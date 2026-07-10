@@ -1,0 +1,300 @@
+.pc3d-section {
+  --pc3d-bg: #f4f1eb;
+  --pc3d-panel: #ffffff;
+  --pc3d-ink: #151515;
+  --pc3d-muted: #706c66;
+  --pc3d-line: #dfd9cf;
+  --pc3d-accent: #1f6e5e;
+  color: var(--pc3d-ink);
+  background: var(--pc3d-bg);
+  padding: clamp(28px, 5vw, 64px) clamp(16px, 4vw, 48px);
+}
+
+.pc3d-header {
+  max-width: 780px;
+  margin: 0 auto 24px;
+  text-align: center;
+}
+
+.pc3d-kicker {
+  margin: 0 0 8px;
+  color: var(--pc3d-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.pc3d-header h2 {
+  margin: 0;
+  font-size: clamp(30px, 5vw, 56px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.pc3d-header p:not(.pc3d-kicker) {
+  margin: 12px auto 0;
+  color: var(--pc3d-muted);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.pc3d-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 18px;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.pc3d-section .stage-wrap {
+  position: relative;
+  overflow: hidden;
+  min-height: 640px;
+  border: 1px solid var(--pc3d-line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff, #eeeae1);
+}
+
+.pc3d-section .stage {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+
+.pc3d-section .stage canvas {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.pc3d-section .stage canvas:active {
+  cursor: grabbing;
+}
+
+.pc3d-section .stage-caption {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2;
+  display: grid;
+  gap: 3px;
+  max-width: min(260px, calc(100% - 36px));
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--pc3d-ink);
+  font-size: 13px;
+  line-height: 1.3;
+  backdrop-filter: blur(12px);
+}
+
+.pc3d-section .stage-caption span {
+  color: var(--pc3d-muted);
+}
+
+.pc3d-section .stage-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(21, 21, 21, 0.14);
+  font-size: clamp(72px, 12vw, 148px);
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.pc3d-section .stage-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+}
+
+.pc3d-section .stage-toolbar button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(21, 21, 21, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--pc3d-ink);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.pc3d-section .stage-toolbar button.active {
+  border-color: var(--pc3d-accent);
+  color: var(--pc3d-accent);
+  box-shadow: inset 0 0 0 1px var(--pc3d-accent);
+}
+
+.pc3d-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.pc3d-group,
+.pc3d-summary {
+  padding: 16px;
+  border: 1px solid var(--pc3d-line);
+  border-radius: 8px;
+  background: var(--pc3d-panel);
+}
+
+.pc3d-group h3,
+.pc3d-summary h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.pc3d-options {
+  display: grid;
+  gap: 8px;
+}
+
+.pc3d-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px;
+  border: 1px solid var(--pc3d-line);
+  border-radius: 8px;
+  background: #f9f7f2;
+  color: var(--pc3d-ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.pc3d-option.active {
+  border-color: var(--pc3d-accent);
+  box-shadow: inset 0 0 0 1px var(--pc3d-accent);
+}
+
+.pc3d-option span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.pc3d-option small {
+  color: var(--pc3d-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.pc3d-option b {
+  flex: 0 0 auto;
+  color: var(--pc3d-accent);
+  font-size: 13px;
+}
+
+.pc3d-swatches {
+  display: flex;
+  gap: 5px;
+}
+
+.pc3d-swatches i {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 50%;
+}
+
+.pc3d-print-fields div {
+  display: grid;
+  grid-template-columns: 1fr 86px;
+  gap: 10px;
+}
+
+.pc3d-print-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--pc3d-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.pc3d-print-fields input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--pc3d-line);
+  border-radius: 8px;
+  background: #f9f7f2;
+  color: var(--pc3d-ink);
+  font: inherit;
+  font-weight: 800;
+}
+
+.pc3d-print-fields input:focus {
+  outline: 2px solid rgba(31, 110, 94, 0.28);
+  outline-offset: 1px;
+}
+
+.pc3d-print-fields p {
+  margin: 10px 0 0;
+  color: var(--pc3d-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pc3d-summary dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.pc3d-summary dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pc3d-summary dt {
+  color: var(--pc3d-muted);
+  font-size: 12px;
+}
+
+.pc3d-summary dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pc3d-total {
+  display: block;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pc3d-line);
+  font-size: 30px;
+  text-align: right;
+}
+
+.pc3d-loading {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  color: var(--pc3d-muted);
+  font-weight: 800;
+}
+
+@media (max-width: 900px) {
+  .pc3d-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pc3d-section .stage-wrap {
+    min-height: 440px;
+  }
+}

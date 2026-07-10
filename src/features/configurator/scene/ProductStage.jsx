@@ -1,0 +1,95 @@
+import { Rotate3D, SlidersHorizontal, ZoomIn } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { GarmentRenderer } from './garmentRenderer.js';
+import { KeyboardRenderer } from './keyboardRenderer.js';
+
+const rendererRegistry = {
+  garmentRenderer: GarmentRenderer,
+  keyboardRenderer: KeyboardRenderer,
+};
+
+export function ProductStage({ onStatePatch, product, state, selected }) {
+  const hostRef = useRef(null);
+  const rendererRef = useRef(null);
+  const [view, setView] = useState('orbit');
+
+  useEffect(() => {
+    const Renderer = rendererRegistry[product.renderer];
+    if (!hostRef.current || rendererRef.current || !Renderer) return;
+    if (!canUseWebGl()) return;
+
+    try {
+      rendererRef.current = new Renderer(hostRef.current, { onStatePatch });
+      rendererRef.current.update(product, state, selected);
+    } catch (error) {
+      console.error(error);
+    }
+
+    return () => {
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
+    };
+  }, [product.renderer]);
+
+  useEffect(() => {
+    rendererRef.current?.update(product, state, selected);
+  }, [product, selected, state]);
+
+  useEffect(() => {
+    if (rendererRef.current) {
+      rendererRef.current.onStatePatch = onStatePatch;
+    }
+  }, [onStatePatch]);
+
+  useEffect(() => {
+    rendererRef.current?.setView(view);
+  }, [view]);
+
+  return (
+    <section className="stage-wrap">
+      <div className="stage-toolbar" aria-label="3D view tools">
+        <button
+          className={view === 'orbit' ? 'active' : ''}
+          onClick={() => setView('orbit')}
+          title="Orbit view"
+          type="button"
+        >
+          <Rotate3D size={17} />
+        </button>
+        <button
+          className={view === 'top' ? 'active' : ''}
+          onClick={() => setView('top')}
+          title="Top view"
+          type="button"
+        >
+          <SlidersHorizontal size={17} />
+        </button>
+        <button
+          className={view === 'detail' ? 'active' : ''}
+          onClick={() => setView('detail')}
+          title="Detail view"
+          type="button"
+        >
+          <ZoomIn size={17} />
+        </button>
+      </div>
+      <div className="stage" ref={hostRef} aria-label={`${product.name} 3D preview`}>
+        <div className="stage-fallback">
+          <BoxIcon />
+        </div>
+      </div>
+      <div className="stage-caption">
+        <strong>{selected.layout?.label}</strong>
+        <span>{selected.colorway?.label} / {selected.material?.shortLabel}</span>
+      </div>
+    </section>
+  );
+}
+
+function BoxIcon() {
+  return <span aria-hidden="true">3D</span>;
+}
+
+function canUseWebGl() {
+  return typeof window !== 'undefined' && typeof window.WebGLRenderingContext !== 'undefined';
+}

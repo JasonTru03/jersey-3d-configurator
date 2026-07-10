@@ -1,0 +1,101 @@
+{% liquid
+  assign default_variant = product.selected_or_first_available_variant
+%}
+
+{% if section.settings.enabled %}
+  {{ 'product-configurator.css' | asset_url | stylesheet_tag }}
+
+  <div
+    data-product-configurator-root
+    data-product-id="{{ product.id }}"
+    data-product-handle="{{ product.handle | escape }}"
+    data-variant-id="{{ default_variant.id }}"
+    data-model-url="{{ 'fn8788-jersey.glb' | asset_url }}"
+    data-heading="{{ section.settings.heading | escape }}"
+    data-subheading="{{ section.settings.subheading | escape }}"
+    data-default-layout="{{ section.settings.default_layout | escape }}"
+    data-default-colorway="{{ section.settings.default_colorway | escape }}"
+    data-default-material="{{ section.settings.default_material | escape }}"
+    data-default-lighting="{{ section.settings.default_lighting | escape }}"
+  ></div>
+
+  <script src="{{ 'product-configurator.js' | asset_url }}" defer></script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "3D product configurator",
+  "tag": "section",
+  "class": "section-product-3d-configurator",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "enabled",
+      "label": "Enable 3D configurator",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Customize your match jersey"
+    },
+    {
+      "type": "textarea",
+      "id": "subheading",
+      "label": "Subheading",
+      "default": "Preview the FN8788 shirt in 3D before adding it to cart."
+    },
+    {
+      "type": "select",
+      "id": "default_layout",
+      "label": "Default size",
+      "default": "m",
+      "options": [
+        { "value": "s", "label": "Small" },
+        { "value": "m", "label": "Medium" },
+        { "value": "l", "label": "Large" },
+        { "value": "xl", "label": "Extra Large" }
+      ]
+    },
+    {
+      "type": "select",
+      "id": "default_colorway",
+      "label": "Default colorway",
+      "default": "home",
+      "options": [
+        { "value": "home", "label": "Home White" },
+        { "value": "away", "label": "Away Black" },
+        { "value": "third", "label": "Third Green" }
+      ]
+    },
+    {
+      "type": "select",
+      "id": "default_material",
+      "label": "Default fabric",
+      "default": "stadium",
+      "options": [
+        { "value": "stadium", "label": "Stadium recycled knit" },
+        { "value": "player", "label": "Player issue performance mesh" },
+        { "value": "long-sleeve", "label": "Long sleeve winter cut" }
+      ]
+    },
+    {
+      "type": "select",
+      "id": "default_lighting",
+      "label": "Default print",
+      "default": "none",
+      "options": [
+        { "value": "none", "label": "No personalization" },
+        { "value": "name-number", "label": "Name and number set" },
+        { "value": "raised-print", "label": "Raised player print" }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "3D product configurator"
+    }
+  ]
+}
+{% endschema %}

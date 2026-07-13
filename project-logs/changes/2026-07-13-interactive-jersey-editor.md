@@ -1,26 +1,26 @@
-# 2026-07-13 Interactive Jersey Editor
+# 2026-07-13 球衣交互编辑器
 
-## Goal
+## 本次目标
 
-Implement the approved first-stage editor: presets plus local image upload, with move, scale, rotate, and delete controls for decorations.
+实现已确认的首版编辑器：预设素材与本地图片上传，以及素材移动、缩放、旋转和删除。
 
-## Scope
+## 范围与边界
 
-- Work is isolated on branch `codex/interactive-jersey-editor`.
-- No backend, Shopify deployment, production asset upload, or main-branch merge is in scope.
+- 全部改动位于独立分支 `codex/interactive-jersey-editor`。
+- 本次不包含后端、Shopify 部署、生产素材上传或合并到 `main` 分支。
 
-## Planned Changes
+## 计划改动
 
-- Add decoration preset and region configuration.
-- Add an editable decoration layer for the 3D scene.
-- Add UI controls for preset selection, upload, region selection, and delete.
-- Add unit, component, and browser interaction verification.
+- 增加素材预设与可放置区域配置。
+- 增加 3D 场景中的可编辑素材图层。
+- 增加预设选择、文件上传、区域选择和删除控制。
+- 增加单元、组件与浏览器交互验证。
 
-## Verification Baseline
+## 自检基线
 
-- `npm test`: 8 tests passed in the isolated worktree before implementation.
+- 实现前已在隔离 worktree 运行 `npm test`，8 个测试全部通过。
 
-## Open Limits
+## 已知限制
 
-- Uploaded images are browser-session data only.
-- Decorations use a camera-facing editor layer in stage one, not mesh-projected decals.
+- 上传图片仅保存在当前浏览器会话。
+- 首版使用面向相机的编辑图层，不使用网格投射贴花。

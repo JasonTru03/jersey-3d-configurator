@@ -1,56 +1,56 @@
-# Interactive Jersey Editor Design
+# 球衣交互编辑器设计方案
 
-## Goal
+## 目标
 
-Add a first-stage jersey editor that lets shoppers select preset patterns and badges, upload an image, and edit each placed decoration while retaining the current limited garment viewing controls.
+在现有球衣 3D 预览基础上，新增首版交互编辑器：用户可选择预设花纹和徽章、上传图片，并对每个已添加素材进行移动、缩放、旋转和删除；同时保留受限的球衣查看旋转、缩放与平移。
 
-## Scope
+## 本次范围
 
-- Keep the existing GLB jersey viewer, constrained orbit rotation, camera zoom, and panning.
-- Add preset pattern and badge choices in the configurator panel.
-- Allow PNG, JPG, WebP, and SVG uploads up to 5 MB. Uploads stay in browser memory only.
-- Place each selected or uploaded decoration on a camera-facing editor layer over the jersey.
-- Let shoppers select one decoration at a time and drag, resize, rotate, or remove it.
-- Store decorations in configurator state so the Shopify configuration JSON can include the edit result.
+- 保留现有 GLB 球衣预览、受限轨道旋转、镜头缩放与平移。
+- 在配置面板中提供预设花纹和徽章。
+- 支持上传 PNG、JPG、WebP、SVG，单文件最大 5 MB；文件仅在当前浏览器会话内使用。
+- 将选中或上传的素材显示在球衣前方的可编辑图层中。
+- 允许一次选中一个素材，并进行拖动、缩放、旋转与删除。
+- 将素材配置保存到现有 configurator 状态，使 Shopify 的配置 JSON 可携带编辑结果。
 
-## Deliberate First-Stage Limits
+## 首版明确不做
 
-- Decorations are not projected onto the garment mesh and are not production-ready print files.
-- Decorations may only be placed in one of four named regions: front, back, left sleeve, and right sleeve.
-- Uploaded images are not persisted across refreshes, devices, or orders. A future backend is required for that.
-- Garment size and material remain catalog options; this work does not add GLB variants.
+- 素材不会投射到衣服网格表面，暂不能作为生产级印花文件。
+- 素材仅能放在正面、背面、左袖、右袖四个命名区域内。
+- 上传图片不会跨刷新、跨设备或跨订单保存；这些能力后续需要后端支持。
+- 不增加不同尺码或面料对应的 GLB 模型版本。
 
-## Architecture
+## 结构设计
 
-1. `productDefinitions.js` owns presets and region metadata.
-2. A new scene-editor module owns decoration geometry, selection, transform math, and interaction limits.
-3. `garmentRenderer.js` renders the garment and delegates decoration-layer rendering to the scene editor.
-4. The configurator UI owns preset selection, upload input, active region selection, and deletion.
-5. Existing state merging persists a serializable decoration list containing asset source, transform, and region.
+1. `productDefinitions.js`：维护预设素材与区域元数据。
+2. 新增场景编辑模块：负责素材图层、选中状态、变换计算与区域限制。
+3. `garmentRenderer.js`：继续渲染球衣，并调用场景编辑模块渲染素材图层。
+4. 配置器 UI：负责预设选择、上传、区域选择与删除按钮。
+5. 现有状态合并逻辑：保存可序列化的素材数组，包括素材来源、位置、缩放、旋转与区域。
 
-## Interaction Model
+## 交互规则
 
-- Selecting a preset creates a decoration in the active region.
-- Uploading a valid image creates one decoration with an in-memory data URL.
-- Clicking a decoration selects it and reveals a visible frame with resize and rotation handles.
-- Dragging its body moves it within its region. Dragging a corner scales it within safe limits. Dragging the rotation handle rotates it.
-- Clicking empty editor space removes the selection. Removing an item deletes it from state.
-- While a decoration is selected or transformed, garment orbit controls are disabled. Otherwise, existing camera controls apply.
+- 选择预设素材后，在当前编辑区域新增一个素材。
+- 上传合法图片后，新增一个携带浏览器内存 data URL 的素材。
+- 点击素材即可选中，并显示边框、缩放控制点与旋转控制点。
+- 拖动素材主体可移动；拖动角点可在安全范围内缩放；拖动旋转控制点可旋转。
+- 点击空白编辑区域取消选中；删除操作从状态中移除素材。
+- 素材处于选中或编辑状态时，禁用球衣视角控制；未选中素材时恢复原有视角控制。
 
-## Validation And Error Handling
+## 校验与错误处理
 
-- Reject unsupported files and files over 5 MB before creating an image URL.
-- Limit text/image decoration count to a small fixed maximum to protect rendering performance.
-- Keep invalid or unreadable images out of state and show a user-facing validation message.
-- Clamp translate, scale, and rotation values before serializing state.
+- 在读取文件前拒绝不支持的格式与超过 5 MB 的文件。
+- 限制可同时存在的素材数量，保护页面渲染性能。
+- 无法读取的图片不进入配置状态，并显示正式的用户提示。
+- 序列化前限制位置、缩放与旋转数值，避免无效配置。
 
-## Testing
+## 验证标准
 
-- Unit tests: upload validation, transform clamping, region boundaries, decoration state changes.
-- Component tests: preset selection, file validation feedback, delete action, serialized configuration.
-- Browser test: choose a preset, upload a test image, drag, resize, rotate, switch region, and confirm garment controls still work when no decoration is selected.
-- Regression: existing tests and production build remain green.
+- 单元测试：上传校验、变换限制、区域边界、素材状态变更。
+- 组件测试：选择预设、上传错误提示、删除操作、配置序列化。
+- 浏览器验证：选择预设、上传测试图片、拖动、缩放、旋转、切换区域，并确认取消选中后球衣视角控制正常。
+- 回归验证：现有测试与生产构建均通过。
 
-## Rollback
+## 回退方式
 
-The feature is isolated to decoration config, editor scene code, UI controls, and accompanying styles. Reverting the feature commit restores the original jersey renderer and UI behavior.
+本功能只影响素材配置、场景编辑代码、配置 UI、样式及配套测试。回退对应功能提交即可恢复为原有球衣预览与文字印字行为。

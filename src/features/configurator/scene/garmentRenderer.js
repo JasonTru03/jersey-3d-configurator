@@ -2,6 +2,7 @@ import gsap from 'gsap';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DecorationEditor } from './decorationEditor.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 
@@ -53,6 +54,12 @@ export class GarmentRenderer {
     this.printMaterial = null;
     this.isDraggingPrint = false;
     this.printColor = '#20242a';
+    this.decorationEditor = new DecorationEditor({
+      camera: this.camera,
+      domElement: this.renderer.domElement,
+      scene: this.scene,
+      onDecorationsChange: (decorations) => this.onStatePatch?.({ overrides: { decorations } }),
+    });
 
     this.addLights();
     this.addFloor();
@@ -80,6 +87,7 @@ export class GarmentRenderer {
     this.applyColors(selected.colorway.swatches);
     this.applyMaterial(selected.material.material);
     this.updatePrintLayer();
+    this.decorationEditor.update(state.overrides?.decorations ?? []);
   }
 
   setView(view) {
@@ -113,6 +121,7 @@ export class GarmentRenderer {
     window.removeEventListener('pointerup', this.handlePointerUp);
     this.disposeGroup(this.root);
     this.disposePrintLayer();
+    this.decorationEditor?.dispose();
     this.renderer?.dispose();
     this.renderer?.domElement.remove();
   }
@@ -334,6 +343,11 @@ export class GarmentRenderer {
   }
 
   handlePointerDown = (event) => {
+    if (this.decorationEditor?.handlePointerDown(event)) {
+      this.controls.enabled = !this.decorationEditor.isEditing();
+      event.preventDefault();
+      return;
+    }
     if (!this.printPlane || !this.isPrintEditable()) return;
     const hit = this.pickJersey(event);
     if (!hit) return;
@@ -344,6 +358,10 @@ export class GarmentRenderer {
   };
 
   handlePointerMove = (event) => {
+    if (this.decorationEditor?.handlePointerMove(event)) {
+      event.preventDefault();
+      return;
+    }
     if (!this.isDraggingPrint || !this.printPlane) return;
     const hit = this.pickJersey(event);
     if (!hit) return;
@@ -352,6 +370,10 @@ export class GarmentRenderer {
   };
 
   handlePointerUp = () => {
+    if (this.decorationEditor?.handlePointerUp()) {
+      this.controls.enabled = !this.decorationEditor.isEditing();
+      return;
+    }
     if (!this.isDraggingPrint) return;
     this.isDraggingPrint = false;
     this.controls.enabled = true;
@@ -407,6 +429,12 @@ export class GarmentRenderer {
         },
       },
     });
+  }
+
+  patchSelectedDecoration(patch) {
+    const changed = this.decorationEditor?.patchSelected(patch);
+    if (changed) this.controls.enabled = false;
+    return changed;
   }
 }
 

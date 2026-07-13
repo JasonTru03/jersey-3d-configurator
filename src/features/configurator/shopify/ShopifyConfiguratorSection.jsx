@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { productApi } from '../api/productApi.js';
 import { mergeConfiguratorState } from '../config/state.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
+import { DecorationPanel } from '../ui/DecorationPanel.jsx';
 
 const defaults = {
   heading: 'Customize your match jersey',
@@ -75,6 +76,10 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
           {state.lighting !== 'none' && (
             <PrintFields overrides={state.overrides} updateState={updateState} />
           )}
+          <section className="pc3d-group">
+            <h3>Artwork</h3>
+            <DecorationPanel product={product} state={state} updateState={updateState} />
+          </section>
           <ExtrasGroup extras={product.options.extras} state={state} updateState={updateState} />
           <Summary quote={quote} selected={selected} />
         </div>
@@ -305,13 +310,26 @@ function syncLineItemProperties({ product, selected, state, settings }) {
       productHandle: settings.productHandle,
       variantId: settings.variantId,
       renderer: product.renderer,
-      state,
+      state: serializeStateForOrder(state),
     }),
   };
 
   Object.entries(properties).forEach(([name, value]) => {
     upsertHiddenInput(form, `properties[${name}]`, value);
   });
+}
+
+export function serializeStateForOrder(state) {
+  return {
+    ...state,
+    overrides: {
+      ...state.overrides,
+      decorations: (state.overrides?.decorations ?? []).map((decoration) => {
+        const { source, ...metadata } = decoration;
+        return decoration.kind === 'upload' ? metadata : { ...metadata, source };
+      }),
+    },
+  };
 }
 
 function upsertHiddenInput(form, name, value) {

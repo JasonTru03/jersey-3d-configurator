@@ -48,4 +48,25 @@ describe('ShopifyConfiguratorSection', () => {
       expect(document.querySelector('input[name="properties[_3D Config JSON]"]').value).toContain('"productHandle":"balance-explorer"');
     });
   });
+
+  it('serializes preset artwork into the native product form', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+
+    expect(await screen.findByText('Customize your match jersey')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Golden Stripe/i }));
+
+    await waitFor(() => {
+      const config = JSON.parse(document.querySelector('input[name="properties[_3D Config JSON]"]').value);
+      expect(config.state.overrides.decorations[0]).toMatchObject({
+        kind: 'pattern',
+        source: 'golden-stripe',
+        region: 'front',
+      });
+    });
+  });
 });

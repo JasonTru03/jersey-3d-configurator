@@ -161,6 +161,17 @@
   gap: 8px;
 }
 
+.pc3d-panel .decoration-panel {
+  padding: 0;
+}
+
+.pc3d-panel .preset-grid button,
+.pc3d-panel .region-picker button,
+.pc3d-panel .upload-artwork,
+.pc3d-panel .decoration-actions button {
+  border-color: var(--pc3d-line, #dedbd4);
+}
+
 .pc3d-option {
   display: flex;
   align-items: center;

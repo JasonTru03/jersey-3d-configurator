@@ -30,6 +30,13 @@ The first version must show a jersey model, offer preset colors, patterns, and b
 - Production app and Shopify bundle builds passing.
 - Browser check: Artwork panel opened, Golden Stripe added, and its contextual controls rendered without console errors.
 
+## Render Bug Follow-up
+
+- User reported that selecting `Roundel Badge` updated the panel but produced no visible badge on the jersey.
+- The preset selection and state update were working; the defect was limited to the Three.js artwork render path.
+- Replaced the decoration Sprite path with a camera-facing `MeshBasicMaterial` plane backed by a `CanvasTexture`, matching the proven print-layer pattern.
+- Browser verification now shows `Roundel Badge` visibly rendered on the front of the jersey with no console errors.
+
 ## Follow-up
 
 - Stage 2 should replace sprites with mesh-projected decals, add surface-aware region constraints, and define a durable asset-upload/fulfillment backend before enabling real customer-upload production orders.

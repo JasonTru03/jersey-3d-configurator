@@ -21,6 +21,21 @@ export function resolveDecorationAsset(decoration, presets = []) {
   return presets.find((preset) => preset.source === decoration.source)?.assetUrl ?? decoration.source;
 }
 
+export function createCameraFacingSurface(texture) {
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const surface = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+  surface.renderOrder = 8;
+  surface.userData.aspect = 1;
+  surface.userData.rotation = 0;
+  return surface;
+}
+
 export class DecorationEditor {
   constructor({ camera, domElement, scene, onDecorationsChange, onSelectionChange }) {
     this.camera = camera;
@@ -34,7 +49,7 @@ export class DecorationEditor {
     this.pointer = new THREE.Vector2();
     this.plane = new THREE.Plane();
     this.intersection = new THREE.Vector3();
-    this.sprites = new Map();
+    this.surfaces = new Map();
     this.decorations = [];
     this.selectedId = null;
     this.dragging = false;
@@ -44,46 +59,75 @@ export class DecorationEditor {
     this.decorations = decorations;
     this.presets = presets;
     const remaining = new Set(decorations.map((decoration) => decoration.id));
-    this.sprites.forEach((sprite, id) => {
+    this.surfaces.forEach((surface, id) => {
       if (remaining.has(id)) return;
-      this.group.remove(sprite);
-      sprite.material.map?.dispose();
-      sprite.material.dispose();
-      this.sprites.delete(id);
+      this.group.remove(surface);
+      surface.geometry.dispose();
+      surface.material.map?.dispose();
+      surface.material.dispose();
+      this.surfaces.delete(id);
     });
 
     decorations.forEach((decoration) => {
-      const sprite = this.sprites.get(decoration.id) ?? this.createSprite(decoration);
-      this.applyDecoration(sprite, decoration);
+      const surface = this.surfaces.get(decoration.id) ?? this.createSurface(decoration);
+      this.applyDecoration(surface, decoration);
     });
 
     this.selectedId = remaining.has(selectedId) ? selectedId : null;
     this.refreshSelection();
+    this.updateCameraFacing();
   }
 
-  createSprite(decoration) {
-    const texture = new THREE.TextureLoader().load(this.resolveAssetUrl(decoration));
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
-    const sprite = new THREE.Sprite(material);
-    sprite.renderOrder = 8;
-    sprite.userData.decorationId = decoration.id;
-    this.group.add(sprite);
-    this.sprites.set(decoration.id, sprite);
-    return sprite;
+  createSurface(decoration) {
+    const surface = createCameraFacingSurface(this.createTexture(decoration));
+    surface.userData.decorationId = decoration.id;
+    this.group.add(surface);
+    this.surfaces.set(decoration.id, surface);
+    return surface;
   }
 
   resolveAssetUrl(decoration) {
     return resolveDecorationAsset(decoration, this.presets);
   }
 
-  applyDecoration(sprite, decoration) {
+  createTexture(decoration) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const image = new Image();
+    image.onload = () => {
+      const aspect = image.naturalWidth / image.naturalHeight || 1;
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      canvas.getContext('2d').drawImage(image, 0, 0);
+      texture.needsUpdate = true;
+      const surface = this.surfaces.get(decoration.id);
+      if (surface) {
+        surface.userData.aspect = aspect;
+        this.applyDecoration(surface, decoration);
+      }
+    };
+    image.onerror = () => console.error(`Unable to load decoration artwork: ${decoration.label}`);
+    image.src = this.resolveAssetUrl(decoration);
+    return texture;
+  }
+
+  applyDecoration(surface, decoration) {
     const anchor = getRegionAnchor(decoration.region);
     const transform = toSpriteTransform(decoration);
-    sprite.position.set(anchor.x + transform.x * 0.48, anchor.y + transform.y * 0.48, anchor.z);
-    sprite.scale.set(0.6 * transform.scale, 0.6 * transform.scale, 1);
-    sprite.material.rotation = THREE.MathUtils.degToRad(transform.rotation);
-    sprite.material.opacity = decoration.id === this.selectedId ? 1 : 0.92;
+    surface.position.set(anchor.x + transform.x * 0.48, anchor.y + transform.y * 0.48, anchor.z);
+    surface.scale.set(0.6 * transform.scale * surface.userData.aspect, 0.6 * transform.scale, 1);
+    surface.userData.rotation = THREE.MathUtils.degToRad(transform.rotation);
+    surface.material.opacity = decoration.id === this.selectedId ? 1 : 0.92;
+  }
+
+  updateCameraFacing() {
+    this.surfaces.forEach((surface) => {
+      surface.quaternion.copy(this.camera.quaternion);
+      surface.rotateZ(surface.userData.rotation);
+    });
   }
 
   handlePointerDown(event) {
@@ -134,18 +178,19 @@ export class DecorationEditor {
   }
 
   dispose() {
-    this.sprites.forEach((sprite) => {
-      sprite.material.map?.dispose();
-      sprite.material.dispose();
+    this.surfaces.forEach((surface) => {
+      surface.geometry.dispose();
+      surface.material.map?.dispose();
+      surface.material.dispose();
     });
-    this.sprites.clear();
+    this.surfaces.clear();
     this.scene.remove(this.group);
   }
 
   pickDecoration(event) {
     this.updatePointer(event);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const targets = [...this.sprites.values()];
+    const targets = [...this.surfaces.values()];
     const hit = this.raycaster.intersectObjects(targets, false)[0];
     if (!hit) return null;
     return this.decorations.find((decoration) => decoration.id === hit.object.userData.decorationId) ?? null;
@@ -173,9 +218,9 @@ export class DecorationEditor {
   }
 
   refreshSelection() {
-    this.sprites.forEach((sprite, id) => {
-      sprite.material.opacity = id === this.selectedId ? 1 : 0.92;
-      sprite.material.color.set(id === this.selectedId ? '#ffffff' : '#e8e8e8');
+    this.surfaces.forEach((surface, id) => {
+      surface.material.opacity = id === this.selectedId ? 1 : 0.92;
+      surface.material.color.set(id === this.selectedId ? '#ffffff' : '#e8e8e8');
     });
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { getRegionAnchor, resolveDecorationAsset, toSpriteTransform } from './decorationEditor.js';
+import * as THREE from 'three';
+import { createCameraFacingSurface, getRegionAnchor, resolveDecorationAsset, toSpriteTransform } from './decorationEditor.js';
 
 describe('decoration editor geometry', () => {
   it('clamps a sprite transform to the editable range', () => {
@@ -23,5 +24,13 @@ describe('decoration editor geometry', () => {
       { kind: 'pattern', source: 'golden-stripe' },
       [{ source: 'golden-stripe', assetUrl }],
     )).toBe(assetUrl);
+  });
+
+  it('uses a camera-facing mesh surface instead of a sprite for visible artwork', () => {
+    const surface = createCameraFacingSurface(new THREE.Texture());
+
+    expect(surface.isMesh).toBe(true);
+    expect(surface.material).toBeInstanceOf(THREE.MeshBasicMaterial);
+    expect(surface.material.depthTest).toBe(false);
   });
 });

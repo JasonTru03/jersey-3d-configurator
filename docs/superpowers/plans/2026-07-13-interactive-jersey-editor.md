@@ -118,7 +118,7 @@ expect(await screen.findByText('Golden Stripe 已添加')).toBeInTheDocument();
 - 修改：`src/features/configurator/shopify/ShopifyConfiguratorSection.test.jsx`
 - 修改：`src/features/configurator/shopify/shopify-configurator.css`
 
-- [ ] 1. 先扩展 Shopify 组件失败测试：选中预设素材后，`_3D Config JSON` 包含 `overrides.decorations` 的预设 ID、区域与变换字段。
+- [ ] 1. 先扩展 Shopify 组件失败测试：选中预设素材后，`_3D Config JSON` 包含 `overrides.decorations` 的预设 ID、区域与变换字段；上传图片只保存其文件名、区域与变换，绝不保存 data URL 或图片二进制内容。
 
 ```js
 expect(JSON.parse(document.querySelector('input[name="properties[_3D Config JSON]"]').value).state.overrides.decorations[0])
@@ -127,7 +127,7 @@ expect(JSON.parse(document.querySelector('input[name="properties[_3D Config JSON
 
 - [ ] 2. 运行 `npm test -- ShopifyConfiguratorSection.test.jsx`，确认该配置尚不存在而失败。
 
-- [ ] 3. 复用本地 `DecorationPanel` 的纯 UI 逻辑或抽出共享组件，避免复制上传校验和状态更新代码。
+- [ ] 3. 复用本地 `DecorationPanel` 的纯 UI 逻辑或抽出共享组件，避免复制上传校验和状态更新代码；新增 `serializeDecorationsForOrder`，对上传图片移除 `source` data URL，仅保留 `id`、`kind`、`label`、`region`、`x`、`y`、`scale`、`rotation`。
 
 - [ ] 4. 让 Shopify CSS 与现有 section 视觉一致，并包含错误与禁用状态。
 

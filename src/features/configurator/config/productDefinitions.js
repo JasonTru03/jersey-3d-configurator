@@ -15,6 +15,38 @@ export const jerseyProduct = {
     lighting: 'Print',
     extras: 'Extras',
   },
+  decorationRegions: [
+    { id: 'front', label: 'Front' },
+    { id: 'back', label: 'Back' },
+    { id: 'left-sleeve', label: 'Left sleeve' },
+    { id: 'right-sleeve', label: 'Right sleeve' },
+  ],
+  decorationPresets: [
+    {
+      id: 'golden-stripe',
+      kind: 'pattern',
+      label: 'Golden Stripe',
+      source: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cpath fill="%23d1b05d" d="M0 84 240 0v36L0 120z"/%3E%3C/svg%3E',
+    },
+    {
+      id: 'night-grid',
+      kind: 'pattern',
+      label: 'Night Grid',
+      source: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cg fill="none" stroke="%2320242a" stroke-width="10" opacity=".85"%3E%3Cpath d="M0 25h240M0 60h240M0 95h240M35 0v120M95 0v120M155 0v120M215 0v120"/%3E%3C/g%3E%3C/svg%3E',
+    },
+    {
+      id: 'crest-badge',
+      kind: 'badge',
+      label: 'Crest Badge',
+      source: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 140"%3E%3Cpath fill="%231f5b4f" stroke="%23d1b05d" stroke-width="8" d="M60 5 110 25v48c0 31-20 51-50 62C30 124 10 104 10 73V25z"/%3E%3Cpath fill="%23f4efe4" d="M60 31 70 55l26 2-20 17 6 26-22-13-22 13 6-26-20-17 26-2z"/%3E%3C/svg%3E',
+    },
+    {
+      id: 'roundel-badge',
+      kind: 'badge',
+      label: 'Roundel Badge',
+      source: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140"%3E%3Ccircle cx="70" cy="70" r="64" fill="%23c84f3d" stroke="%23f4efe4" stroke-width="10"/%3E%3Ccircle cx="70" cy="70" r="35" fill="%2320242a"/%3E%3Cpath fill="%23f4efe4" d="m70 39 9 22 24 2-18 16 6 24-21-13-21 13 6-24-18-16 24-2z"/%3E%3C/svg%3E',
+    },
+  ],
   defaultState: {
     productId: 'fn8788-jersey',
     layout: 'm',
@@ -34,6 +66,7 @@ export const jerseyProduct = {
         y: 0.36,
         z: 0.5,
       },
+      decorations: [],
     },
   },
   options: {

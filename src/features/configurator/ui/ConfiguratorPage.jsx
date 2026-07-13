@@ -10,12 +10,14 @@ import {
   Save,
   Settings2,
   ShoppingCart,
+  Sticker,
   Shirt,
   Sun,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
+import { DecorationPanel } from './DecorationPanel.jsx';
 import './configurator.css';
 
 const sectionDefaults = [
@@ -23,6 +25,7 @@ const sectionDefaults = [
   { id: 'colorway', label: 'Color', icon: Palette },
   { id: 'material', label: 'Fabric', icon: Layers3 },
   { id: 'lighting', label: 'Print', icon: Lightbulb },
+  { id: 'decorations', label: 'Artwork', icon: Sticker },
   { id: 'extras', label: 'Extras', icon: Cable },
 ];
 
@@ -171,6 +174,9 @@ function ConfigPanel({ product, quote, section, selected, state, updateState }) 
           state={state}
           updateState={updateState}
         />
+      )}
+      {section === 'decorations' && (
+        <DecorationPanel product={product} state={state} updateState={updateState} />
       )}
       <BuildSummary quote={quote} selected={selected} />
     </aside>

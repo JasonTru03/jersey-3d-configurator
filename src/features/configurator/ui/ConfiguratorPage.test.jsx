@@ -16,4 +16,17 @@ describe('ConfiguratorPage', () => {
       expect(screen.getAllByText('$99').length).toBeGreaterThan(0);
     });
   });
+
+  it('adds a preset decoration and exposes edit controls', async () => {
+    render(<ConfiguratorPage />);
+
+    expect(await screen.findByText('FN8788 Match Jersey')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artwork' }));
+    fireEvent.click(screen.getByRole('button', { name: /Golden Stripe/i }));
+
+    expect(await screen.findByText('Golden Stripe added')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rotate right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete artwork' })).toBeInTheDocument();
+  });
 });

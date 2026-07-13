@@ -87,7 +87,11 @@ export class GarmentRenderer {
     this.applyColors(selected.colorway.swatches);
     this.applyMaterial(selected.material.material);
     this.updatePrintLayer();
-    this.decorationEditor.update(state.overrides?.decorations ?? []);
+    this.decorationEditor.update(
+      state.overrides?.decorations ?? [],
+      state.overrides?.activeDecorationId,
+      product.decorationPresets ?? [],
+    );
   }
 
   setView(view) {

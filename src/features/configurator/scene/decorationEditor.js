@@ -34,8 +34,9 @@ export class DecorationEditor {
     this.dragging = false;
   }
 
-  update(decorations = []) {
+  update(decorations = [], selectedId = null, presets = []) {
     this.decorations = decorations;
+    this.presets = presets;
     const remaining = new Set(decorations.map((decoration) => decoration.id));
     this.sprites.forEach((sprite, id) => {
       if (remaining.has(id)) return;
@@ -50,12 +51,12 @@ export class DecorationEditor {
       this.applyDecoration(sprite, decoration);
     });
 
-    if (!remaining.has(this.selectedId)) this.selectedId = null;
+    this.selectedId = remaining.has(selectedId) ? selectedId : null;
     this.refreshSelection();
   }
 
   createSprite(decoration) {
-    const texture = new THREE.TextureLoader().load(decoration.source);
+    const texture = new THREE.TextureLoader().load(this.resolveAssetUrl(decoration));
     texture.colorSpace = THREE.SRGBColorSpace;
     const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
     const sprite = new THREE.Sprite(material);
@@ -64,6 +65,11 @@ export class DecorationEditor {
     this.group.add(sprite);
     this.sprites.set(decoration.id, sprite);
     return sprite;
+  }
+
+  resolveAssetUrl(decoration) {
+    if (decoration.kind !== 'preset') return decoration.source;
+    return this.presets.find((preset) => preset.source === decoration.source)?.assetUrl ?? decoration.source;
   }
 
   applyDecoration(sprite, decoration) {

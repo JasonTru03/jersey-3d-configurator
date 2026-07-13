@@ -385,6 +385,109 @@
   line-height: 1.4;
 }
 
+.decoration-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.region-picker,
+.decoration-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.region-picker button,
+.upload-artwork,
+.decoration-actions button {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.region-picker button.active,
+.preset-grid button:focus-visible,
+.region-picker button:focus-visible,
+.upload-artwork:focus-visible,
+.decoration-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.region-picker button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.preset-grid button {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.preset-grid img {
+  width: 100%;
+  height: 76px;
+  border-radius: 5px;
+  background: #e9e5dc;
+  object-fit: contain;
+}
+
+.preset-grid span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-artwork {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.decoration-actions {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.delete-artwork {
+  color: #b23a2a !important;
+}
+
+.decoration-message {
+  min-height: 18px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .summary-panel {
   display: grid;
   gap: 14px;
@@ -507,5 +610,9 @@
     right: 12px;
     bottom: 12px;
     min-width: 0;
+  }
+
+  .preset-grid {
+    grid-template-columns: 1fr;
   }
 }

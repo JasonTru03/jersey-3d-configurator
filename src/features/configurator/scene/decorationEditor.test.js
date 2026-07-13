@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getRegionAnchor, toSpriteTransform } from './decorationEditor.js';
+import { getRegionAnchor, resolveDecorationAsset, toSpriteTransform } from './decorationEditor.js';
 
 describe('decoration editor geometry', () => {
   it('clamps a sprite transform to the editable range', () => {
@@ -14,5 +14,14 @@ describe('decoration editor geometry', () => {
   it('provides distinct anchors for the four named jersey regions', () => {
     expect(getRegionAnchor('front')).not.toEqual(getRegionAnchor('back'));
     expect(getRegionAnchor('left-sleeve')).not.toEqual(getRegionAnchor('right-sleeve'));
+  });
+
+  it('resolves a pattern preset to its renderable asset instead of its source id', () => {
+    const assetUrl = 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E';
+
+    expect(resolveDecorationAsset(
+      { kind: 'pattern', source: 'golden-stripe' },
+      [{ source: 'golden-stripe', assetUrl }],
+    )).toBe(assetUrl);
   });
 });

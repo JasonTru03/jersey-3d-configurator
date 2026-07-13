@@ -59,6 +59,7 @@ export class GarmentRenderer {
       domElement: this.renderer.domElement,
       scene: this.scene,
       onDecorationsChange: (decorations) => this.onStatePatch?.({ overrides: { decorations } }),
+      onSelectionChange: (activeDecorationId) => this.onStatePatch?.({ overrides: { activeDecorationId } }),
     });
 
     this.addLights();
@@ -92,6 +93,7 @@ export class GarmentRenderer {
       state.overrides?.activeDecorationId,
       product.decorationPresets ?? [],
     );
+    this.controls.enabled = !this.decorationEditor.isEditing() && !this.isDraggingPrint;
   }
 
   setView(view) {

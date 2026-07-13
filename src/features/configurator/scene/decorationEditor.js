@@ -16,11 +16,17 @@ export function toSpriteTransform(transform) {
   return clampDecorationTransform(transform);
 }
 
+export function resolveDecorationAsset(decoration, presets = []) {
+  if (decoration.kind === 'upload') return decoration.source;
+  return presets.find((preset) => preset.source === decoration.source)?.assetUrl ?? decoration.source;
+}
+
 export class DecorationEditor {
-  constructor({ camera, domElement, scene, onDecorationsChange }) {
+  constructor({ camera, domElement, scene, onDecorationsChange, onSelectionChange }) {
     this.camera = camera;
     this.domElement = domElement;
     this.onDecorationsChange = onDecorationsChange;
+    this.onSelectionChange = onSelectionChange;
     this.group = new THREE.Group();
     this.scene = scene;
     this.scene.add(this.group);
@@ -68,8 +74,7 @@ export class DecorationEditor {
   }
 
   resolveAssetUrl(decoration) {
-    if (decoration.kind !== 'preset') return decoration.source;
-    return this.presets.find((preset) => preset.source === decoration.source)?.assetUrl ?? decoration.source;
+    return resolveDecorationAsset(decoration, this.presets);
   }
 
   applyDecoration(sprite, decoration) {
@@ -86,6 +91,7 @@ export class DecorationEditor {
     if (!decoration) {
       if (this.selectedId) {
         this.selectedId = null;
+        this.onSelectionChange?.(null);
         this.refreshSelection();
         return true;
       }
@@ -93,6 +99,7 @@ export class DecorationEditor {
     }
 
     this.selectedId = decoration.id;
+    this.onSelectionChange?.(decoration.id);
     this.dragging = true;
     this.refreshSelection();
     return true;

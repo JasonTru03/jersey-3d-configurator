@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createCameraFacingSurface, getRegionAnchor, resolveDecorationAsset, toSpriteTransform } from './decorationEditor.js';
+import {
+  createCameraFacingSurface,
+  getRegionAnchor,
+  getRegionFrame,
+  resolveDecorationAsset,
+  toRegionPosition,
+  toRegionTransform,
+  toSpriteTransform,
+} from './decorationEditor.js';
 
 describe('decoration editor geometry', () => {
   it('clamps a sprite transform to the editable range', () => {
@@ -15,6 +23,21 @@ describe('decoration editor geometry', () => {
   it('provides distinct anchors for the four named jersey regions', () => {
     expect(getRegionAnchor('front')).not.toEqual(getRegionAnchor('back'));
     expect(getRegionAnchor('left-sleeve')).not.toEqual(getRegionAnchor('right-sleeve'));
+  });
+
+  it('maps back coordinates onto the back surface and restores their local transform', () => {
+    const frame = getRegionFrame('back');
+    const position = toRegionPosition('back', { x: 0.5, y: -0.25 });
+
+    expect(frame.normal.z).toBe(-1);
+    expect(position.z).toBeLessThan(frame.anchor.z);
+    expect(toRegionTransform('back', position)).toMatchObject({ x: 0.5, y: -0.25 });
+  });
+
+  it('maps sleeve coordinates through a reversible local frame', () => {
+    const position = toRegionPosition('right-sleeve', { x: -0.4, y: 0.35 });
+
+    expect(toRegionTransform('right-sleeve', position)).toMatchObject({ x: -0.4, y: 0.35 });
   });
 
   it('resolves a pattern preset to its renderable asset instead of its source id', () => {

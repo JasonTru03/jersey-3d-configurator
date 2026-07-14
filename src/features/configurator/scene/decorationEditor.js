@@ -1,19 +1,80 @@
 import * as THREE from 'three';
 import { clampDecorationTransform, patchDecoration } from '../config/decorations.js';
 
-const REGION_ANCHORS = {
-  front: { x: 0, y: 0.42, z: 0.72 },
-  back: { x: 0, y: 0.42, z: -0.72 },
-  'left-sleeve': { x: -1.08, y: 0.42, z: 0.08 },
-  'right-sleeve': { x: 1.08, y: 0.42, z: 0.08 },
+const REGION_OFFSET = 0.026;
+const REGION_POSITION_SCALE = 0.48;
+
+const REGION_FRAMES = {
+  front: {
+    anchor: { x: 0, y: 0.42, z: 0.72 },
+    horizontal: { x: 1, y: 0, z: 0 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: 0, y: 0, z: 1 },
+  },
+  back: {
+    anchor: { x: 0, y: 0.42, z: -0.72 },
+    horizontal: { x: -1, y: 0, z: 0 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: 0, y: 0, z: -1 },
+  },
+  'left-sleeve': {
+    anchor: { x: -1.08, y: 0.42, z: 0.08 },
+    horizontal: { x: 0, y: 0, z: 1 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: -1, y: 0, z: 0 },
+  },
+  'right-sleeve': {
+    anchor: { x: 1.08, y: 0.42, z: 0.08 },
+    horizontal: { x: 0, y: 0, z: -1 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: 1, y: 0, z: 0 },
+  },
 };
 
 export function getRegionAnchor(region) {
-  return { ...(REGION_ANCHORS[region] ?? REGION_ANCHORS.front) };
+  return { ...getRegionFrame(region).anchor };
+}
+
+export function getRegionFrame(region) {
+  const frame = REGION_FRAMES[region] ?? REGION_FRAMES.front;
+  return {
+    anchor: { ...frame.anchor },
+    horizontal: { ...frame.horizontal },
+    vertical: { ...frame.vertical },
+    normal: { ...frame.normal },
+  };
+}
+
+export function toRegionPosition(region, transform) {
+  const frame = getRegionFrame(region);
+  const clamped = toSpriteTransform(transform);
+  return toVector(frame.anchor)
+    .addScaledVector(toVector(frame.horizontal), clamped.x * REGION_POSITION_SCALE)
+    .addScaledVector(toVector(frame.vertical), clamped.y * REGION_POSITION_SCALE)
+    .addScaledVector(toVector(frame.normal), REGION_OFFSET);
+}
+
+export function toRegionTransform(region, position) {
+  const frame = getRegionFrame(region);
+  const relative = toVector(position).sub(toVector(frame.anchor));
+  return toSpriteTransform({
+    x: roundCoordinate(relative.dot(toVector(frame.horizontal)) / REGION_POSITION_SCALE),
+    y: roundCoordinate(relative.dot(toVector(frame.vertical)) / REGION_POSITION_SCALE),
+    scale: 1,
+    rotation: 0,
+  });
 }
 
 export function toSpriteTransform(transform) {
   return clampDecorationTransform(transform);
+}
+
+function toVector(value) {
+  return value.isVector3 ? value.clone() : new THREE.Vector3(value.x, value.y, value.z);
+}
+
+function roundCoordinate(value) {
+  return Math.round(value * 10000) / 10000;
 }
 
 export function resolveDecorationAsset(decoration, presets = []) {

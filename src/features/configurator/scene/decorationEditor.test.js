@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
-  createCameraFacingSurface,
+  createRegionSurface,
   getRegionAnchor,
   getRegionFrame,
   resolveDecorationAsset,
@@ -37,7 +37,7 @@ describe('decoration editor geometry', () => {
   it('maps sleeve coordinates through a reversible local frame', () => {
     const position = toRegionPosition('right-sleeve', { x: -0.4, y: 0.35 });
 
-    expect(toRegionTransform('right-sleeve', position)).toMatchObject({ x: -0.4, y: 0.35 });
+    expect(toRegionTransform('right-sleeve', position)).toEqual({ x: -0.4, y: 0.35 });
   });
 
   it('resolves a pattern preset to its renderable asset instead of its source id', () => {
@@ -49,11 +49,12 @@ describe('decoration editor geometry', () => {
     )).toBe(assetUrl);
   });
 
-  it('uses a camera-facing mesh surface instead of a sprite for visible artwork', () => {
-    const surface = createCameraFacingSurface(new THREE.Texture());
+  it('creates artwork surfaces that participate in garment depth occlusion', () => {
+    const surface = createRegionSurface(new THREE.Texture());
 
     expect(surface.isMesh).toBe(true);
     expect(surface.material).toBeInstanceOf(THREE.MeshBasicMaterial);
-    expect(surface.material.depthTest).toBe(false);
+    expect(surface.material.depthTest).toBe(true);
+    expect(surface.material.depthWrite).toBe(false);
   });
 });

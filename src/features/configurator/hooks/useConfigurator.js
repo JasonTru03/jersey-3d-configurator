@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { productApi } from '../api/productApi.js';
 import { mergeConfiguratorState } from '../config/state.js';
+import { createDesignDocument, parseDesignDocument } from '../designs/designDocument.js';
+import { createDesignDownload, readDesignFile } from '../designs/designFileBrowser.js';
 import {
   createDesignHistory,
   getCurrentDesignState,
@@ -65,6 +67,35 @@ export function useConfigurator() {
     setQuote(await productApi.quoteConfiguration(product.id, nextState));
   }, [history, product]);
 
+  const saveDesignFile = useCallback(() => {
+    const currentState = getCurrentDesignState(history);
+    if (!product || !currentState) return null;
+
+    return createDesignDownload(createDesignDocument({
+      productId: product.id,
+      state: currentState,
+    }));
+  }, [history, product]);
+
+  const loadDesignFile = useCallback(async (file) => {
+    if (!product) {
+      return { message: 'The configurator is still loading.', ok: false };
+    }
+
+    try {
+      const rawText = await readDesignFile(file);
+      const nextState = parseDesignDocument(rawText, {
+        defaultState: product.defaultState,
+        expectedProductId: product.id,
+      });
+      setHistory(createDesignHistory(nextState));
+      setQuote(await productApi.quoteConfiguration(product.id, nextState));
+      return { ok: true };
+    } catch (error) {
+      return { message: error.message, ok: false };
+    }
+  }, [product]);
+
   const state = useMemo(() => getCurrentDesignState(history), [history]);
   const canUndo = Boolean(history?.cursor > 0);
   const canRedo = Boolean(history && history.cursor < history.entries.length - 1);
@@ -91,5 +122,7 @@ export function useConfigurator() {
     redo: () => moveHistory(1),
     canUndo,
     canRedo,
+    loadDesignFile,
+    saveDesignFile,
   };
 }

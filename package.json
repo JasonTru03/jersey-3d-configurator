@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "npm run build:app && npm run build:shopify",
     "build:app": "vite build",
+    "build:showcase": "vite build",
     "build:shopify": "vite build --config vite.shopify.config.js && node scripts/export-shopify-css.mjs",
     "preview": "vite preview",
     "test": "vitest run"

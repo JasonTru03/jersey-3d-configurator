@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { productApi } from '../api/productApi.js';
 import { mergeConfiguratorState } from '../config/state.js';
+import {
+  createDesignHistory,
+  getCurrentDesignState,
+  moveDesignHistory,
+  recordDesignState,
+} from '../designs/designHistory.js';
 
 export function useConfigurator() {
   const [product, setProduct] = useState(null);
-  const [state, setState] = useState(null);
+  const [history, setHistory] = useState(null);
   const [quote, setQuote] = useState(null);
   const [status, setStatus] = useState('loading');
 
@@ -22,7 +28,7 @@ export function useConfigurator() {
 
         if (!active) return;
         setProduct(definition);
-        setState(definition.defaultState);
+        setHistory(createDesignHistory(definition.defaultState));
         setQuote(initialQuote);
         setStatus('ready');
       } catch (error) {
@@ -41,13 +47,27 @@ export function useConfigurator() {
 
   const updateState = useCallback(
     async (patch) => {
-      if (!product || !state) return;
-      const nextState = mergeConfiguratorState(state, patch);
-      setState(nextState);
+      const currentState = getCurrentDesignState(history);
+      if (!product || !currentState) return;
+      const nextState = mergeConfiguratorState(currentState, patch);
+      setHistory((currentHistory) => recordDesignState(currentHistory, nextState));
       setQuote(await productApi.quoteConfiguration(product.id, nextState));
     },
-    [product, state],
+    [history, product],
   );
+
+  const moveHistory = useCallback(async (offset) => {
+    if (!product || !history) return;
+    const nextHistory = moveDesignHistory(history, offset);
+    if (nextHistory === history) return;
+    const nextState = getCurrentDesignState(nextHistory);
+    setHistory(nextHistory);
+    setQuote(await productApi.quoteConfiguration(product.id, nextState));
+  }, [history, product]);
+
+  const state = useMemo(() => getCurrentDesignState(history), [history]);
+  const canUndo = Boolean(history?.cursor > 0);
+  const canRedo = Boolean(history && history.cursor < history.entries.length - 1);
 
   const selected = useMemo(() => {
     if (!product || !state) return null;
@@ -67,5 +87,9 @@ export function useConfigurator() {
     state,
     status,
     updateState,
+    undo: () => moveHistory(-1),
+    redo: () => moveHistory(1),
+    canUndo,
+    canRedo,
   };
 }

@@ -20,3 +20,8 @@ Cloudflare 已能从 `showcase` 分支成功执行 `npm run build:showcase`；�
 
 - 本地展示构建和 Wrangler 离线部署预检均通过。
 - 推送至 `showcase` 后，在 Cloudflare **Deployments** 打开最新构建，确认 Build 与 Deploy 都为绿色；随后打开 `workers.dev` 地址做页面验收。
+
+## 后续修复
+
+- 2026-07-14：已在开发分支修复 Artwork 在背面和袖子悬空的问题。修复改为使用区域局部坐标和区域法线，设计 JSON 无需迁移。
+- 自动验证通过后仍需将修复发布到 `showcase`，再验证背面、左右袖、拖拽和保存后重新打开的视觉结果。

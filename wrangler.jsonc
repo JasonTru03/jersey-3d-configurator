@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "jersey-3d-configurator",
+  "compatibility_date": "2026-07-14",
+  "assets": {
+    "directory": "./dist"
+  }
+}

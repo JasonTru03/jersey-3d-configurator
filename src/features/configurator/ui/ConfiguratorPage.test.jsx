@@ -29,4 +29,27 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('button', { name: 'Rotate right' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete artwork' })).toBeInTheDocument();
   });
+
+  it('lets a shopper undo an option change and open the design review', async () => {
+    render(<ConfiguratorPage />);
+
+    expect(await screen.findByText('FN8788 Match Jersey')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
+    fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Away Black/i })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Home White/i })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+
+    expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
+  });
 });

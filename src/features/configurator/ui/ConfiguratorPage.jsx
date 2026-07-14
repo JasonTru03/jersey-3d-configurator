@@ -2,22 +2,26 @@ import {
   BadgeDollarSign,
   Cable,
   CircuitBoard,
+  FolderOpen,
   Layers3,
   Lightbulb,
   Moon,
   PackageCheck,
   Palette,
   Save,
+  Redo2,
   Settings2,
   ShoppingCart,
   Sticker,
   Shirt,
   Sun,
+  Undo2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
+import { DesignReviewDialog } from './DesignReviewDialog.jsx';
 import './configurator.css';
 
 const sectionDefaults = [
@@ -30,9 +34,42 @@ const sectionDefaults = [
 ];
 
 export function ConfiguratorPage() {
-  const { product, quote, selected, state, status, updateState } = useConfigurator();
+  const {
+    canRedo,
+    canUndo,
+    loadDesignFile,
+    product,
+    quote,
+    redo,
+    saveDesignFile,
+    selected,
+    state,
+    status,
+    undo,
+    updateState,
+  } = useConfigurator();
+  const fileInputRef = useRef(null);
   const [section, setSection] = useState('layout');
   const [theme, setTheme] = useState('light');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [fileError, setFileError] = useState('');
+
+  const handleSaveDesign = () => {
+    const download = saveDesignFile();
+    if (!download) return;
+    const url = URL.createObjectURL(download.blob);
+    const link = document.createElement('a');
+    link.download = download.filename;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleLoadDesign = async (event) => {
+    const result = await loadDesignFile(event.target.files?.[0] ?? null);
+    setFileError(result.ok ? '' : result.message);
+    event.target.value = '';
+  };
 
   if (status === 'loading') {
     return <main className="boot-screen">Loading configurator</main>;
@@ -46,7 +83,21 @@ export function ConfiguratorPage() {
     <main className="configurator-shell" data-theme={theme}>
       <Sidebar activeSection={section} labels={product.optionLabels} onSelect={setSection} />
       <section className="workspace">
-        <TopBar product={product} quote={quote} theme={theme} onThemeToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
+        <TopBar
+          canRedo={canRedo}
+          canUndo={canUndo}
+          onOpenFile={() => fileInputRef.current?.click()}
+          onRedo={redo}
+          onReview={() => setReviewOpen(true)}
+          onSave={handleSaveDesign}
+          onThemeToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          onUndo={undo}
+          product={product}
+          quote={quote}
+          theme={theme}
+        />
+        <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
+        {fileError && <p className="file-error" role="alert">{fileError}</p>}
         <div className="workspace-grid">
           <ProductStage
             onStatePatch={updateState}
@@ -64,6 +115,15 @@ export function ConfiguratorPage() {
           />
         </div>
       </section>
+      <DesignReviewDialog
+        onClose={() => setReviewOpen(false)}
+        onSave={handleSaveDesign}
+        open={reviewOpen}
+        product={product}
+        quote={quote}
+        selected={selected}
+        state={state}
+      />
     </main>
   );
 }
@@ -100,7 +160,7 @@ function Sidebar({ activeSection, labels, onSelect }) {
   );
 }
 
-function TopBar({ product, quote, theme, onThemeToggle }) {
+function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThemeToggle, onUndo, product, quote, theme }) {
   return (
     <header className="topbar">
       <div>
@@ -111,13 +171,16 @@ function TopBar({ product, quote, theme, onThemeToggle }) {
         <button className="icon-button" onClick={onThemeToggle} type="button" title="Toggle theme">
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         </button>
-        <button className="soft-button" type="button">
+        <button aria-label="Undo" className="icon-button" disabled={!canUndo} onClick={onUndo} type="button"><Undo2 size={18} /></button>
+        <button aria-label="Redo" className="icon-button" disabled={!canRedo} onClick={onRedo} type="button"><Redo2 size={18} /></button>
+        <button className="soft-button" onClick={onOpenFile} type="button"><FolderOpen size={17} />Open design</button>
+        <button className="soft-button" onClick={onSave} type="button">
           <Save size={17} />
-          Save
+          Save design
         </button>
-        <button className="primary-button" type="button">
+        <button className="primary-button" onClick={onReview} type="button">
           <ShoppingCart size={17} />
-          Add to cart
+          Review design
         </button>
         <strong className="price-pill">${quote.total}</strong>
       </div>

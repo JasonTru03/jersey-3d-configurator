@@ -1,0 +1,44 @@
+# Cloudflare Workers 展示站部署
+
+## 目标
+
+将独立 3D 定制器作为纯静态展示站发布。用户可以编辑球衣、下载本地 JSON 设计文件并重新打开它；展示站不保存设计、不调用 Shopify Cart，也不处理付款。
+
+## 分支职责
+
+- `codex/interactive-jersey-editor`：开发与阶段性验证分支，不直接作为公开展示站。
+- `showcase`：已经验收的公开展示分支。只有准备发布的提交才更新此分支。
+- `main`：保持不变；此流程不合并到 `main`。
+
+## Cloudflare Workers 配置
+
+在 Cloudflare Dashboard 选择 **Workers & Pages → Create application → Import a repository**，连接 GitHub 仓库 `JasonTru03/jersey-3d-configurator`，再设置：
+
+| 设置 | 值 |
+| --- | --- |
+| Production branch | `showcase` |
+| Build command | `npm run build:showcase` |
+| Deploy command | `npx wrangler deploy` |
+| Root directory | `/` |
+| Builds for non-production branches | Disabled |
+
+根目录的 `wrangler.jsonc` 负责声明 Worker 名称、`compatibility_date` 和 `dist` 静态资源目录。不要在 Cloudflare 后台重复填写 `--assets` 或 `--name`，以免后台配置与版本化配置分叉。
+
+首次部署成功后，Cloudflare 会提供 `*.workers.dev` 地址。需要自定义域名时，在 Worker 的 **Domains** 中绑定域名，再按 Cloudflare 指示配置 DNS；不要把域名直接指向某台服务器 IP。
+
+## 发布流程
+
+1. 在 `codex/interactive-jersey-editor` 完成代码，运行 `npm test` 与 `npm run build:showcase`。
+2. 将已验证提交快进到 `showcase` 并推送。
+3. 在 Cloudflare Worker 的 **Deployments** 页面确认构建和部署均成功，再打开公开 URL 做浏览器验收。
+4. 发布有问题时，在 **Deployments** 中回滚到上一份成功版本；不要强推或改写 `showcase` 历史。
+
+## 后续边界
+
+第二期需要服务器保存设计时，再新增受保护的 API 与图片存储；本展示站不把 Data URL、Shopify 密钥或支付信息放进环境变量或客户端代码。
+
+## 验收
+
+- Cloudflare 构建命令成功，并通过 Wrangler 发布 `dist`。
+- 公开链接可加载 3D 模型，用户可修改选项、保存 JSON 并重新打开 JSON。
+- 确认弹层仍明确加购与付款尚未开放。

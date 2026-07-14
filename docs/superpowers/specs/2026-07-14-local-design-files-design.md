@@ -92,7 +92,7 @@ flowchart LR
 {
   "format": "jersey-design",
   "version": 1,
-  "productId": "fn8788-match-jersey",
+  "productId": "fn8788-jersey",
   "variantId": "shopify-variant-id",
   "savedAt": "2026-07-14T00:00:00.000Z",
   "state": {

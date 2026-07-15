@@ -85,6 +85,18 @@ describe('decoration editor geometry', () => {
     });
   });
 
+  it('assigns a different default position when a front artwork slot is occupied', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    mesh.updateMatrixWorld(true);
+    const occupied = getDefaultDecorationPlacement([mesh], 'front');
+    const next = getDefaultDecorationPlacement([mesh], 'front', [occupied]);
+
+    expect(next.position).not.toEqual(occupied.position);
+    expect(new THREE.Vector3(next.position.x, next.position.y, next.position.z)
+      .distanceTo(new THREE.Vector3(occupied.position.x, occupied.position.y, occupied.position.z)))
+      .toBeGreaterThan(0.2);
+  });
+
   it('creates a depth-tested polygon-offset decal on a garment mesh', () => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
     mesh.updateMatrixWorld(true);

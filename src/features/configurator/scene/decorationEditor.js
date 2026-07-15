@@ -4,6 +4,18 @@ import { clampDecorationTransform, patchDecoration } from '../config/decorations
 
 const REGION_OFFSET = 0.026;
 const REGION_POSITION_SCALE = 0.48;
+const DECORATION_MIN_DISTANCE = 0.24;
+const DEFAULT_PLACEMENT_OFFSETS = [
+  { horizontal: 0, vertical: 0 },
+  { horizontal: -0.58, vertical: 0.32 },
+  { horizontal: 0.58, vertical: 0.32 },
+  { horizontal: -0.58, vertical: -0.04 },
+  { horizontal: 0.58, vertical: -0.04 },
+  { horizontal: -0.5, vertical: -0.34 },
+  { horizontal: 0.5, vertical: -0.34 },
+  { horizontal: 0, vertical: 0.38 },
+  { horizontal: 0, vertical: -0.4 },
+];
 
 const REGION_FRAMES = {
   front: {
@@ -106,7 +118,7 @@ export function createRegionSurface(texture) {
   return surface;
 }
 
-export function getDefaultDecorationPlacement(meshes, region) {
+export function getDefaultDecorationPlacement(meshes, region, occupiedPlacements = []) {
   if (!meshes.length) return null;
   const bounds = new THREE.Box3();
   meshes.forEach((mesh) => bounds.expandByObject(mesh));
@@ -114,13 +126,31 @@ export function getDefaultDecorationPlacement(meshes, region) {
 
   const direction = (REGION_DIRECTIONS[region] ?? REGION_DIRECTIONS.front).clone();
   const center = bounds.getCenter(new THREE.Vector3());
-  const distance = Math.max(bounds.getSize(new THREE.Vector3()).length(), 1);
-  const raycaster = new THREE.Raycaster(
-    center.clone().addScaledVector(direction, distance * 2),
-    direction.negate(),
-  );
-  const hit = raycaster.intersectObjects(meshes, false)[0];
-  return hit ? placementFromIntersection(hit, region) : null;
+  const size = bounds.getSize(new THREE.Vector3());
+  const distance = Math.max(size.length(), 1);
+  const horizontal = new THREE.Vector3(0, 1, 0).cross(direction).normalize();
+  const horizontalSpan = Math.max(Math.abs(horizontal.x) * size.x + Math.abs(horizontal.z) * size.z, 0.6);
+  const verticalSpan = Math.max(size.y, 0.8);
+  const candidates = DEFAULT_PLACEMENT_OFFSETS
+    .map((offset) => {
+      const origin = center.clone()
+        .addScaledVector(horizontal, offset.horizontal * horizontalSpan * 0.42)
+        .addScaledVector(new THREE.Vector3(0, 1, 0), offset.vertical * verticalSpan * 0.42)
+        .addScaledVector(direction, distance * 2);
+      const hit = new THREE.Raycaster(origin, direction.clone().negate()).intersectObjects(meshes, false)[0];
+      return hit ? placementFromIntersection(hit, region) : null;
+    })
+    .filter(Boolean);
+
+  return candidates.find((placement) => !isPlacementOccupied(placement, occupiedPlacements)) ?? candidates[0] ?? null;
+}
+
+function isPlacementOccupied(placement, occupiedPlacements) {
+  const position = toVector(placement.position);
+  return occupiedPlacements.some((occupied) => (
+    occupied?.region === placement.region
+    && position.distanceTo(toVector(occupied.position)) < DECORATION_MIN_DISTANCE
+  ));
 }
 
 export function createDecalSurface(texture, mesh, placement, transform) {
@@ -226,12 +256,18 @@ export class DecorationEditor {
     });
 
     const migrated = [];
+    const generatedPlacements = [];
     decorations.forEach((decoration) => {
       const requiresPlacement = !decoration.placement || decoration.placement.region !== decoration.region;
+      const occupiedPlacements = decorations
+        .filter((item) => item.id !== decoration.id && item.region === decoration.region && item.placement)
+        .map((item) => item.placement)
+        .concat(generatedPlacements.filter((placement) => placement.region === decoration.region));
       const placement = requiresPlacement
-        ? getDefaultDecorationPlacement(this.garmentMeshes, decoration.region)
+        ? getDefaultDecorationPlacement(this.garmentMeshes, decoration.region, occupiedPlacements)
         : decoration.placement;
       if (!placement) return;
+      generatedPlacements.push(placement);
       const migrationKey = `${decoration.id}:${decoration.region}`;
       if (requiresPlacement && !this.migratedDecorationIds.has(migrationKey)) {
         this.migratedDecorationIds.add(migrationKey);

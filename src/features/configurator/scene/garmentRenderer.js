@@ -5,6 +5,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DecorationEditor } from './decorationEditor.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
+const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
+
+export function selectDecorationMeshes(meshes) {
+  const clothMeshes = meshes.filter((mesh) => DECORATION_MESH_NAME_PATTERN.test(mesh.name));
+  return clothMeshes.length ? clothMeshes : meshes;
+}
 
 export class GarmentRenderer {
   constructor(host, options = {}) {
@@ -47,6 +53,7 @@ export class GarmentRenderer {
     this.scene.add(this.root);
     this.modelMaterials = [];
     this.modelMeshes = [];
+    this.decorationMeshes = [];
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.printPlane = null;
@@ -143,6 +150,7 @@ export class GarmentRenderer {
       this.modelGroup.clear();
       this.modelMaterials = [];
       this.modelMeshes = [];
+      this.decorationMeshes = [];
       const model = gltf.scene;
       model.traverse((item) => {
         if (!item.isMesh) return;
@@ -154,10 +162,12 @@ export class GarmentRenderer {
         this.modelMeshes.push(item);
       });
 
+      this.decorationMeshes = selectDecorationMeshes(this.modelMeshes);
+
       this.modelGroup.add(model);
       this.fitModel(model);
       this.modelGroup.updateMatrixWorld(true);
-      this.decorationEditor.setGarmentMeshes(this.modelMeshes);
+      this.decorationEditor.setGarmentMeshes(this.decorationMeshes);
       this.decorationEditor.update(
         this.state?.overrides?.decorations ?? [],
         this.state?.overrides?.activeDecorationId,
@@ -394,7 +404,7 @@ export class GarmentRenderer {
   };
 
   isPrintEditable() {
-    return this.state?.lighting && this.state.lighting !== 'none' && this.modelMeshes.length > 0;
+    return this.state?.lighting && this.state.lighting !== 'none' && this.decorationMeshes.length > 0;
   }
 
   pickJersey(event) {
@@ -402,7 +412,7 @@ export class GarmentRenderer {
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    return this.raycaster.intersectObjects(this.modelMeshes, false)[0] ?? null;
+    return this.raycaster.intersectObjects(this.decorationMeshes, false)[0] ?? null;
   }
 
   placePrintAtIntersection(hit, animate = false) {

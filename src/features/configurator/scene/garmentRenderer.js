@@ -156,6 +156,13 @@ export class GarmentRenderer {
 
       this.modelGroup.add(model);
       this.fitModel(model);
+      this.modelGroup.updateMatrixWorld(true);
+      this.decorationEditor.setGarmentMeshes(this.modelMeshes);
+      this.decorationEditor.update(
+        this.state?.overrides?.decorations ?? [],
+        this.state?.overrides?.activeDecorationId,
+        this.product?.decorationPresets ?? [],
+      );
       this.applyColors(this.selected?.colorway?.swatches);
       this.applyMaterial(this.selected?.material?.material);
       this.updatePrintLayer();

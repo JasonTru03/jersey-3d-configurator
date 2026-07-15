@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import { clampDecorationTransform, patchDecoration } from '../config/decorations.js';
 
 const REGION_OFFSET = 0.026;
@@ -29,6 +30,13 @@ const REGION_FRAMES = {
     vertical: { x: 0, y: 1, z: 0 },
     normal: { x: 1, y: 0, z: 0 },
   },
+};
+
+const REGION_DIRECTIONS = {
+  front: new THREE.Vector3(0, 0, 1),
+  back: new THREE.Vector3(0, 0, -1),
+  'left-sleeve': new THREE.Vector3(-1, 0, 0),
+  'right-sleeve': new THREE.Vector3(1, 0, 0),
 };
 
 export function getRegionAnchor(region) {
@@ -98,6 +106,83 @@ export function createRegionSurface(texture) {
   return surface;
 }
 
+export function getDefaultDecorationPlacement(meshes, region) {
+  if (!meshes.length) return null;
+  const bounds = new THREE.Box3();
+  meshes.forEach((mesh) => bounds.expandByObject(mesh));
+  if (bounds.isEmpty()) return null;
+
+  const direction = (REGION_DIRECTIONS[region] ?? REGION_DIRECTIONS.front).clone();
+  const center = bounds.getCenter(new THREE.Vector3());
+  const distance = Math.max(bounds.getSize(new THREE.Vector3()).length(), 1);
+  const raycaster = new THREE.Raycaster(
+    center.clone().addScaledVector(direction, distance * 2),
+    direction.negate(),
+  );
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  return hit ? placementFromIntersection(hit, region) : null;
+}
+
+export function createDecalSurface(texture, mesh, placement, transform) {
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    side: THREE.DoubleSide,
+  });
+  const surface = new THREE.Mesh(createDecalGeometry(mesh, placement, transform), material);
+  surface.renderOrder = 8;
+  surface.userData.aspect = 1;
+  surface.userData.rotation = transform.rotation ?? 0;
+  return surface;
+}
+
+function createDecalGeometry(mesh, placement, transform, aspect = 1) {
+  const normal = toVector(placement.normal).normalize();
+  const orientation = new THREE.Quaternion()
+    .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(normal, THREE.MathUtils.degToRad(transform.rotation ?? 0)));
+  const size = 0.6 * toSpriteTransform(transform).scale;
+  return new DecalGeometry(
+    mesh,
+    toVector(placement.position),
+    new THREE.Euler().setFromQuaternion(orientation),
+    new THREE.Vector3(size * aspect, size, 0.12),
+  );
+}
+
+function placementFromIntersection(hit, region) {
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+  const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+  return {
+    region,
+    position: toPlainVector(hit.point),
+    normal: toPlainVector(normal),
+  };
+}
+
+function findGarmentMeshForPlacement(meshes, placement) {
+  if (!placement || !meshes.length) return null;
+  const normal = toVector(placement.normal).normalize();
+  const raycaster = new THREE.Raycaster(
+    toVector(placement.position).addScaledVector(normal, 0.04),
+    normal.negate(),
+  );
+  return raycaster.intersectObjects(meshes, false)[0]?.object ?? null;
+}
+
+function toPlainVector(vector) {
+  return {
+    x: roundCoordinate(vector.x),
+    y: roundCoordinate(vector.y),
+    z: roundCoordinate(vector.z),
+  };
+}
+
 export class DecorationEditor {
   constructor({ camera, domElement, scene, onDecorationsChange, onSelectionChange }) {
     this.camera = camera;
@@ -112,9 +197,14 @@ export class DecorationEditor {
     this.plane = new THREE.Plane();
     this.intersection = new THREE.Vector3();
     this.surfaces = new Map();
+    this.garmentMeshes = [];
     this.decorations = [];
     this.selectedId = null;
     this.dragging = false;
+  }
+
+  setGarmentMeshes(meshes = []) {
+    this.garmentMeshes = meshes;
   }
 
   update(decorations = [], selectedId = null, presets = []) {
@@ -131,17 +221,22 @@ export class DecorationEditor {
     });
 
     decorations.forEach((decoration) => {
-      const surface = this.surfaces.get(decoration.id) ?? this.createSurface(decoration);
-      this.applyDecoration(surface, decoration);
+      const placement = decoration.placement ?? getDefaultDecorationPlacement(this.garmentMeshes, decoration.region);
+      if (!placement) return;
+      const surface = this.surfaces.get(decoration.id) ?? this.createSurface(decoration, placement);
+      if (surface) this.applyDecoration(surface, decoration, placement);
     });
 
     this.selectedId = remaining.has(selectedId) ? selectedId : null;
     this.refreshSelection();
   }
 
-  createSurface(decoration) {
-    const surface = createRegionSurface(this.createTexture(decoration));
+  createSurface(decoration, placement) {
+    const mesh = findGarmentMeshForPlacement(this.garmentMeshes, placement);
+    if (!mesh) return null;
+    const surface = createDecalSurface(this.createTexture(decoration), mesh, placement, decoration);
     surface.userData.decorationId = decoration.id;
+    surface.userData.garmentMesh = mesh;
     this.group.add(surface);
     this.surfaces.set(decoration.id, surface);
     return surface;
@@ -167,7 +262,8 @@ export class DecorationEditor {
       const surface = this.surfaces.get(decoration.id);
       if (surface) {
         surface.userData.aspect = aspect;
-        this.applyDecoration(surface, decoration);
+        const placement = surface.userData.placement ?? decoration.placement;
+        if (placement) this.applyDecoration(surface, decoration, placement);
       }
     };
     image.onerror = () => console.error(`Unable to load decoration artwork: ${decoration.label}`);
@@ -175,18 +271,14 @@ export class DecorationEditor {
     return texture;
   }
 
-  applyDecoration(surface, decoration) {
-    const frame = getRegionFrame(decoration.region);
-    const transform = toSpriteTransform(decoration);
-    surface.position.copy(toRegionPosition(decoration.region, transform));
-    surface.scale.set(0.6 * transform.scale * surface.userData.aspect, 0.6 * transform.scale, 1);
-    surface.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
-      toVector(frame.horizontal),
-      toVector(frame.vertical),
-      toVector(frame.normal),
-    ));
-    surface.userData.rotation = THREE.MathUtils.degToRad(transform.rotation);
-    surface.rotateZ(surface.userData.rotation);
+  applyDecoration(surface, decoration, placement) {
+    const mesh = findGarmentMeshForPlacement(this.garmentMeshes, placement);
+    if (!mesh) return;
+    surface.geometry.dispose();
+    surface.geometry = createDecalGeometry(mesh, placement, decoration, surface.userData.aspect);
+    surface.userData.placement = placement;
+    surface.userData.garmentMesh = mesh;
+    surface.userData.rotation = decoration.rotation;
     surface.material.opacity = decoration.id === this.selectedId ? 1 : 0.92;
   }
 

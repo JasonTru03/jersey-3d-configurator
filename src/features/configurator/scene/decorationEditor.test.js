@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
   DecorationEditor,
+  createDecalSurface,
   createRegionSurface,
+  getDefaultDecorationPlacement,
   getRegionAnchor,
   getRegionFrame,
   resolveDecorationAsset,
@@ -69,5 +71,36 @@ describe('decoration editor geometry', () => {
     expect(surface.material).toBeInstanceOf(THREE.MeshBasicMaterial);
     expect(surface.material.depthTest).toBe(true);
     expect(surface.material.depthWrite).toBe(false);
+  });
+
+  it('derives a front artwork placement from the loaded garment mesh', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    mesh.updateMatrixWorld(true);
+
+    expect(getDefaultDecorationPlacement([mesh], 'front')).toMatchObject({
+      region: 'front',
+      position: { x: 0, y: 0, z: 1 },
+      normal: { x: 0, y: 0, z: 1 },
+    });
+  });
+
+  it('creates a depth-tested polygon-offset decal on a garment mesh', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    mesh.updateMatrixWorld(true);
+    const surface = createDecalSurface(
+      new THREE.Texture(),
+      mesh,
+      {
+        region: 'front',
+        position: { x: 0, y: 0, z: 1 },
+        normal: { x: 0, y: 0, z: 1 },
+      },
+      { scale: 1, rotation: 0 },
+    );
+
+    expect(surface).toBeInstanceOf(THREE.Mesh);
+    expect(surface.material.depthTest).toBe(true);
+    expect(surface.material.depthWrite).toBe(false);
+    expect(surface.material.polygonOffset).toBe(true);
   });
 });

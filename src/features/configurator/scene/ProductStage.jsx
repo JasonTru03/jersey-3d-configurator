@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { GarmentRenderer } from './garmentRenderer.js';
 import { KeyboardRenderer } from './keyboardRenderer.js';
 import { PrintToolbarOverlay } from './PrintToolbarOverlay.jsx';
-import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
+import { getPrintItems, legacyFirstItemFields, patchPrintItem, removePrintItem } from '../config/printItems.js';
 
 const rendererRegistry = {
   garmentRenderer: GarmentRenderer,
@@ -93,7 +93,10 @@ export function ProductStage({ onStatePatch, product, state, selected }) {
         <PrintToolbarOverlay
           item={printItems.find((item) => item.id === activePrintId)}
           onCopy={() => {}}
-          onDelete={() => {}}
+          onDelete={(id) => {
+            const nextItems = removePrintItem(printItems, id);
+            onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+          }}
           onEdit={() => {}}
           onRotate={(id, degrees) => patchPrint(id, { rotation: (printItems.find((item) => item.id === id)?.rotation ?? 0) + degrees })}
         />

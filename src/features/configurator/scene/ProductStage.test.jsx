@@ -18,4 +18,15 @@ describe('ProductStage print toolbar', () => {
       }),
     }));
   });
+
+  it('removes the active print through the state patch callback', () => {
+    const onStatePatch = vi.fn();
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete print' }));
+
+    expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
+      overrides: expect.objectContaining({ printItems: [] }),
+    }));
+  });
 });

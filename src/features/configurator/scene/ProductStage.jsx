@@ -17,7 +17,7 @@ const rendererRegistry = {
   keyboardRenderer: KeyboardRenderer,
 };
 
-export function ProductStage({ onStatePatch, product, state, selected }) {
+export function ProductStage({ onEditPrint, onStatePatch, product, state, selected }) {
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
   const [view, setView] = useState('orbit');
@@ -111,7 +111,7 @@ export function ProductStage({ onStatePatch, product, state, selected }) {
             const nextItems = removePrintItem(printItems, id);
             onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
           }}
-          onEdit={() => {}}
+          onEdit={(id) => onEditPrint?.(id)}
           onRotate={(id, degrees) => patchPrint(id, { rotation: (printItems.find((item) => item.id === id)?.rotation ?? 0) + degrees })}
         />
       </div>

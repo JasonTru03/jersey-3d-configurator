@@ -40,4 +40,13 @@ describe('ProductStage print toolbar', () => {
       overrides: expect.objectContaining({ printItems: expect.arrayContaining([expect.objectContaining({ id: 'print-2' })]) }),
     }));
   });
+
+  it('forwards edit to the page with the active print id', () => {
+    const onEditPrint = vi.fn();
+    render(<ProductStage onEditPrint={onEditPrint} onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit print' }));
+
+    expect(onEditPrint).toHaveBeenCalledWith('print-1');
+  });
 });

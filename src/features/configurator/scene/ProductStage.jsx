@@ -113,6 +113,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
           }}
           onEdit={(id) => onEditPrint?.(id)}
           onRotate={(id, degrees) => patchPrint(id, { rotation: (printItems.find((item) => item.id === id)?.rotation ?? 0) + degrees })}
+          onScale={(id, scale) => patchPrint(id, { scale })}
         />
       </div>
       <div className="stage-caption">

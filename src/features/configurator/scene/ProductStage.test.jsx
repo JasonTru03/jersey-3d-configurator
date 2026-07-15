@@ -49,4 +49,17 @@ describe('ProductStage print toolbar', () => {
 
     expect(onEditPrint).toHaveBeenCalledWith('print-1');
   });
+
+  it('updates the active print scale from the resize handle', () => {
+    const onStatePatch = vi.fn();
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
+
+    const handle = screen.getByRole('button', { name: 'Resize print' });
+    fireEvent.pointerDown(handle, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(handle, { clientX: 50, clientY: 10 });
+
+    expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
+      overrides: expect.objectContaining({ printItems: [expect.objectContaining({ id: 'print-1', scale: expect.any(Number) })] }),
+    }));
+  });
 });

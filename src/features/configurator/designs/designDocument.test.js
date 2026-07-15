@@ -40,4 +40,32 @@ describe('design document', () => {
       expectedProductId: 'fn8788-jersey',
     })).toThrow(DesignDocumentError);
   });
+
+  it('loads legacy print fields as a print item', () => {
+    const state = parseDesignDocument(JSON.stringify({
+      format: 'jersey-design',
+      productId: 'fn8788-jersey',
+      state: {
+        ...defaultState,
+        overrides: { printName: 'MASON', printNumber: '10', printPlacement: { x: 0, y: 0.2, z: 0.5 } },
+      },
+      version: 1,
+    }), { defaultState, expectedProductId: 'fn8788-jersey' });
+
+    expect(state.overrides.printItems).toMatchObject([{ name: 'MASON', number: '10' }]);
+  });
+
+  it('mirrors the first print item to legacy fields when saving', () => {
+    const document = createDesignDocument({
+      productId: 'fn8788-jersey',
+      state: {
+        ...defaultState,
+        overrides: {
+          printItems: [{ id: 'print-1', name: 'MASON', number: '10', placement: { x: 0, y: 0.2, z: 0.5 } }],
+        },
+      },
+    });
+
+    expect(document.state.overrides).toMatchObject({ printName: 'MASON', printNumber: '10' });
+  });
 });

@@ -2,6 +2,8 @@ import { Rotate3D, SlidersHorizontal, ZoomIn } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { GarmentRenderer } from './garmentRenderer.js';
 import { KeyboardRenderer } from './keyboardRenderer.js';
+import { PrintToolbarOverlay } from './PrintToolbarOverlay.jsx';
+import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 
 const rendererRegistry = {
   garmentRenderer: GarmentRenderer,
@@ -12,6 +14,17 @@ export function ProductStage({ onStatePatch, product, state, selected }) {
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
   const [view, setView] = useState('orbit');
+  const printItems = state?.lighting && state.lighting !== 'none' ? getPrintItems(state.overrides) : [];
+  const [activePrintId, setActivePrintId] = useState(null);
+
+  useEffect(() => {
+    setActivePrintId((current) => printItems.some((item) => item.id === current) ? current : printItems[0]?.id ?? null);
+  }, [state]);
+
+  const patchPrint = (id, patch) => {
+    const nextItems = patchPrintItem(printItems, id, patch);
+    onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+  };
 
   useEffect(() => {
     const Renderer = rendererRegistry[product.renderer];
@@ -77,6 +90,13 @@ export function ProductStage({ onStatePatch, product, state, selected }) {
         <div className="stage-fallback">
           <BoxIcon />
         </div>
+        <PrintToolbarOverlay
+          item={printItems.find((item) => item.id === activePrintId)}
+          onCopy={() => {}}
+          onDelete={() => {}}
+          onEdit={() => {}}
+          onRotate={(id, degrees) => patchPrint(id, { rotation: (printItems.find((item) => item.id === id)?.rotation ?? 0) + degrees })}
+        />
       </div>
       <div className="stage-caption">
         <strong>{selected.layout?.label}</strong>

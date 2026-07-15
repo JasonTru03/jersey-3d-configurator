@@ -165,6 +165,10 @@ function placementFromIntersection(hit, region) {
   };
 }
 
+export function getPlacementFromIntersection(hit, region, fallback = null) {
+  return hit ? placementFromIntersection(hit, region) : fallback;
+}
+
 function findGarmentMeshForPlacement(meshes, placement) {
   if (!placement || !meshes.length) return null;
   const normal = toVector(placement.normal).normalize();
@@ -201,6 +205,7 @@ export class DecorationEditor {
     this.decorations = [];
     this.selectedId = null;
     this.dragging = false;
+    this.migratedDecorationIds = new Set();
   }
 
   setGarmentMeshes(meshes = []) {
@@ -220,12 +225,26 @@ export class DecorationEditor {
       this.surfaces.delete(id);
     });
 
+    const migrated = [];
     decorations.forEach((decoration) => {
-      const placement = decoration.placement ?? getDefaultDecorationPlacement(this.garmentMeshes, decoration.region);
+      const requiresPlacement = !decoration.placement || decoration.placement.region !== decoration.region;
+      const placement = requiresPlacement
+        ? getDefaultDecorationPlacement(this.garmentMeshes, decoration.region)
+        : decoration.placement;
       if (!placement) return;
+      const migrationKey = `${decoration.id}:${decoration.region}`;
+      if (requiresPlacement && !this.migratedDecorationIds.has(migrationKey)) {
+        this.migratedDecorationIds.add(migrationKey);
+        migrated.push(patchDecoration(decoration, { placement }));
+      }
       const surface = this.surfaces.get(decoration.id) ?? this.createSurface(decoration, placement);
       if (surface) this.applyDecoration(surface, decoration, placement);
     });
+
+    if (migrated.length) {
+      const byId = new Map(migrated.map((decoration) => [decoration.id, decoration]));
+      this.onDecorationsChange?.(decorations.map((decoration) => byId.get(decoration.id) ?? decoration));
+    }
 
     this.selectedId = remaining.has(selectedId) ? selectedId : null;
     this.refreshSelection();
@@ -304,8 +323,10 @@ export class DecorationEditor {
   handlePointerMove(event) {
     if (!this.dragging || !this.selectedId) return false;
     const decoration = this.decorations.find((item) => item.id === this.selectedId);
-    if (!decoration || !this.intersectRegion(event, decoration.region)) return false;
-    this.emitPatch(decoration.id, toRegionTransform(decoration.region, this.intersection));
+    if (!decoration) return false;
+    const placement = getPlacementFromIntersection(this.pickGarment(event), decoration.region, null);
+    if (!placement) return false;
+    this.emitPatch(decoration.id, { placement });
     return true;
   }
 
@@ -342,6 +363,12 @@ export class DecorationEditor {
     const hit = this.raycaster.intersectObjects(targets, false)[0];
     if (!hit) return null;
     return this.decorations.find((decoration) => decoration.id === hit.object.userData.decorationId) ?? null;
+  }
+
+  pickGarment(event) {
+    this.updatePointer(event);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    return this.raycaster.intersectObjects(this.garmentMeshes, false)[0] ?? null;
   }
 
   intersectRegion(event, region) {

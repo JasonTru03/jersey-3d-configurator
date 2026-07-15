@@ -39,14 +39,19 @@ export function createDecoration({ id, kind, source, label, region }) {
     y: 0,
     scale: 1,
     rotation: 0,
+    placement: null,
   };
 }
 
 export function patchDecoration(decoration, patch) {
+  const region = EDITABLE_REGIONS.includes(patch.region) ? patch.region : decoration.region;
   return {
     ...decoration,
     ...patch,
-    region: EDITABLE_REGIONS.includes(patch.region) ? patch.region : decoration.region,
+    region,
+    placement: patch.region && region !== decoration.region
+      ? null
+      : (patch.placement ?? decoration.placement ?? null),
     ...clampDecorationTransform({
       x: patch.x ?? decoration.x,
       y: patch.y ?? decoration.y,

@@ -5,6 +5,7 @@ import {
   createDecalSurface,
   createRegionSurface,
   getDefaultDecorationPlacement,
+  getPlacementFromIntersection,
   getRegionAnchor,
   getRegionFrame,
   resolveDecorationAsset,
@@ -102,5 +103,46 @@ describe('decoration editor geometry', () => {
     expect(surface.material.depthTest).toBe(true);
     expect(surface.material.depthWrite).toBe(false);
     expect(surface.material.polygonOffset).toBe(true);
+  });
+
+  it('keeps the last valid placement when a drag ray misses the garment', () => {
+    const previous = {
+      region: 'front',
+      position: { x: 0.1, y: 0.2, z: 0.3 },
+      normal: { x: 0, y: 0, z: 1 },
+    };
+
+    expect(getPlacementFromIntersection(null, 'front', previous)).toEqual(previous);
+  });
+
+  it('migrates a legacy decoration to a mesh placement after the garment loads', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    mesh.updateMatrixWorld(true);
+    const changes = [];
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onDecorationsChange: (decorations) => changes.push(decorations),
+    });
+    editor.setGarmentMeshes([mesh]);
+    editor.update([{
+      id: 'legacy-badge',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotation: 0,
+    }], null, [{ source: 'crest', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' }]);
+
+    expect(changes[0][0].placement).toMatchObject({
+      region: 'front',
+      normal: { z: 1 },
+    });
+
+    editor.dispose();
   });
 });

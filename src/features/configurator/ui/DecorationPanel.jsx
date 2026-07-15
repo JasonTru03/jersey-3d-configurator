@@ -16,7 +16,10 @@ export function DecorationPanel({ product, state, updateState }) {
   }
 
   function addPreset(preset) {
-    if (isFull) return;
+    if (isFull) {
+      setMessage(`You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
+      return;
+    }
     const id = `preset-${preset.id}-${Date.now()}`;
     const next = createDecoration({ ...preset, id, region: activeRegion });
     updateDecorations([...decorations, next], id);
@@ -55,7 +58,7 @@ export function DecorationPanel({ product, state, updateState }) {
       return;
     }
     if (isFull) {
-      setMessage(`Maximum ${MAX_DECORATIONS} artworks allowed.`);
+      setMessage(`You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
       return;
     }
     const reader = new FileReader();
@@ -69,6 +72,14 @@ export function DecorationPanel({ product, state, updateState }) {
     reader.readAsDataURL(file);
   }
 
+  function openUploadPicker() {
+    if (isFull) {
+      setMessage(`You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
+      return;
+    }
+    inputRef.current?.click();
+  }
+
   return (
     <section className="decoration-panel">
       <div className="region-picker" aria-label="Artwork region">
@@ -80,16 +91,17 @@ export function DecorationPanel({ product, state, updateState }) {
       </div>
       <div className="preset-grid">
         {product.decorationPresets.map((preset) => (
-          <button aria-label={preset.label} disabled={isFull} key={preset.id} onClick={() => addPreset(preset)} type="button">
+          <button aria-label={preset.label} key={preset.id} onClick={() => addPreset(preset)} type="button">
             <img alt="" src={preset.assetUrl} />
             <span>{preset.label}</span>
           </button>
         ))}
       </div>
       <input accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden onChange={handleUpload} ref={inputRef} type="file" />
-      <button className="upload-artwork" disabled={isFull} onClick={() => inputRef.current?.click()} type="button">
+      <button className="upload-artwork" onClick={openUploadPicker} type="button">
         <ImagePlus size={16} /> Upload artwork
       </button>
+      <p className="decoration-slots">{decorations.length} / {MAX_DECORATIONS} artwork slots used</p>
       {active && (
         <div className="decoration-actions">
           <strong>{active.label}</strong>

@@ -8,8 +8,12 @@ describe('productApi', () => {
 
     expect(product).toMatchObject({
       id: 'fn8788-jersey',
-      name: 'Arsenal Match Jersey',
+      name: 'Chelsea Match Jersey',
       renderer: 'garmentRenderer',
+      model: {
+        glbUrl: '/models/chelsea-jersey.glb',
+        assetName: 'chelsea-jersey.glb',
+      },
     });
     expect(product.defaultState.productId).toBe(product.id);
     expect(product.options.layout.length).toBeGreaterThan(1);

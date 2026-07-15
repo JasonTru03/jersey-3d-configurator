@@ -1,12 +1,12 @@
 export const jerseyProduct = {
   id: 'fn8788-jersey',
-  name: 'Arsenal Match Jersey',
+  name: 'Chelsea Match Jersey',
   basePrice: 89,
   currency: 'USD',
   renderer: 'garmentRenderer',
   model: {
-    glbUrl: '/models/arsenal-jersey.glb',
-    assetName: 'arsenal-jersey.glb',
+    glbUrl: '/models/chelsea-jersey.glb',
+    assetName: 'chelsea-jersey.glb',
   },
   optionLabels: {
     layout: 'Size',

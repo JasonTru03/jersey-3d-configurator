@@ -6,7 +6,7 @@ describe('ConfiguratorPage', () => {
   it('loads the jersey product and updates the quote when an extra is toggled', async () => {
     render(<ConfiguratorPage />);
 
-    expect(await screen.findByText('Arsenal Match Jersey')).toBeInTheDocument();
+    expect(await screen.findByText('Chelsea Match Jersey')).toBeInTheDocument();
     expect(screen.getAllByText('$89').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Extras' }));
@@ -20,7 +20,7 @@ describe('ConfiguratorPage', () => {
   it('adds a preset decoration and exposes edit controls', async () => {
     render(<ConfiguratorPage />);
 
-    expect(await screen.findByText('Arsenal Match Jersey')).toBeInTheDocument();
+    expect(await screen.findByText('Chelsea Match Jersey')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Artwork' }));
     fireEvent.click(screen.getByRole('button', { name: /Golden Stripe/i }));
@@ -33,7 +33,7 @@ describe('ConfiguratorPage', () => {
   it('lets a shopper undo an option change and open the design review', async () => {
     render(<ConfiguratorPage />);
 
-    expect(await screen.findByText('Arsenal Match Jersey')).toBeInTheDocument();
+    expect(await screen.findByText('Chelsea Match Jersey')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
     fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));

@@ -8,7 +8,7 @@ describe('productApi', () => {
 
     expect(product).toMatchObject({
       id: 'fn8788-jersey',
-      name: 'FN8788 Match Jersey',
+      name: 'Arsenal Match Jersey',
       renderer: 'garmentRenderer',
     });
     expect(product.defaultState.productId).toBe(product.id);

@@ -6,10 +6,17 @@ import { DecorationEditor } from './decorationEditor.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
+const MIN_PRINT_COPY_DISTANCE = 0.24;
 
 export function selectDecorationMeshes(meshes) {
   const clothMeshes = meshes.filter((mesh) => DECORATION_MESH_NAME_PATTERN.test(mesh.name));
   return clothMeshes.length ? clothMeshes : meshes;
+}
+
+export function getNextPrintPlacement(candidates, occupiedPlacements) {
+  return candidates.find((candidate) => occupiedPlacements.every((occupied) => (
+    distanceBetweenPlacements(candidate, occupied) >= MIN_PRINT_COPY_DISTANCE
+  ))) ?? null;
 }
 
 export class GarmentRenderer {
@@ -531,4 +538,8 @@ function sanitizePrintText(value) {
 
 function roundPlacement(value) {
   return Math.round(value * 10000) / 10000;
+}
+
+function distanceBetweenPlacements(first, second) {
+  return Math.hypot(first.x - second.x, first.y - second.y, first.z - second.z);
 }

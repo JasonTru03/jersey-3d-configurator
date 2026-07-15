@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { selectDecorationMeshes } from './garmentRenderer.js';
+import { getNextPrintPlacement, selectDecorationMeshes } from './garmentRenderer.js';
 
 describe('garment decoration mesh selection', () => {
   it('uses cloth meshes instead of topstitch meshes for artwork placement', () => {
@@ -17,5 +17,14 @@ describe('garment decoration mesh selection', () => {
     const second = new THREE.Mesh();
 
     expect(selectDecorationMeshes([first, second])).toEqual([first, second]);
+  });
+
+  it('chooses a copy placement away from existing print placements', () => {
+    const selected = getNextPrintPlacement(
+      [{ x: 0, y: 0.36, z: 0.5 }, { x: 0.3, y: 0.36, z: 0.5 }],
+      [{ x: 0, y: 0.36, z: 0.5 }],
+    );
+
+    expect(selected).toEqual({ x: 0.3, y: 0.36, z: 0.5 });
   });
 });

@@ -24,12 +24,26 @@ describe('decoration helpers', () => {
       region: 'front',
     });
 
+    expect(decoration.placement).toBeNull();
+
     expect(patchDecoration(decoration, { x: 9, y: -9, scale: 9, rotation: 300 })).toMatchObject({
       x: 1,
       y: -1,
       scale: 2.4,
       rotation: 180,
     });
+  });
+
+  it('preserves a saved mesh placement but clears it after a region change', () => {
+    const decoration = createDecoration({ id: 'badge-1', kind: 'preset', source: 'crest', label: 'Crest', region: 'front' });
+    const placement = {
+      region: 'front',
+      position: { x: 0.1, y: 0.2, z: 0.3 },
+      normal: { x: 0, y: 0, z: 1 },
+    };
+
+    expect(patchDecoration(decoration, { placement }).placement).toEqual(placement);
+    expect(patchDecoration({ ...decoration, placement }, { region: 'back' }).placement).toBeNull();
   });
 
   it('keeps other decorations when one is removed', () => {

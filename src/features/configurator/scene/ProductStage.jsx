@@ -3,7 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import { GarmentRenderer } from './garmentRenderer.js';
 import { KeyboardRenderer } from './keyboardRenderer.js';
 import { PrintToolbarOverlay } from './PrintToolbarOverlay.jsx';
-import { getPrintItems, legacyFirstItemFields, patchPrintItem, removePrintItem } from '../config/printItems.js';
+import { duplicatePrintItem, getPrintItems, legacyFirstItemFields, patchPrintItem, removePrintItem } from '../config/printItems.js';
+import { getNextPrintPlacement } from './garmentRenderer.js';
+
+const printCopyCandidates = [
+  { x: 0.3, y: 0.36, z: 0.5 },
+  { x: -0.3, y: 0.36, z: 0.5 },
+  { x: 0, y: 0.08, z: 0.5 },
+];
 
 const rendererRegistry = {
   garmentRenderer: GarmentRenderer,
@@ -92,7 +99,14 @@ export function ProductStage({ onStatePatch, product, state, selected }) {
         </div>
         <PrintToolbarOverlay
           item={printItems.find((item) => item.id === activePrintId)}
-          onCopy={() => {}}
+          onCopy={(id) => {
+            const placement = getNextPrintPlacement(printCopyCandidates, printItems.map((item) => item.placement).filter(Boolean));
+            const copy = duplicatePrintItem(printItems, id, placement);
+            if (!copy) return;
+            const nextItems = [...printItems, copy];
+            onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+            setActivePrintId(copy.id);
+          }}
           onDelete={(id) => {
             const nextItems = removePrintItem(printItems, id);
             onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });

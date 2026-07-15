@@ -29,4 +29,15 @@ describe('ProductStage print toolbar', () => {
       overrides: expect.objectContaining({ printItems: [] }),
     }));
   });
+
+  it('duplicates the active print at a distinct placement', () => {
+    const onStatePatch = vi.fn();
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', placement: { x: 0, y: 0.36, z: 0.5 } }] } }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate print' }));
+
+    expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
+      overrides: expect.objectContaining({ printItems: expect.arrayContaining([expect.objectContaining({ id: 'print-2' })]) }),
+    }));
+  });
 });

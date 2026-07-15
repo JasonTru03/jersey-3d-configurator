@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
+  DecorationEditor,
   createRegionSurface,
   getRegionAnchor,
   getRegionFrame,
@@ -11,6 +12,18 @@ import {
 } from './decorationEditor.js';
 
 describe('decoration editor geometry', () => {
+  it('updates an empty decoration collection without invoking removed camera-facing behavior', () => {
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+    });
+
+    expect(() => editor.update([], null, [])).not.toThrow();
+
+    editor.dispose();
+  });
+
   it('clamps a sprite transform to the editable range', () => {
     expect(toSpriteTransform({ x: 9, y: -9, scale: 9, rotation: 300 })).toEqual({
       x: 1,

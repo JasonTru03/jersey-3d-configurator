@@ -137,7 +137,6 @@ export class DecorationEditor {
 
     this.selectedId = remaining.has(selectedId) ? selectedId : null;
     this.refreshSelection();
-    this.updateCameraFacing();
   }
 
   createSurface(decoration) {

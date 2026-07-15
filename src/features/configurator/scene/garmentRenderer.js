@@ -268,7 +268,6 @@ export class GarmentRenderer {
   animate = () => {
     this.frame = requestAnimationFrame(this.animate);
     this.controls.update();
-    this.decorationEditor?.updateCameraFacing();
     this.renderer.render(this.scene, this.camera);
   };
 

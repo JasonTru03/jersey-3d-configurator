@@ -1,19 +1,81 @@
 import * as THREE from 'three';
 import { clampDecorationTransform, patchDecoration } from '../config/decorations.js';
 
-const REGION_ANCHORS = {
-  front: { x: 0, y: 0.42, z: 0.72 },
-  back: { x: 0, y: 0.42, z: -0.72 },
-  'left-sleeve': { x: -1.08, y: 0.42, z: 0.08 },
-  'right-sleeve': { x: 1.08, y: 0.42, z: 0.08 },
+const REGION_OFFSET = 0.026;
+const REGION_POSITION_SCALE = 0.48;
+
+const REGION_FRAMES = {
+  front: {
+    anchor: { x: 0, y: 0.42, z: 0.72 },
+    horizontal: { x: 1, y: 0, z: 0 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: 0, y: 0, z: 1 },
+  },
+  back: {
+    anchor: { x: 0, y: 0.42, z: -0.72 },
+    horizontal: { x: -1, y: 0, z: 0 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: 0, y: 0, z: -1 },
+  },
+  'left-sleeve': {
+    anchor: { x: -1.08, y: 0.42, z: 0.08 },
+    horizontal: { x: 0, y: 0, z: 1 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: -1, y: 0, z: 0 },
+  },
+  'right-sleeve': {
+    anchor: { x: 1.08, y: 0.42, z: 0.08 },
+    horizontal: { x: 0, y: 0, z: -1 },
+    vertical: { x: 0, y: 1, z: 0 },
+    normal: { x: 1, y: 0, z: 0 },
+  },
 };
 
 export function getRegionAnchor(region) {
-  return { ...(REGION_ANCHORS[region] ?? REGION_ANCHORS.front) };
+  return { ...getRegionFrame(region).anchor };
+}
+
+export function getRegionFrame(region) {
+  const frame = REGION_FRAMES[region] ?? REGION_FRAMES.front;
+  return {
+    anchor: { ...frame.anchor },
+    horizontal: { ...frame.horizontal },
+    vertical: { ...frame.vertical },
+    normal: { ...frame.normal },
+  };
+}
+
+export function toRegionPosition(region, transform) {
+  const frame = getRegionFrame(region);
+  const clamped = toSpriteTransform(transform);
+  return toVector(frame.anchor)
+    .addScaledVector(toVector(frame.horizontal), clamped.x * REGION_POSITION_SCALE)
+    .addScaledVector(toVector(frame.vertical), clamped.y * REGION_POSITION_SCALE)
+    .addScaledVector(toVector(frame.normal), REGION_OFFSET);
+}
+
+export function toRegionTransform(region, position) {
+  const frame = getRegionFrame(region);
+  const relative = toVector(position).sub(toVector(frame.anchor));
+  const clamped = toSpriteTransform({
+    x: roundCoordinate(relative.dot(toVector(frame.horizontal)) / REGION_POSITION_SCALE),
+    y: roundCoordinate(relative.dot(toVector(frame.vertical)) / REGION_POSITION_SCALE),
+    scale: 1,
+    rotation: 0,
+  });
+  return { x: clamped.x, y: clamped.y };
 }
 
 export function toSpriteTransform(transform) {
   return clampDecorationTransform(transform);
+}
+
+function toVector(value) {
+  return value.isVector3 ? value.clone() : new THREE.Vector3(value.x, value.y, value.z);
+}
+
+function roundCoordinate(value) {
+  return Math.round(value * 10000) / 10000;
 }
 
 export function resolveDecorationAsset(decoration, presets = []) {
@@ -21,11 +83,11 @@ export function resolveDecorationAsset(decoration, presets = []) {
   return presets.find((preset) => preset.source === decoration.source)?.assetUrl ?? decoration.source;
 }
 
-export function createCameraFacingSurface(texture) {
+export function createRegionSurface(texture) {
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
-    depthTest: false,
+    depthTest: true,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
@@ -79,7 +141,7 @@ export class DecorationEditor {
   }
 
   createSurface(decoration) {
-    const surface = createCameraFacingSurface(this.createTexture(decoration));
+    const surface = createRegionSurface(this.createTexture(decoration));
     surface.userData.decorationId = decoration.id;
     this.group.add(surface);
     this.surfaces.set(decoration.id, surface);
@@ -115,19 +177,18 @@ export class DecorationEditor {
   }
 
   applyDecoration(surface, decoration) {
-    const anchor = getRegionAnchor(decoration.region);
+    const frame = getRegionFrame(decoration.region);
     const transform = toSpriteTransform(decoration);
-    surface.position.set(anchor.x + transform.x * 0.48, anchor.y + transform.y * 0.48, anchor.z);
+    surface.position.copy(toRegionPosition(decoration.region, transform));
     surface.scale.set(0.6 * transform.scale * surface.userData.aspect, 0.6 * transform.scale, 1);
+    surface.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+      toVector(frame.horizontal),
+      toVector(frame.vertical),
+      toVector(frame.normal),
+    ));
     surface.userData.rotation = THREE.MathUtils.degToRad(transform.rotation);
+    surface.rotateZ(surface.userData.rotation);
     surface.material.opacity = decoration.id === this.selectedId ? 1 : 0.92;
-  }
-
-  updateCameraFacing() {
-    this.surfaces.forEach((surface) => {
-      surface.quaternion.copy(this.camera.quaternion);
-      surface.rotateZ(surface.userData.rotation);
-    });
   }
 
   handlePointerDown(event) {
@@ -153,11 +214,7 @@ export class DecorationEditor {
     if (!this.dragging || !this.selectedId) return false;
     const decoration = this.decorations.find((item) => item.id === this.selectedId);
     if (!decoration || !this.intersectRegion(event, decoration.region)) return false;
-    const anchor = getRegionAnchor(decoration.region);
-    this.emitPatch(decoration.id, {
-      x: (this.intersection.x - anchor.x) / 0.48,
-      y: (this.intersection.y - anchor.y) / 0.48,
-    });
+    this.emitPatch(decoration.id, toRegionTransform(decoration.region, this.intersection));
     return true;
   }
 
@@ -199,8 +256,8 @@ export class DecorationEditor {
   intersectRegion(event, region) {
     this.updatePointer(event);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const anchor = getRegionAnchor(region);
-    this.plane.setFromNormalAndCoplanarPoint(this.camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(anchor.x, anchor.y, anchor.z));
+    const frame = getRegionFrame(region);
+    this.plane.setFromNormalAndCoplanarPoint(toVector(frame.normal), toVector(frame.anchor));
     return this.raycaster.ray.intersectPlane(this.plane, this.intersection);
   }
 

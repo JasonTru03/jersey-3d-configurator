@@ -18,6 +18,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
@@ -49,6 +50,8 @@ export function ConfiguratorPage() {
     updateState,
   } = useConfigurator();
   const fileInputRef = useRef(null);
+  const nameInputRef = useRef(null);
+  const [editingPrintId, setEditingPrintId] = useState(null);
   const [section, setSection] = useState('layout');
   const [theme, setTheme] = useState('light');
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -100,6 +103,11 @@ export function ConfiguratorPage() {
         {fileError && <p className="file-error" role="alert">{fileError}</p>}
         <div className="workspace-grid">
           <ProductStage
+            onEditPrint={(id) => {
+              setEditingPrintId(id);
+              setSection('lighting');
+              requestAnimationFrame(() => nameInputRef.current?.focus());
+            }}
             onStatePatch={updateState}
             product={product}
             state={state}
@@ -112,6 +120,8 @@ export function ConfiguratorPage() {
             selected={selected}
             state={state}
             updateState={updateState}
+            editingPrintId={editingPrintId}
+            nameInputRef={nameInputRef}
           />
         </div>
       </section>
@@ -188,7 +198,7 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThem
   );
 }
 
-function ConfigPanel({ product, quote, section, selected, state, updateState }) {
+function ConfigPanel({ editingPrintId, nameInputRef, product, quote, section, selected, state, updateState }) {
   return (
     <aside className="config-panel">
       <PanelHeader labels={product.optionLabels} section={section} />
@@ -226,6 +236,8 @@ function ConfigPanel({ product, quote, section, selected, state, updateState }) 
           {state.lighting !== 'none' && (
             <PrintFields
               overrides={state.overrides}
+              editingPrintId={editingPrintId}
+              nameInputRef={nameInputRef}
               updateState={updateState}
             />
           )}
@@ -348,17 +360,24 @@ function ExtrasPanel({ extras, state, updateState }) {
   );
 }
 
-function PrintFields({ overrides, updateState }) {
+function PrintFields({ editingPrintId, nameInputRef, overrides, updateState }) {
+  const items = getPrintItems(overrides);
+  const active = items.find((item) => item.id === editingPrintId) ?? items[0];
+  const patchActive = (patch) => {
+    const next = patchPrintItem(items, active.id, patch);
+    updateState({ overrides: { printItems: next, ...legacyFirstItemFields(next) } });
+  };
   return (
     <div className="print-fields">
       <label>
         <span>Name</span>
         <input
           maxLength={14}
-          onChange={(event) => updateState({ overrides: { printName: event.target.value } })}
+          onChange={(event) => patchActive({ name: event.target.value })}
           placeholder="PLAYER"
           type="text"
-          value={overrides.printName ?? ''}
+          ref={nameInputRef}
+          value={active?.name ?? ''}
         />
       </label>
       <label>
@@ -366,10 +385,10 @@ function PrintFields({ overrides, updateState }) {
         <input
           inputMode="numeric"
           maxLength={2}
-          onChange={(event) => updateState({ overrides: { printNumber: event.target.value } })}
+          onChange={(event) => patchActive({ number: event.target.value })}
           placeholder="16"
           type="text"
-          value={overrides.printNumber ?? ''}
+          value={active?.number ?? ''}
         />
       </label>
       <p>Drag the print on the jersey to place it.</p>

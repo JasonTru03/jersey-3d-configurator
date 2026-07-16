@@ -31,7 +31,7 @@ Replace the initial wraparound assertion so the pointer path from the lower-left
 expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(329.6, 0));
 ```
 
-The later full-circle assertion remains `180`, proving that incremental updates still support repeated circular movement.
+The later full-circle assertion becomes approximately `160`, preserving the initial 20.4 degree counterclockwise movement while proving that incremental updates still support repeated circular movement.
 
 - [ ] **Step 2: Write the failing state-persistence assertion**
 

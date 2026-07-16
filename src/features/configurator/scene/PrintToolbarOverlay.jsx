@@ -81,7 +81,7 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
     if (!start || start.pointerId !== event.pointerId || !onRotate) return;
     event.preventDefault();
     const angle = getPointerAngle(start.centerX, start.centerY, event.clientX, event.clientY);
-    const rotation = normalizePrintRotation(start.rotation + getShortestAngleDelta(start.angle, angle));
+    const rotation = normalizePrintRotation(start.rotation - getShortestAngleDelta(start.angle, angle));
     rotationStart.current = { ...start, angle, rotation };
     onRotate(item.id, rotation);
   };

@@ -13,7 +13,7 @@ describe('PrintToolbarOverlay', () => {
     expect(screen.getByRole('button', { name: 'Resize print' })).toBeInTheDocument();
   });
 
-  it('captures the rotation pointer and wraps clockwise rotation through zero degrees', () => {
+  it('captures the rotation pointer and wraps counterclockwise pointer movement through zero degrees', () => {
     const onRotate = vi.fn();
     render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 350 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
 
@@ -23,7 +23,7 @@ describe('PrintToolbarOverlay', () => {
     fireEvent.pointerMove(handle, { pointerId: 9, clientX: 100, clientY: 121 });
 
     expect(handle.setPointerCapture).toHaveBeenCalledWith(9);
-    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(10.4, 0));
+    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(329.6, 0));
 
     fireEvent.pointerMove(handle, { pointerId: 9, clientX: 200, clientY: 130 });
     fireEvent.pointerMove(handle, { pointerId: 9, clientX: 150, clientY: 180 });
@@ -31,7 +31,7 @@ describe('PrintToolbarOverlay', () => {
     fireEvent.pointerMove(handle, { pointerId: 9, clientX: 150, clientY: 80 });
     fireEvent.pointerMove(handle, { pointerId: 9, clientX: 200, clientY: 130 });
 
-    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(180, 0));
+    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(160, 0));
   });
 
   it('does not change rotation for a click without pointer movement', () => {

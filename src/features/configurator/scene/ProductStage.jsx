@@ -39,7 +39,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
     if (!canUseWebGl()) return;
 
     try {
-      rendererRef.current = new Renderer(hostRef.current, { onStatePatch });
+      rendererRef.current = new Renderer(hostRef.current, { onPrintSelectionChange: setActivePrintId, onStatePatch });
       rendererRef.current.update(product, state, selected);
     } catch (error) {
       console.error(error);
@@ -58,6 +58,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
   useEffect(() => {
     if (rendererRef.current) {
       rendererRef.current.onStatePatch = onStatePatch;
+      rendererRef.current.onPrintSelectionChange = setActivePrintId;
     }
   }, [onStatePatch]);
 

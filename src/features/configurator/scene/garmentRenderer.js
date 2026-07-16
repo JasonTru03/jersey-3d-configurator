@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DecorationEditor } from './decorationEditor.js';
-import { getPrintItems } from '../config/printItems.js';
+import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
@@ -24,6 +24,7 @@ export class GarmentRenderer {
   constructor(host, options = {}) {
     this.host = host;
     this.onStatePatch = options.onStatePatch;
+    this.onPrintSelectionChange = options.onPrintSelectionChange;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#f3f1ec');
     this.camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
@@ -387,6 +388,21 @@ export class GarmentRenderer {
   }
 
   handlePointerDown = (event) => {
+    const printHit = this.pickPrint(event);
+    if (printHit) {
+      this.activePrintId = printHit.object.userData.printId;
+      this.onPrintSelectionChange?.(this.activePrintId);
+      if (this.isPrintEditable()) {
+        const hit = this.pickJersey(event);
+        if (hit) {
+          this.isDraggingPrint = true;
+          this.controls.enabled = false;
+          this.placePrintAtIntersection(hit, true);
+        }
+      }
+      event.preventDefault();
+      return;
+    }
     if (this.decorationEditor?.handlePointerDown(event)) {
       this.controls.enabled = !this.decorationEditor.isEditing();
       event.preventDefault();
@@ -436,6 +452,14 @@ export class GarmentRenderer {
     return this.raycaster.intersectObjects(this.decorationMeshes, false)[0] ?? null;
   }
 
+  pickPrint(event) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    return this.raycaster.intersectObjects([...this.printLayers.values()].map((layer) => layer.plane), false)[0] ?? null;
+  }
+
   placePrintAtIntersection(hit, animate = false) {
     const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
     const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
@@ -459,18 +483,25 @@ export class GarmentRenderer {
   emitPrintPlacement() {
     if (!this.printPlane || !this.onStatePatch) return;
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(this.printPlane.quaternion).normalize();
+    const placement = {
+      x: roundPlacement(this.printPlane.position.x),
+      y: roundPlacement(this.printPlane.position.y),
+      z: roundPlacement(this.printPlane.position.z),
+      normal: {
+        x: roundPlacement(normal.x),
+        y: roundPlacement(normal.y),
+        z: roundPlacement(normal.z),
+      },
+    };
+    const printItems = getPrintItems(this.state?.overrides);
+    const activePrintId = this.activePrintId ?? printItems[0]?.id;
+    const nextItems = activePrintId
+      ? patchPrintItem(printItems, activePrintId, { placement })
+      : printItems;
     this.onStatePatch({
       overrides: {
-        printPlacement: {
-          x: roundPlacement(this.printPlane.position.x),
-          y: roundPlacement(this.printPlane.position.y),
-          z: roundPlacement(this.printPlane.position.z),
-          normal: {
-            x: roundPlacement(normal.x),
-            y: roundPlacement(normal.y),
-            z: roundPlacement(normal.z),
-          },
-        },
+        printItems: nextItems,
+        ...legacyFirstItemFields(nextItems),
       },
     });
   }

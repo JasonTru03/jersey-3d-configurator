@@ -227,6 +227,43 @@
   z-index: 0;
 }
 
+.print-toolbar-overlay {
+  position: absolute;
+  z-index: 3;
+  top: 42%;
+  left: 50%;
+  display: grid;
+  grid-template-columns: repeat(3, 32px);
+  gap: 8px;
+  padding: 8px;
+  border: 2px solid #ef5d43;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 84%, transparent);
+  box-shadow: 0 6px 20px rgba(16, 17, 21, 0.16);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(8px);
+}
+
+.print-toolbar-overlay button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.print-toolbar-overlay button:hover,
+.print-toolbar-overlay button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+}
+
 .stage-toolbar {
   position: absolute;
   z-index: 2;

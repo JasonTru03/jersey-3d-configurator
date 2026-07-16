@@ -101,10 +101,10 @@ Export and test a pure `getPrintToolbarAnchor` function. Cover all four placemen
 
 ```js
 it('flips a visible anchor away from the top-right edges', () => {
-  expect(getPrintToolbarAnchor({ x: 320, y: 90 }, { width: 480, height: 360 })).toMatchObject({ placement: 'left-bottom', visible: true });
-  expect(getPrintToolbarAnchor({ x: 180, y: 90 }, { width: 480, height: 360 })).toMatchObject({ placement: 'right-bottom', visible: true });
-  expect(getPrintToolbarAnchor({ x: 320, y: 220 }, { width: 480, height: 360 })).toMatchObject({ placement: 'left-top', visible: true });
-  expect(getPrintToolbarAnchor({ x: 180, y: 220 }, { width: 480, height: 360 })).toMatchObject({ placement: 'right-top', visible: true });
+  expect(getPrintToolbarAnchor({ x: 0.5, y: 0.5, z: 0 }, { width: 480, height: 360 })).toMatchObject({ placement: 'left-bottom', visible: true });
+  expect(getPrintToolbarAnchor({ x: -0.3, y: 0.5, z: 0 }, { width: 480, height: 360 })).toMatchObject({ placement: 'right-bottom', visible: true });
+  expect(getPrintToolbarAnchor({ x: 0.5, y: -0.2, z: 0 }, { width: 480, height: 360 })).toMatchObject({ placement: 'left-top', visible: true });
+  expect(getPrintToolbarAnchor({ x: -0.3, y: -0.2, z: 0 }, { width: 480, height: 360 })).toMatchObject({ placement: 'right-top', visible: true });
 });
 ```
 
@@ -121,7 +121,7 @@ Add exported constants for a stage safety inset and the approximate toolbar dime
 
 ```js
 export function getPrintToolbarAnchor(projected, { width, height }) {
-  if (!width || !height || projected.z < -1 || projected.z > 1) return { visible: false };
+  if (!width || !height || projected.x < -1 || projected.x > 1 || projected.y < -1 || projected.y > 1 || projected.z < -1 || projected.z > 1) return { visible: false };
   const x = clamp(Math.round((projected.x * 0.5 + 0.5) * width), TOOLBAR_SAFE_INSET, width - TOOLBAR_SAFE_INSET);
   const y = clamp(Math.round((-projected.y * 0.5 + 0.5) * height), TOOLBAR_SAFE_INSET, height - TOOLBAR_SAFE_INSET);
   const horizontal = x + TOOLBAR_WIDTH + TOOLBAR_GAP > width ? 'left' : 'right';

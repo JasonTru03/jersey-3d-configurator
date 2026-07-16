@@ -130,6 +130,12 @@ export class GarmentRenderer {
       ?? null;
   }
 
+  setActivePrintId(id) {
+    if (this.activePrintId === id) return;
+    this.activePrintId = id;
+    this.syncPrintAnchor();
+  }
+
   update(product, state, selected) {
     if (!selected) return;
     this.product = product;

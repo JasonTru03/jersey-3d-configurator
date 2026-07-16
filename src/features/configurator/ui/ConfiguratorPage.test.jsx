@@ -1,6 +1,36 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ConfiguratorPage } from './ConfiguratorPage.jsx';
+
+vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    GarmentRenderer: class {
+      constructor(host, options) {
+        this.onPrintAnchorChange = options.onPrintAnchorChange;
+      }
+
+      update() {
+        this.onPrintAnchorChange?.({ visible: true, x: 180, y: 220, placement: 'right-top' });
+      }
+
+      setActivePrintId() {}
+
+      setView() {}
+
+      dispose() {}
+    },
+  };
+});
+
+beforeAll(() => {
+  vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('ConfiguratorPage', () => {
   it('loads the jersey product and updates the quote when an extra is toggled', async () => {

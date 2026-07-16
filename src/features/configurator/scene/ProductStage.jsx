@@ -23,6 +23,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
   const [view, setView] = useState('orbit');
   const printItems = state?.lighting && state.lighting !== 'none' ? getPrintItems(state.overrides) : [];
   const [activePrintId, setActivePrintId] = useState(null);
+  const [printAnchor, setPrintAnchor] = useState({ visible: false });
 
   useEffect(() => {
     setActivePrintId((current) => printItems.some((item) => item.id === current) ? current : printItems[0]?.id ?? null);
@@ -39,7 +40,11 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
     if (!canUseWebGl()) return;
 
     try {
-      rendererRef.current = new Renderer(hostRef.current, { onPrintSelectionChange: setActivePrintId, onStatePatch });
+      rendererRef.current = new Renderer(hostRef.current, {
+        onPrintAnchorChange: setPrintAnchor,
+        onPrintSelectionChange: setActivePrintId,
+        onStatePatch,
+      });
       rendererRef.current.update(product, state, selected);
     } catch (error) {
       console.error(error);
@@ -56,8 +61,13 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
   }, [product, selected, state]);
 
   useEffect(() => {
+    rendererRef.current?.setActivePrintId(activePrintId);
+  }, [activePrintId]);
+
+  useEffect(() => {
     if (rendererRef.current) {
       rendererRef.current.onStatePatch = onStatePatch;
+      rendererRef.current.onPrintAnchorChange = setPrintAnchor;
       rendererRef.current.onPrintSelectionChange = setActivePrintId;
     }
   }, [onStatePatch]);
@@ -99,6 +109,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
           <BoxIcon />
         </div>
         <PrintToolbarOverlay
+          anchor={printAnchor}
           item={printItems.find((item) => item.id === activePrintId)}
           onCopy={(id) => {
             const placement = getNextPrintPlacement(printCopyCandidates, printItems.map((item) => item.placement).filter(Boolean));
@@ -110,6 +121,8 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
           }}
           onDelete={(id) => {
             const nextItems = removePrintItem(printItems, id);
+            setActivePrintId(null);
+            setPrintAnchor({ visible: false });
             onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
           }}
           onEdit={(id) => onEditPrint?.(id)}

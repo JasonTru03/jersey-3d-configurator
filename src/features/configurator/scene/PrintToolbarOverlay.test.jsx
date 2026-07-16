@@ -13,25 +13,53 @@ describe('PrintToolbarOverlay', () => {
     expect(screen.getByRole('button', { name: 'Resize print' })).toBeInTheDocument();
   });
 
-  it('captures the rotation pointer and wraps counterclockwise pointer movement through zero degrees', () => {
+  it('uses the same clockwise rotation increment for equal tangent drags at different radii', () => {
+    const nearRotate = vi.fn();
+    const { unmount } = render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={nearRotate} />);
+
+    const nearHandle = screen.getByRole('button', { name: 'Rotate print' });
+    fireEvent.pointerDown(nearHandle, { pointerId: 9, clientX: 200, clientY: 130 });
+    fireEvent.pointerMove(nearHandle, { pointerId: 9, clientX: 200, clientY: 150 });
+
+    expect(nearRotate).toHaveBeenLastCalledWith('print-1', 350);
+
+    unmount();
+
+    const farRotate = vi.fn();
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={farRotate} />);
+
+    const farHandle = screen.getByRole('button', { name: 'Rotate print' });
+    fireEvent.pointerDown(farHandle, { pointerId: 10, clientX: 250, clientY: 130 });
+    fireEvent.pointerMove(farHandle, { pointerId: 10, clientX: 250, clientY: 150 });
+
+    expect(farRotate).toHaveBeenLastCalledWith('print-1', 350);
+  });
+
+  it('keeps clockwise rotation stable while the pointer crosses the print center', () => {
     const onRotate = vi.fn();
-    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 350 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
 
     const handle = screen.getByRole('button', { name: 'Rotate print' });
     handle.setPointerCapture = vi.fn();
-    fireEvent.pointerDown(handle, { pointerId: 9, clientX: 100, clientY: 139 });
-    fireEvent.pointerMove(handle, { pointerId: 9, clientX: 100, clientY: 121 });
+    fireEvent.pointerDown(handle, { pointerId: 11, clientX: 250, clientY: 130 });
+    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 250, clientY: 150 });
+    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 150, clientY: 130 });
+    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 140, clientY: 130 });
 
-    expect(handle.setPointerCapture).toHaveBeenCalledWith(9);
-    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(329.6, 0));
+    expect(handle.setPointerCapture).toHaveBeenCalledWith(11);
+    expect(onRotate.mock.calls[1]).toEqual(['print-1', 350]);
+    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(349, 0));
+  });
 
-    fireEvent.pointerMove(handle, { pointerId: 9, clientX: 200, clientY: 130 });
-    fireEvent.pointerMove(handle, { pointerId: 9, clientX: 150, clientY: 180 });
-    fireEvent.pointerMove(handle, { pointerId: 9, clientX: 100, clientY: 130 });
-    fireEvent.pointerMove(handle, { pointerId: 9, clientX: 150, clientY: 80 });
-    fireEvent.pointerMove(handle, { pointerId: 9, clientX: 200, clientY: 130 });
+  it('limits a large pointer event to twenty-four degrees', () => {
+    const onRotate = vi.fn();
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
 
-    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(160, 0));
+    const handle = screen.getByRole('button', { name: 'Rotate print' });
+    fireEvent.pointerDown(handle, { pointerId: 12, clientX: 250, clientY: 130 });
+    fireEvent.pointerMove(handle, { pointerId: 12, clientX: 250, clientY: 1000 });
+
+    expect(onRotate).toHaveBeenLastCalledWith('print-1', 336);
   });
 
   it('does not change rotation for a click without pointer movement', () => {

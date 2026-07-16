@@ -70,7 +70,7 @@ describe('ProductStage print toolbar', () => {
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({
-        printItems: [expect.objectContaining({ id: 'print-1', rotation: expect.closeTo(270, 0) })],
+        printItems: [expect.objectContaining({ id: 'print-1', rotation: expect.closeTo(336, 0) })],
       }),
     }));
   });

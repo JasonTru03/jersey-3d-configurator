@@ -2,7 +2,7 @@
 
 日期：2026-07-16  
 分支：`codex/inline-print-selection-controls`  
-状态：功能、自动化验证与构建完成；待用户授权合入 `showcase` 和发布
+状态：已合入 `showcase`、已发布并完成公开静态资源验证
 
 ## 用户可见变化
 
@@ -56,4 +56,10 @@
 - `origin`：`JasonTru03/jersey-3d-configurator`
 - `backup`：`SuJianben/Custom-made-jerseys`
 
-尚未合并至 `showcase`，也尚未触发 Cloudflare 发布。发布前需用户明确授权“合入并发布”。若需要回退，使用合入 `showcase` 后生成的 merge commit 即可恢复到此前稳定版本。
+已在用户授权后合入并推送 `showcase`，合并提交为 `49aca14 merge: inline name set selection controls`。Cloudflare 的生产分支为 `showcase`，公开地址为：
+
+`https://jersey-3d-configurator.jason1064969838.workers.dev/`
+
+发布后验证结果：公开首页 HTTP 200，引用 `index-BS59VOV-.js`；该线上脚本包含 `print-selection-frame`、`Duplicate print` 和 `Selected print controls` 标识，确认本次贴边选中控件资源已部署。
+
+若需要回退，不改写历史：对 `49aca14` 执行保留主线的 revert，再推送 `showcase`，并重新验证公开地址。

@@ -8,10 +8,6 @@ import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
 const MIN_PRINT_COPY_DISTANCE = 0.24;
-const PRINT_TOOLBAR_WIDTH = 132;
-const PRINT_TOOLBAR_HEIGHT = 92;
-const PRINT_TOOLBAR_GAP = 10;
-const PRINT_TOOLBAR_SAFE_INSET = 12;
 
 export function selectDecorationMeshes(meshes) {
   const clothMeshes = meshes.filter((mesh) => DECORATION_MESH_NAME_PATTERN.test(mesh.name));
@@ -24,33 +20,30 @@ export function getNextPrintPlacement(candidates, occupiedPlacements) {
   ))) ?? null;
 }
 
-export function getPrintToolbarAnchor(projected, { width, height }) {
-  if (!width || !height || projected.x < -1 || projected.x > 1 || projected.y < -1 || projected.y > 1 || projected.z < -1 || projected.z > 1) {
-    return { visible: false };
-  }
+export function getPrintSelectionRect(projectedCorners, { width, height }) {
+  if (!width || !height || projectedCorners.length !== 4 || projectedCorners.some((corner) => (
+    corner.x < -1 || corner.x > 1 || corner.y < -1 || corner.y > 1 || corner.z < -1 || corner.z > 1
+  ))) return { visible: false };
 
-  const x = clamp(
-    Math.round((projected.x * 0.5 + 0.5) * width),
-    PRINT_TOOLBAR_SAFE_INSET,
-    Math.max(PRINT_TOOLBAR_SAFE_INSET, width - PRINT_TOOLBAR_SAFE_INSET),
-  );
-  const y = clamp(
-    Math.round((-projected.y * 0.5 + 0.5) * height),
-    PRINT_TOOLBAR_SAFE_INSET,
-    Math.max(PRINT_TOOLBAR_SAFE_INSET, height - PRINT_TOOLBAR_SAFE_INSET),
-  );
-  const horizontal = x + PRINT_TOOLBAR_WIDTH + PRINT_TOOLBAR_GAP > width ? 'left' : 'right';
-  const vertical = y - PRINT_TOOLBAR_HEIGHT - PRINT_TOOLBAR_GAP < 0 ? 'bottom' : 'top';
-
-  return { visible: true, x, y, placement: `${horizontal}-${vertical}` };
+  const points = projectedCorners.map((corner) => ({
+    x: Math.round((corner.x * 0.5 + 0.5) * width),
+    y: Math.round((-corner.y * 0.5 + 0.5) * height),
+  }));
+  const left = Math.min(...points.map((point) => point.x));
+  const right = Math.max(...points.map((point) => point.x));
+  const top = Math.min(...points.map((point) => point.y));
+  const bottom = Math.max(...points.map((point) => point.y));
+  if (right <= left || bottom <= top) return { visible: false };
+  return { visible: true, left, top, width: right - left, height: bottom - top };
 }
 
-export function hasPrintToolbarAnchorChanged(previous, next) {
+export function hasPrintSelectionRectChanged(previous, next) {
   return !previous
     || previous.visible !== next.visible
-    || previous.x !== next.x
-    || previous.y !== next.y
-    || previous.placement !== next.placement;
+    || previous.left !== next.left
+    || previous.top !== next.top
+    || previous.width !== next.width
+    || previous.height !== next.height;
 }
 
 export class GarmentRenderer {
@@ -102,7 +95,6 @@ export class GarmentRenderer {
     this.printLayers = new Map();
     this.activePrintId = null;
     this.lastPrintAnchor = null;
-    this.printAnchorPosition = new THREE.Vector3();
     this.isDraggingPrint = false;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
@@ -348,12 +340,9 @@ export class GarmentRenderer {
   syncPrintAnchor() {
     const plane = this.printPlane;
     const anchor = plane
-      ? getPrintToolbarAnchor(
-        plane.getWorldPosition(this.printAnchorPosition).project(this.camera),
-        this.host.getBoundingClientRect(),
-      )
+      ? getPrintSelectionRect(getPlaneProjectedCorners(plane, this.camera), this.host.getBoundingClientRect())
       : { visible: false };
-    if (!hasPrintToolbarAnchorChanged(this.lastPrintAnchor, anchor)) return;
+    if (!hasPrintSelectionRectChanged(this.lastPrintAnchor, anchor)) return;
     this.lastPrintAnchor = anchor;
     this.onPrintAnchorChange?.(anchor);
   }
@@ -643,8 +632,17 @@ function roundPlacement(value) {
   return Math.round(value * 10000) / 10000;
 }
 
-function clamp(value, minimum, maximum) {
-  return Math.min(maximum, Math.max(minimum, value));
+function getPlaneProjectedCorners(plane, camera) {
+  plane.geometry.computeBoundingBox();
+  const bounds = plane.geometry.boundingBox;
+  if (!bounds) return [];
+
+  return [
+    new THREE.Vector3(bounds.min.x, bounds.min.y, 0),
+    new THREE.Vector3(bounds.max.x, bounds.min.y, 0),
+    new THREE.Vector3(bounds.min.x, bounds.max.y, 0),
+    new THREE.Vector3(bounds.max.x, bounds.max.y, 0),
+  ].map((corner) => plane.localToWorld(corner).project(camera));
 }
 
 function distanceBetweenPlacements(first, second) {

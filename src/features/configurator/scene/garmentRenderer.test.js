@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { getNextPrintPlacement, getPrintSelectionRect, hasPrintSelectionRectChanged, selectDecorationMeshes } from './garmentRenderer.js';
+import { getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes } from './garmentRenderer.js';
 
 describe('garment decoration mesh selection', () => {
   it('uses cloth meshes instead of topstitch meshes for artwork placement', () => {
@@ -58,5 +58,14 @@ describe('garment decoration mesh selection', () => {
     expect(hasPrintSelectionRectChanged(selectionRect, selectionRect)).toBe(false);
     expect(hasPrintSelectionRectChanged(selectionRect, { ...selectionRect, width: 101 })).toBe(true);
     expect(hasPrintSelectionRectChanged(selectionRect, { visible: false })).toBe(true);
+  });
+
+  it('clears selection instead of placing a print when a pointer misses a print and decoration', () => {
+    expect(getPrintPointerDownAction({ hasPrintHit: false, handledDecoration: false })).toBe('deselect-print');
+  });
+
+  it('does not start a drag until the pointer has moved more than four pixels', () => {
+    expect(hasExceededPrintDragThreshold({ x: 100, y: 100 }, { clientX: 103, clientY: 102 })).toBe(false);
+    expect(hasExceededPrintDragThreshold({ x: 100, y: 100 }, { clientX: 105, clientY: 103 })).toBe(true);
   });
 });

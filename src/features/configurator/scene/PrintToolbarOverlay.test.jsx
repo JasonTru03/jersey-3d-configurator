@@ -27,6 +27,35 @@ describe('PrintToolbarOverlay', () => {
     expect(onScale).toHaveBeenCalledWith('print-1', expect.any(Number));
   });
 
+  it('captures the resize pointer and scales outward and inward within limits', () => {
+    const onScale = vi.fn();
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} onScale={onScale} />);
+
+    const handle = screen.getByRole('button', { name: 'Resize print' });
+    handle.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(handle, { pointerId: 7, clientX: 200, clientY: 160 });
+    fireEvent.pointerMove(handle, { pointerId: 7, clientX: 240, clientY: 200 });
+    fireEvent.pointerMove(handle, { pointerId: 7, clientX: 165, clientY: 135 });
+
+    expect(handle.setPointerCapture).toHaveBeenCalledWith(7);
+    expect(onScale.mock.calls[0][1]).toBeGreaterThan(1);
+    expect(onScale.mock.calls[1][1]).toBeLessThan(1);
+  });
+
+  it('keeps resize scale within the supported range', () => {
+    const onScale = vi.fn();
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} onScale={onScale} />);
+
+    const handle = screen.getByRole('button', { name: 'Resize print' });
+    handle.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(handle, { pointerId: 8, clientX: 200, clientY: 160 });
+    fireEvent.pointerMove(handle, { pointerId: 8, clientX: 1000, clientY: 1000 });
+    fireEvent.pointerMove(handle, { pointerId: 8, clientX: 150, clientY: 130 });
+
+    expect(onScale.mock.calls[0][1]).toBe(2.5);
+    expect(onScale.mock.calls[1][1]).toBe(0.45);
+  });
+
   it('uses the projected selection rectangle and hides when it is not visible', () => {
     const { rerender } = render(
       <PrintToolbarOverlay anchor={{ visible: true, left: 180, top: 220, width: 96, height: 54 }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} />,

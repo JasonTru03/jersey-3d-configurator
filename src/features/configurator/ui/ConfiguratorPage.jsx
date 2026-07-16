@@ -18,7 +18,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
+import { ensurePrintItems, getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
@@ -56,6 +56,18 @@ export function ConfiguratorPage() {
   const [theme, setTheme] = useState('light');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [fileError, setFileError] = useState('');
+
+  const handleLightingSelect = (lighting) => {
+    if (lighting === 'none') {
+      updateState({ lighting });
+      return;
+    }
+    const printItems = ensurePrintItems(getPrintItems(state.overrides));
+    updateState({
+      lighting,
+      overrides: { printItems, ...legacyFirstItemFields(printItems) },
+    });
+  };
 
   const handleSaveDesign = () => {
     const download = saveDesignFile();
@@ -120,6 +132,7 @@ export function ConfiguratorPage() {
             selected={selected}
             state={state}
             updateState={updateState}
+            onLightingSelect={handleLightingSelect}
             editingPrintId={editingPrintId}
             nameInputRef={nameInputRef}
           />
@@ -198,7 +211,7 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThem
   );
 }
 
-function ConfigPanel({ editingPrintId, nameInputRef, product, quote, section, selected, state, updateState }) {
+function ConfigPanel({ editingPrintId, nameInputRef, onLightingSelect, product, quote, section, selected, state, updateState }) {
   return (
     <aside className="config-panel">
       <PanelHeader labels={product.optionLabels} section={section} />
@@ -231,7 +244,7 @@ function ConfigPanel({ editingPrintId, nameInputRef, product, quote, section, se
             group="lighting"
             options={product.options.lighting}
             selectedId={state.lighting}
-            onSelect={(lighting) => updateState({ lighting })}
+            onSelect={onLightingSelect}
           />
           {state.lighting !== 'none' && (
             <PrintFields

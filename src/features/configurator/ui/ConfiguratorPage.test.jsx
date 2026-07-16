@@ -64,4 +64,21 @@ describe('ConfiguratorPage', () => {
       expect(screen.getByLabelText('Name')).toHaveFocus();
     });
   });
+
+  it('recreates a name set after its only print is deleted', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete print' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Edit print' })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+
+    expect(await screen.findByRole('button', { name: 'Edit print' })).toBeInTheDocument();
+  });
 });

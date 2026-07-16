@@ -455,6 +455,9 @@ export class GarmentRenderer {
       event.preventDefault();
       return;
     }
+    this.onPrintSelectionChange?.(null);
+    this.lastPrintAnchor = null;
+    this.onPrintAnchorChange?.({ visible: false });
     if (!this.printPlane || !this.isPrintEditable()) return;
     const hit = this.pickJersey(event);
     if (!hit) return;

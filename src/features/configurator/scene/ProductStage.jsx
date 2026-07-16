@@ -1,5 +1,5 @@
 import { Rotate3D, SlidersHorizontal, ZoomIn } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GarmentRenderer } from './garmentRenderer.js';
 import { KeyboardRenderer } from './keyboardRenderer.js';
 import { PrintToolbarOverlay } from './PrintToolbarOverlay.jsx';
@@ -23,10 +23,17 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
   const [view, setView] = useState('orbit');
   const printItems = state?.lighting && state.lighting !== 'none' ? getPrintItems(state.overrides) : [];
   const [activePrintId, setActivePrintId] = useState(null);
+  const [selectedPrintId, setSelectedPrintId] = useState(null);
   const [printAnchor, setPrintAnchor] = useState({ visible: false });
+
+  const handlePrintSelectionChange = useCallback((id) => {
+    setActivePrintId(id);
+    setSelectedPrintId(id);
+  }, []);
 
   useEffect(() => {
     setActivePrintId((current) => printItems.some((item) => item.id === current) ? current : printItems[0]?.id ?? null);
+    setSelectedPrintId((current) => printItems.some((item) => item.id === current) ? current : null);
   }, [state]);
 
   const patchPrint = (id, patch) => {
@@ -42,7 +49,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
     try {
       rendererRef.current = new Renderer(hostRef.current, {
         onPrintAnchorChange: setPrintAnchor,
-        onPrintSelectionChange: setActivePrintId,
+        onPrintSelectionChange: handlePrintSelectionChange,
         onStatePatch,
       });
       rendererRef.current.update(product, state, selected);
@@ -68,9 +75,9 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
     if (rendererRef.current) {
       rendererRef.current.onStatePatch = onStatePatch;
       rendererRef.current.onPrintAnchorChange = setPrintAnchor;
-      rendererRef.current.onPrintSelectionChange = setActivePrintId;
+      rendererRef.current.onPrintSelectionChange = handlePrintSelectionChange;
     }
-  }, [onStatePatch]);
+  }, [handlePrintSelectionChange, onStatePatch]);
 
   useEffect(() => {
     rendererRef.current?.setView(view);
@@ -109,8 +116,8 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
           <BoxIcon />
         </div>
         <PrintToolbarOverlay
-          anchor={printAnchor}
-          item={printItems.find((item) => item.id === activePrintId)}
+          anchor={selectedPrintId === activePrintId ? printAnchor : { visible: false }}
+          item={printItems.find((item) => item.id === selectedPrintId)}
           onCopy={(id) => {
             const placement = getNextPrintPlacement(printCopyCandidates, printItems.map((item) => item.placement).filter(Boolean));
             const copy = duplicatePrintItem(printItems, id, placement);
@@ -118,10 +125,12 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
             const nextItems = [...printItems, copy];
             onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
             setActivePrintId(copy.id);
+            setSelectedPrintId(copy.id);
           }}
           onDelete={(id) => {
             const nextItems = removePrintItem(printItems, id);
             setActivePrintId(null);
+            setSelectedPrintId(null);
             setPrintAnchor({ visible: false });
             onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
           }}

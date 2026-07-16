@@ -3,6 +3,7 @@ import { useRef } from 'react';
 
 const MIN_PRINT_SCALE = 0.45;
 const MAX_PRINT_SCALE = 2.5;
+const PRINT_RESIZE_DISTANCE = 96;
 
 function getDistanceFromCenter(centerX, centerY, clientX, clientY) {
   return Math.hypot(clientX - centerX, clientY - centerY);
@@ -10,7 +11,7 @@ function getDistanceFromCenter(centerX, centerY, clientX, clientY) {
 
 function getResizeScale(start, clientX, clientY) {
   const distance = getDistanceFromCenter(start.centerX, start.centerY, clientX, clientY);
-  return Math.min(MAX_PRINT_SCALE, Math.max(MIN_PRINT_SCALE, start.scale + (distance - start.distance) / 160));
+  return Math.min(MAX_PRINT_SCALE, Math.max(MIN_PRINT_SCALE, start.scale + (distance - start.distance) / PRINT_RESIZE_DISTANCE));
 }
 
 export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {

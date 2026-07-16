@@ -4,6 +4,9 @@ import { useRef } from 'react';
 const MIN_PRINT_SCALE = 0.45;
 const MAX_PRINT_SCALE = 2.5;
 const PRINT_RESIZE_DISTANCE = 96;
+const ROTATION_CENTER_PROTECTION_RADIUS = 32;
+const ROTATION_DEGREES_PER_PIXEL = 0.5;
+const MAX_ROTATION_DELTA = 24;
 
 function getDistanceFromCenter(centerX, centerY, clientX, clientY) {
   return Math.hypot(clientX - centerX, clientY - centerY);
@@ -14,16 +17,24 @@ function getResizeScale(start, clientX, clientY) {
   return Math.min(MAX_PRINT_SCALE, Math.max(MIN_PRINT_SCALE, start.scale + (distance - start.distance) / PRINT_RESIZE_DISTANCE));
 }
 
-function getPointerAngle(centerX, centerY, clientX, clientY) {
-  return Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI);
-}
-
 function normalizePrintRotation(degrees) {
   return ((degrees % 360) + 360) % 360;
 }
 
-function getShortestAngleDelta(previous, next) {
-  return ((next - previous + 540) % 360) - 180;
+function getRadialDirection(centerX, centerY, clientX, clientY) {
+  const x = clientX - centerX;
+  const y = clientY - centerY;
+  const distance = Math.hypot(x, y);
+  if (distance < ROTATION_CENTER_PROTECTION_RADIUS) return null;
+  return { x: x / distance, y: y / distance };
+}
+
+function getClockwiseTangent(direction) {
+  return { x: -direction.y, y: direction.x };
+}
+
+function clampRotationDelta(delta) {
+  return Math.min(MAX_ROTATION_DELTA, Math.max(-MAX_ROTATION_DELTA, delta));
 }
 
 export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
@@ -67,11 +78,14 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
     const centerY = anchor.top + anchor.height / 2;
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    const radialDirection = getRadialDirection(centerX, centerY, event.clientX, event.clientY) ?? { x: 1, y: 0 };
     rotationStart.current = {
       pointerId: event.pointerId,
       centerX,
       centerY,
-      angle: getPointerAngle(centerX, centerY, event.clientX, event.clientY),
+      lastX: event.clientX,
+      lastY: event.clientY,
+      radialDirection,
       rotation: normalizePrintRotation(item.rotation ?? 0),
     };
   };
@@ -80,9 +94,13 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
     const start = rotationStart.current;
     if (!start || start.pointerId !== event.pointerId || !onRotate) return;
     event.preventDefault();
-    const angle = getPointerAngle(start.centerX, start.centerY, event.clientX, event.clientY);
-    const rotation = normalizePrintRotation(start.rotation - getShortestAngleDelta(start.angle, angle));
-    rotationStart.current = { ...start, angle, rotation };
+    const dx = event.clientX - start.lastX;
+    const dy = event.clientY - start.lastY;
+    const tangent = getClockwiseTangent(start.radialDirection);
+    const delta = clampRotationDelta((dx * tangent.x + dy * tangent.y) * ROTATION_DEGREES_PER_PIXEL);
+    const rotation = normalizePrintRotation(start.rotation - delta);
+    const radialDirection = getRadialDirection(start.centerX, start.centerY, event.clientX, event.clientY) ?? start.radialDirection;
+    rotationStart.current = { ...start, lastX: event.clientX, lastY: event.clientY, radialDirection, rotation };
     onRotate(item.id, rotation);
   };
 

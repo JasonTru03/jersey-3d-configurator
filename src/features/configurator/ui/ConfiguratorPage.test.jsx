@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfiguratorPage } from './ConfiguratorPage.jsx';
+
+const rendererHarness = vi.hoisted(() => ({ options: null }));
 
 vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -8,11 +10,12 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
     ...actual,
     GarmentRenderer: class {
       constructor(host, options) {
+        rendererHarness.options = options;
         this.onPrintAnchorChange = options.onPrintAnchorChange;
       }
 
       update() {
-        this.onPrintAnchorChange?.({ visible: true, x: 180, y: 220, placement: 'right-top' });
+        this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
       }
 
       setActivePrintId() {}
@@ -30,6 +33,10 @@ beforeAll(() => {
 
 afterAll(() => {
   vi.unstubAllGlobals();
+});
+
+beforeEach(() => {
+  rendererHarness.options = null;
 });
 
 describe('ConfiguratorPage', () => {
@@ -88,6 +95,7 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Edit print' }));
 
     await waitFor(() => {
@@ -101,6 +109,7 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete print' }));
 
     await waitFor(() => {
@@ -109,6 +118,6 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
 
-    expect(await screen.findByRole('button', { name: 'Edit print' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit print' })).not.toBeInTheDocument();
   });
 });

@@ -15,7 +15,7 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
       }
 
       update() {
-        this.onPrintAnchorChange?.({ visible: true, x: 180, y: 220, placement: 'right-top' });
+        this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
       }
 
       setView() {}
@@ -46,10 +46,23 @@ beforeEach(() => {
 });
 
 describe('ProductStage print toolbar', () => {
+  it('only shows controls after a print is selected and hides them after blank-stage selection clears', () => {
+    render(<ProductStage onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
+
+    expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
+
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
+    expect(screen.getByRole('group', { name: 'Selected print controls' })).toBeInTheDocument();
+
+    act(() => rendererHarness.options.onPrintSelectionChange(null));
+    expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
+  });
+
   it('rotates the active print through the state patch callback', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Rotate print right' }));
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
@@ -63,6 +76,7 @@ describe('ProductStage print toolbar', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete print' }));
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
@@ -74,6 +88,7 @@ describe('ProductStage print toolbar', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', placement: { x: 0, y: 0.36, z: 0.5 } }] } }} />);
 
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate print' }));
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
@@ -89,6 +104,7 @@ describe('ProductStage print toolbar', () => {
     const onEditPrint = vi.fn();
     render(<ProductStage onEditPrint={onEditPrint} onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
 
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Edit print' }));
 
     expect(onEditPrint).toHaveBeenCalledWith('print-1');
@@ -98,6 +114,7 @@ describe('ProductStage print toolbar', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     const handle = screen.getByRole('button', { name: 'Resize print' });
     fireEvent.pointerDown(handle, { clientX: 10, clientY: 10 });
     fireEvent.pointerMove(handle, { clientX: 50, clientY: 10 });
@@ -107,17 +124,18 @@ describe('ProductStage print toolbar', () => {
     }));
   });
 
-  it('hides the toolbar without an anchor and positions it beside the selected print', async () => {
+  it('hides the toolbar without a visible selection rectangle', async () => {
     render(<ProductStage onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
 
+    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     await waitFor(() => {
-      expect(screen.getByRole('group', { name: 'Selected print controls' })).toHaveClass('is-right-top');
+      expect(screen.getByRole('group', { name: 'Selected print controls' })).toBeInTheDocument();
     });
 
     act(() => rendererHarness.options.onPrintAnchorChange({ visible: false }));
     expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
 
-    act(() => rendererHarness.options.onPrintAnchorChange({ visible: true, x: 300, y: 80, placement: 'left-bottom' }));
-    expect(screen.getByRole('group', { name: 'Selected print controls' })).toHaveClass('is-left-bottom');
+    act(() => rendererHarness.options.onPrintAnchorChange({ visible: true, left: 300, top: 80, width: 96, height: 54 }));
+    expect(screen.getByRole('group', { name: 'Selected print controls' })).toBeInTheDocument();
   });
 });

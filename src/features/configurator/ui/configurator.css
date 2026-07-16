@@ -229,40 +229,27 @@
 
 .print-toolbar-overlay {
   position: absolute;
+  inset: 0;
   z-index: 3;
-  top: var(--print-anchor-y);
-  left: var(--print-anchor-x);
-  display: grid;
-  grid-template-columns: repeat(3, 32px);
-  gap: 8px;
-  padding: 8px;
+  pointer-events: none;
+}
+
+.print-selection-frame {
+  position: absolute;
+  top: var(--print-top);
+  left: var(--print-left);
+  width: var(--print-width);
+  height: var(--print-height);
   border: 2px solid #ef5d43;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--panel) 84%, transparent);
-  box-shadow: 0 6px 20px rgba(16, 17, 21, 0.16);
-  backdrop-filter: blur(8px);
+  border-radius: 3px;
+  pointer-events: none;
 }
 
-.print-toolbar-overlay.is-right-top {
-  transform: translate(10px, calc(-100% - 10px));
-}
-
-.print-toolbar-overlay.is-left-top {
-  transform: translate(calc(-100% - 10px), calc(-100% - 10px));
-}
-
-.print-toolbar-overlay.is-right-bottom {
-  transform: translate(10px, 10px);
-}
-
-.print-toolbar-overlay.is-left-bottom {
-  transform: translate(calc(-100% - 10px), 10px);
-}
-
-.print-toolbar-overlay button {
+.print-control {
+  position: absolute;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   padding: 0;
   border: 1px solid var(--line);
@@ -270,10 +257,38 @@
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
+  pointer-events: auto;
 }
 
-.print-toolbar-overlay button:hover,
-.print-toolbar-overlay button:focus-visible {
+.print-control--edit {
+  top: calc(var(--print-top) - 14px);
+  left: calc(var(--print-left) - 14px);
+}
+
+.print-control--rotate {
+  top: calc(var(--print-top) - 14px);
+  left: calc(var(--print-left) + var(--print-width) - 14px);
+}
+
+.print-control--delete {
+  top: calc(var(--print-top) + var(--print-height) - 14px);
+  left: calc(var(--print-left) - 14px);
+}
+
+.print-control--duplicate {
+  top: calc(var(--print-top) + var(--print-height) - 14px);
+  left: calc(var(--print-left) + (var(--print-width) - 28px) / 2);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.print-control--resize {
+  top: calc(var(--print-top) + var(--print-height) - 14px);
+  left: calc(var(--print-left) + var(--print-width) - 14px);
+}
+
+.print-control:hover,
+.print-control:focus-visible {
   border-color: var(--accent);
   color: var(--accent);
   outline: none;

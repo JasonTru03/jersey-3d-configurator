@@ -135,7 +135,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
             onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
           }}
           onEdit={(id) => onEditPrint?.(id)}
-          onRotate={(id, degrees) => patchPrint(id, { rotation: (printItems.find((item) => item.id === id)?.rotation ?? 0) + degrees })}
+          onRotate={(id, rotation) => patchPrint(id, { rotation })}
           onScale={(id, scale) => patchPrint(id, { scale })}
         />
       </div>

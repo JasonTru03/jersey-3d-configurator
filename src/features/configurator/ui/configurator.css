@@ -285,6 +285,7 @@
 .print-control--resize {
   top: calc(var(--print-top) + var(--print-height) - 14px);
   left: calc(var(--print-left) + var(--print-width) - 14px);
+  touch-action: none;
 }
 
 .print-control:hover,

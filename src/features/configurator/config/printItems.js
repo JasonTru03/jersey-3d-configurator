@@ -37,6 +37,11 @@ export function getPrintItems(overrides = {}) {
   })];
 }
 
+export function ensurePrintItems(items) {
+  if (items.length) return items;
+  return [createPrintItem()];
+}
+
 export function patchPrintItem(items, id, patch) {
   return items.map((item) => item.id === id ? createPrintItem({ ...item, ...patch }) : item);
 }

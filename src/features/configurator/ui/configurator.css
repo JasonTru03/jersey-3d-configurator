@@ -230,8 +230,8 @@
 .print-toolbar-overlay {
   position: absolute;
   z-index: 3;
-  top: 42%;
-  left: 50%;
+  top: var(--print-anchor-y);
+  left: var(--print-anchor-x);
   display: grid;
   grid-template-columns: repeat(3, 32px);
   gap: 8px;
@@ -240,8 +240,23 @@
   border-radius: 6px;
   background: color-mix(in srgb, var(--panel) 84%, transparent);
   box-shadow: 0 6px 20px rgba(16, 17, 21, 0.16);
-  transform: translate(-50%, -50%);
   backdrop-filter: blur(8px);
+}
+
+.print-toolbar-overlay.is-right-top {
+  transform: translate(10px, calc(-100% - 10px));
+}
+
+.print-toolbar-overlay.is-left-top {
+  transform: translate(calc(-100% - 10px), calc(-100% - 10px));
+}
+
+.print-toolbar-overlay.is-right-bottom {
+  transform: translate(10px, 10px);
+}
+
+.print-toolbar-overlay.is-left-bottom {
+  transform: translate(calc(-100% - 10px), 10px);
 }
 
 .print-toolbar-overlay button {

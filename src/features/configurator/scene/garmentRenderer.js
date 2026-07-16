@@ -8,6 +8,10 @@ import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
 const MIN_PRINT_COPY_DISTANCE = 0.24;
+const PRINT_TOOLBAR_WIDTH = 132;
+const PRINT_TOOLBAR_HEIGHT = 92;
+const PRINT_TOOLBAR_GAP = 10;
+const PRINT_TOOLBAR_SAFE_INSET = 12;
 
 export function selectDecorationMeshes(meshes) {
   const clothMeshes = meshes.filter((mesh) => DECORATION_MESH_NAME_PATTERN.test(mesh.name));
@@ -20,10 +24,40 @@ export function getNextPrintPlacement(candidates, occupiedPlacements) {
   ))) ?? null;
 }
 
+export function getPrintToolbarAnchor(projected, { width, height }) {
+  if (!width || !height || projected.x < -1 || projected.x > 1 || projected.y < -1 || projected.y > 1 || projected.z < -1 || projected.z > 1) {
+    return { visible: false };
+  }
+
+  const x = clamp(
+    Math.round((projected.x * 0.5 + 0.5) * width),
+    PRINT_TOOLBAR_SAFE_INSET,
+    Math.max(PRINT_TOOLBAR_SAFE_INSET, width - PRINT_TOOLBAR_SAFE_INSET),
+  );
+  const y = clamp(
+    Math.round((-projected.y * 0.5 + 0.5) * height),
+    PRINT_TOOLBAR_SAFE_INSET,
+    Math.max(PRINT_TOOLBAR_SAFE_INSET, height - PRINT_TOOLBAR_SAFE_INSET),
+  );
+  const horizontal = x + PRINT_TOOLBAR_WIDTH + PRINT_TOOLBAR_GAP > width ? 'left' : 'right';
+  const vertical = y - PRINT_TOOLBAR_HEIGHT - PRINT_TOOLBAR_GAP < 0 ? 'bottom' : 'top';
+
+  return { visible: true, x, y, placement: `${horizontal}-${vertical}` };
+}
+
+export function hasPrintToolbarAnchorChanged(previous, next) {
+  return !previous
+    || previous.visible !== next.visible
+    || previous.x !== next.x
+    || previous.y !== next.y
+    || previous.placement !== next.placement;
+}
+
 export class GarmentRenderer {
   constructor(host, options = {}) {
     this.host = host;
     this.onStatePatch = options.onStatePatch;
+    this.onPrintAnchorChange = options.onPrintAnchorChange;
     this.onPrintSelectionChange = options.onPrintSelectionChange;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#f3f1ec');
@@ -67,6 +101,8 @@ export class GarmentRenderer {
     this.pointer = new THREE.Vector2();
     this.printLayers = new Map();
     this.activePrintId = null;
+    this.lastPrintAnchor = null;
+    this.printAnchorPosition = new THREE.Vector3();
     this.isDraggingPrint = false;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
@@ -92,6 +128,12 @@ export class GarmentRenderer {
     return this.printLayers.get(this.activePrintId)?.plane
       ?? this.printLayers.values().next().value?.plane
       ?? null;
+  }
+
+  setActivePrintId(id) {
+    if (this.activePrintId === id) return;
+    this.activePrintId = id;
+    this.syncPrintAnchor();
   }
 
   update(product, state, selected) {
@@ -299,8 +341,22 @@ export class GarmentRenderer {
   animate = () => {
     this.frame = requestAnimationFrame(this.animate);
     this.controls.update();
+    this.syncPrintAnchor();
     this.renderer.render(this.scene, this.camera);
   };
+
+  syncPrintAnchor() {
+    const plane = this.printPlane;
+    const anchor = plane
+      ? getPrintToolbarAnchor(
+        plane.getWorldPosition(this.printAnchorPosition).project(this.camera),
+        this.host.getBoundingClientRect(),
+      )
+      : { visible: false };
+    if (!hasPrintToolbarAnchorChanged(this.lastPrintAnchor, anchor)) return;
+    this.lastPrintAnchor = anchor;
+    this.onPrintAnchorChange?.(anchor);
+  }
 
   disposeGroup(group) {
     group.traverse((item) => {
@@ -378,6 +434,7 @@ export class GarmentRenderer {
     this.printLayers.clear();
     this.activePrintId = null;
     this.isDraggingPrint = false;
+    this.syncPrintAnchor();
   }
 
   disposePrintLayerEntry(layer) {
@@ -392,6 +449,7 @@ export class GarmentRenderer {
     if (printHit) {
       this.activePrintId = printHit.object.userData.printId;
       this.onPrintSelectionChange?.(this.activePrintId);
+      this.syncPrintAnchor();
       if (this.isPrintEditable()) {
         const hit = this.pickJersey(event);
         if (hit) {
@@ -583,6 +641,10 @@ function sanitizePrintText(value) {
 
 function roundPlacement(value) {
   return Math.round(value * 10000) / 10000;
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function distanceBetweenPlacements(first, second) {

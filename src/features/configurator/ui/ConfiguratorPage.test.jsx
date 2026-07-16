@@ -1,6 +1,36 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ConfiguratorPage } from './ConfiguratorPage.jsx';
+
+vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    GarmentRenderer: class {
+      constructor(host, options) {
+        this.onPrintAnchorChange = options.onPrintAnchorChange;
+      }
+
+      update() {
+        this.onPrintAnchorChange?.({ visible: true, x: 180, y: 220, placement: 'right-top' });
+      }
+
+      setActivePrintId() {}
+
+      setView() {}
+
+      dispose() {}
+    },
+  };
+});
+
+beforeAll(() => {
+  vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('ConfiguratorPage', () => {
   it('loads the jersey product and updates the quote when an extra is toggled', async () => {
@@ -63,5 +93,22 @@ describe('ConfiguratorPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Name')).toHaveFocus();
     });
+  });
+
+  it('recreates a name set after its only print is deleted', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete print' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Edit print' })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+
+    expect(await screen.findByRole('button', { name: 'Edit print' })).toBeInTheDocument();
   });
 });

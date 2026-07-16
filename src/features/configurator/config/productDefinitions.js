@@ -70,6 +70,16 @@ export const jerseyProduct = {
         y: 0.36,
         z: 0.5,
       },
+      printItems: [
+        {
+          id: 'print-1',
+          name: 'PLAYER',
+          number: '16',
+          placement: { x: 0, y: 0.36, z: 0.5 },
+          scale: 1,
+          rotation: 0,
+        },
+      ],
       decorations: [],
     },
   },

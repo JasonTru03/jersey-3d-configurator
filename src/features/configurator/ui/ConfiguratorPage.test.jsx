@@ -52,4 +52,16 @@ describe('ConfiguratorPage', () => {
 
     expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
   });
+
+  it('focuses the name field when editing a selected print', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit print' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Name')).toHaveFocus();
+    });
+  });
 });

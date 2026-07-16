@@ -3,19 +3,28 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DecorationEditor } from './decorationEditor.js';
+import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
+const MIN_PRINT_COPY_DISTANCE = 0.24;
 
 export function selectDecorationMeshes(meshes) {
   const clothMeshes = meshes.filter((mesh) => DECORATION_MESH_NAME_PATTERN.test(mesh.name));
   return clothMeshes.length ? clothMeshes : meshes;
 }
 
+export function getNextPrintPlacement(candidates, occupiedPlacements) {
+  return candidates.find((candidate) => occupiedPlacements.every((occupied) => (
+    distanceBetweenPlacements(candidate, occupied) >= MIN_PRINT_COPY_DISTANCE
+  ))) ?? null;
+}
+
 export class GarmentRenderer {
   constructor(host, options = {}) {
     this.host = host;
     this.onStatePatch = options.onStatePatch;
+    this.onPrintSelectionChange = options.onPrintSelectionChange;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#f3f1ec');
     this.camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
@@ -56,9 +65,8 @@ export class GarmentRenderer {
     this.decorationMeshes = [];
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
-    this.printPlane = null;
-    this.printTexture = null;
-    this.printMaterial = null;
+    this.printLayers = new Map();
+    this.activePrintId = null;
     this.isDraggingPrint = false;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
@@ -78,6 +86,12 @@ export class GarmentRenderer {
     this.resizeObserver.observe(host);
     this.resize();
     this.animate();
+  }
+
+  get printPlane() {
+    return this.printLayers.get(this.activePrintId)?.plane
+      ?? this.printLayers.values().next().value?.plane
+      ?? null;
   }
 
   update(product, state, selected) {
@@ -296,76 +310,99 @@ export class GarmentRenderer {
   }
 
   updatePrintLayer() {
-    const printEnabled = this.state?.lighting && this.state.lighting !== 'none';
-    if (!printEnabled) {
+    const printItems = this.state?.lighting && this.state.lighting !== 'none'
+      ? getPrintItems(this.state?.overrides)
+      : [];
+    if (!printItems.length) {
       this.disposePrintLayer();
       return;
     }
 
-    if (!this.printPlane) {
-      this.printTexture = new THREE.CanvasTexture(makePrintCanvas(this.getPrintOptions()));
-      this.printTexture.colorSpace = THREE.SRGBColorSpace;
-      this.printMaterial = new THREE.MeshBasicMaterial({
-        map: this.printTexture,
-        transparent: true,
-        depthTest: true,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      this.printPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.42), this.printMaterial);
-      this.printPlane.renderOrder = 4;
-      this.scene.add(this.printPlane);
-    }
+    const ids = new Set(printItems.map((item) => item.id));
+    this.printLayers.forEach((layer, id) => {
+      if (ids.has(id)) return;
+      this.disposePrintLayerEntry(layer);
+      this.printLayers.delete(id);
+    });
+    printItems.forEach((item) => this.updatePrintLayerEntry(item));
+  }
 
-    this.redrawPrintTexture();
-    this.applyStoredPrintPlacement();
+  updatePrintLayerEntry(item) {
+    let layer = this.printLayers.get(item.id);
+    if (!layer) {
+      const texture = new THREE.CanvasTexture(makePrintCanvas(this.getPrintOptions(item)));
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.42), material);
+      plane.renderOrder = 4;
+      plane.userData.printId = item.id;
+      this.scene.add(plane);
+      layer = { material, plane, texture };
+      this.printLayers.set(item.id, layer);
+    }
+    layer.texture.image = makePrintCanvas(this.getPrintOptions(item));
+    layer.texture.needsUpdate = true;
+    this.applyStoredPrintPlacement(layer.plane, item);
   }
 
   redrawPrintTexture() {
-    if (!this.printTexture) return;
-    const nextCanvas = makePrintCanvas(this.getPrintOptions());
-    this.printTexture.image = nextCanvas;
-    this.printTexture.needsUpdate = true;
+    getPrintItems(this.state?.overrides).forEach((item) => this.updatePrintLayerEntry(item));
   }
 
-  getPrintOptions() {
-    const overrides = this.state?.overrides ?? {};
+  getPrintOptions(item) {
     return {
-      name: sanitizePrintText(overrides.printName ?? 'PLAYER'),
-      number: sanitizePrintText(overrides.printNumber ?? '16'),
+      name: sanitizePrintText(item.name ?? 'PLAYER'),
+      number: sanitizePrintText(item.number ?? '16'),
       color: this.printColor,
       raised: this.state?.lighting === 'raised-print',
     };
   }
 
-  applyStoredPrintPlacement() {
-    if (!this.printPlane) return;
-    const stored = this.state?.overrides?.printPlacement ?? DEFAULT_PRINT_POSITION;
-    this.printPlane.position.set(stored.x, stored.y, stored.z);
+  applyStoredPrintPlacement(plane, item) {
+    const stored = item.placement ?? DEFAULT_PRINT_POSITION;
+    plane.position.set(stored.x, stored.y, stored.z);
     if (stored.normal) {
-      this.printPlane.quaternion.setFromUnitVectors(
+      plane.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 0, 1),
         new THREE.Vector3(stored.normal.x, stored.normal.y, stored.normal.z).normalize(),
       );
     } else {
-      this.printPlane.quaternion.identity();
+      plane.quaternion.identity();
     }
+    plane.rotateZ(THREE.MathUtils.degToRad(item.rotation ?? 0));
+    plane.scale.setScalar(item.scale ?? 1);
   }
 
   disposePrintLayer() {
-    if (this.printPlane) {
-      this.scene.remove(this.printPlane);
-      this.printPlane.geometry.dispose();
-      this.printPlane = null;
-    }
-    this.printMaterial?.dispose();
-    this.printMaterial = null;
-    this.printTexture?.dispose();
-    this.printTexture = null;
+    this.printLayers.forEach((layer) => this.disposePrintLayerEntry(layer));
+    this.printLayers.clear();
+    this.activePrintId = null;
     this.isDraggingPrint = false;
   }
 
+  disposePrintLayerEntry(layer) {
+    this.scene.remove(layer.plane);
+    layer.plane.geometry.dispose();
+    layer.material.dispose();
+    layer.texture.dispose();
+  }
+
   handlePointerDown = (event) => {
+    const printHit = this.pickPrint(event);
+    if (printHit) {
+      this.activePrintId = printHit.object.userData.printId;
+      this.onPrintSelectionChange?.(this.activePrintId);
+      if (this.isPrintEditable()) {
+        const hit = this.pickJersey(event);
+        if (hit) {
+          this.isDraggingPrint = true;
+          this.controls.enabled = false;
+          this.placePrintAtIntersection(hit, true);
+        }
+      }
+      event.preventDefault();
+      return;
+    }
     if (this.decorationEditor?.handlePointerDown(event)) {
       this.controls.enabled = !this.decorationEditor.isEditing();
       event.preventDefault();
@@ -415,6 +452,14 @@ export class GarmentRenderer {
     return this.raycaster.intersectObjects(this.decorationMeshes, false)[0] ?? null;
   }
 
+  pickPrint(event) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    return this.raycaster.intersectObjects([...this.printLayers.values()].map((layer) => layer.plane), false)[0] ?? null;
+  }
+
   placePrintAtIntersection(hit, animate = false) {
     const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
     const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
@@ -438,18 +483,25 @@ export class GarmentRenderer {
   emitPrintPlacement() {
     if (!this.printPlane || !this.onStatePatch) return;
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(this.printPlane.quaternion).normalize();
+    const placement = {
+      x: roundPlacement(this.printPlane.position.x),
+      y: roundPlacement(this.printPlane.position.y),
+      z: roundPlacement(this.printPlane.position.z),
+      normal: {
+        x: roundPlacement(normal.x),
+        y: roundPlacement(normal.y),
+        z: roundPlacement(normal.z),
+      },
+    };
+    const printItems = getPrintItems(this.state?.overrides);
+    const activePrintId = this.activePrintId ?? printItems[0]?.id;
+    const nextItems = activePrintId
+      ? patchPrintItem(printItems, activePrintId, { placement })
+      : printItems;
     this.onStatePatch({
       overrides: {
-        printPlacement: {
-          x: roundPlacement(this.printPlane.position.x),
-          y: roundPlacement(this.printPlane.position.y),
-          z: roundPlacement(this.printPlane.position.z),
-          normal: {
-            x: roundPlacement(normal.x),
-            y: roundPlacement(normal.y),
-            z: roundPlacement(normal.z),
-          },
-        },
+        printItems: nextItems,
+        ...legacyFirstItemFields(nextItems),
       },
     });
   }
@@ -531,4 +583,8 @@ function sanitizePrintText(value) {
 
 function roundPlacement(value) {
   return Math.round(value * 10000) / 10000;
+}
+
+function distanceBetweenPlacements(first, second) {
+  return Math.hypot(first.x - second.x, first.y - second.y, first.z - second.z);
 }

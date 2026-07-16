@@ -10,11 +10,12 @@ export class DesignDocumentError extends Error {
 }
 
 export function createDesignDocument({ productId, variantId = null, state, savedAt = new Date().toISOString() }) {
+  const normalizedState = normalizePrintState(state);
   return {
     format: DESIGN_DOCUMENT_FORMAT,
     productId,
     savedAt,
-    state: structuredClone(state),
+    state: structuredClone(normalizedState),
     variantId,
     version: DESIGN_DOCUMENT_VERSION,
   };
@@ -41,10 +42,34 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState }
     throw new DesignDocumentError('invalid-state', 'This design file does not contain a design state.');
   }
 
+  const documentOverrides = document.state.overrides ?? {};
+  const mergedOverrides = { ...defaultState.overrides, ...documentOverrides };
+  const printSource = hasDocumentPrintData(documentOverrides) ? documentOverrides : mergedOverrides;
+  const printItems = getPrintItems(printSource);
+
   return {
     ...structuredClone(defaultState),
     ...structuredClone(document.state),
     extras: { ...defaultState.extras, ...document.state.extras },
-    overrides: { ...defaultState.overrides, ...document.state.overrides },
+    overrides: {
+      ...mergedOverrides,
+      printItems,
+      ...legacyFirstItemFields(printItems),
+    },
   };
 }
+
+function normalizePrintState(state) {
+  const overrides = state.overrides ?? {};
+  const printItems = getPrintItems(overrides);
+  return {
+    ...state,
+    overrides: { ...overrides, printItems, ...legacyFirstItemFields(printItems) },
+  };
+}
+
+function hasDocumentPrintData(overrides) {
+  return Array.isArray(overrides.printItems)
+    || Boolean(overrides.printName || overrides.printNumber || overrides.printPlacement);
+}
+import { getPrintItems, legacyFirstItemFields } from '../config/printItems.js';

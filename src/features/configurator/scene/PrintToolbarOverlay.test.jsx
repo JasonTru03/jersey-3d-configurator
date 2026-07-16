@@ -5,7 +5,7 @@ import { PrintToolbarOverlay } from './PrintToolbarOverlay.jsx';
 describe('PrintToolbarOverlay', () => {
   it('exposes the five name set controls and rotates the selected print', () => {
     const onRotate = vi.fn();
-    render(<PrintToolbarOverlay anchor={{ visible: true, x: 180, y: 220, placement: 'right-top' }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 180, top: 220, width: 96, height: 54 }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Rotate print right' }));
 
@@ -18,7 +18,7 @@ describe('PrintToolbarOverlay', () => {
 
   it('emits a scale change from the resize handle', () => {
     const onScale = vi.fn();
-    render(<PrintToolbarOverlay anchor={{ visible: true, x: 180, y: 220, placement: 'right-top' }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} onScale={onScale} />);
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 180, top: 220, width: 96, height: 54 }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} onScale={onScale} />);
 
     const handle = screen.getByRole('button', { name: 'Resize print' });
     fireEvent.pointerDown(handle, { clientX: 10, clientY: 10 });
@@ -27,14 +27,15 @@ describe('PrintToolbarOverlay', () => {
     expect(onScale).toHaveBeenCalledWith('print-1', expect.any(Number));
   });
 
-  it('uses the projected anchor location and hides when it is not visible', () => {
+  it('uses the projected selection rectangle and hides when it is not visible', () => {
     const { rerender } = render(
-      <PrintToolbarOverlay anchor={{ visible: true, x: 180, y: 220, placement: 'right-top' }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} />,
+      <PrintToolbarOverlay anchor={{ visible: true, left: 180, top: 220, width: 96, height: 54 }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} />,
     );
 
     const controls = screen.getByRole('group', { name: 'Selected print controls' });
-    expect(controls).toHaveClass('is-right-top');
-    expect(controls).toHaveStyle({ '--print-anchor-x': '180px', '--print-anchor-y': '220px' });
+    expect(controls).toHaveStyle({ '--print-left': '180px', '--print-top': '220px', '--print-width': '96px', '--print-height': '54px' });
+    expect(screen.getByTestId('print-selection-frame')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Duplicate print' })).toHaveTextContent('×2');
 
     rerender(<PrintToolbarOverlay anchor={{ visible: false }} item={{ id: 'print-1', scale: 1 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={vi.fn()} />);
 

@@ -1,4 +1,4 @@
-import { Copy, Maximize2, Pencil, RotateCw, Trash2 } from 'lucide-react';
+import { Maximize2, Pencil, RotateCw, Trash2 } from 'lucide-react';
 import { useRef } from 'react';
 
 export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
@@ -8,16 +8,23 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
   return (
     <div
       aria-label="Selected print controls"
-      className={`print-toolbar-overlay is-${anchor.placement}`}
+      className="print-toolbar-overlay"
       role="group"
-      style={{ '--print-anchor-x': `${anchor.x}px`, '--print-anchor-y': `${anchor.y}px` }}
+      style={{
+        '--print-left': `${anchor.left}px`,
+        '--print-top': `${anchor.top}px`,
+        '--print-width': `${anchor.width}px`,
+        '--print-height': `${anchor.height}px`,
+      }}
     >
-      <button aria-label="Edit print" onClick={() => onEdit(item.id)} type="button"><Pencil size={15} /></button>
-      <button aria-label="Rotate print right" onClick={() => onRotate(item.id, 15)} type="button"><RotateCw size={15} /></button>
-      <button aria-label="Delete print" onClick={() => onDelete(item.id)} type="button"><Trash2 size={15} /></button>
-      <button aria-label="Duplicate print" onClick={() => onCopy(item.id)} type="button"><Copy size={15} /></button>
+      <div className="print-selection-frame" data-testid="print-selection-frame" />
+      <button aria-label="Edit print" className="print-control print-control--edit" onClick={() => onEdit(item.id)} type="button"><Pencil size={15} /></button>
+      <button aria-label="Rotate print right" className="print-control print-control--rotate" onClick={() => onRotate(item.id, 15)} type="button"><RotateCw size={15} /></button>
+      <button aria-label="Delete print" className="print-control print-control--delete" onClick={() => onDelete(item.id)} type="button"><Trash2 size={15} /></button>
+      <button aria-label="Duplicate print" className="print-control print-control--duplicate" onClick={() => onCopy(item.id)} type="button">×2</button>
       <button
         aria-label="Resize print"
+        className="print-control print-control--resize"
         onPointerDown={(event) => { dragStart.current = { scale: item.scale, x: event.clientX, y: event.clientY }; }}
         onPointerMove={(event) => {
           if (!dragStart.current || !onScale) return;

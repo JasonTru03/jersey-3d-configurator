@@ -8,6 +8,17 @@ import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
 const MIN_PRINT_COPY_DISTANCE = 0.24;
+const PRINT_DRAG_THRESHOLD = 4;
+
+export function getPrintPointerDownAction({ hasPrintHit, handledDecoration }) {
+  if (hasPrintHit) return 'select-print';
+  if (handledDecoration) return 'decoration';
+  return 'deselect-print';
+}
+
+export function hasExceededPrintDragThreshold(start, event) {
+  return Math.hypot(event.clientX - start.x, event.clientY - start.y) > PRINT_DRAG_THRESHOLD;
+}
 
 export function selectDecorationMeshes(meshes) {
   const clothMeshes = meshes.filter((mesh) => DECORATION_MESH_NAME_PATTERN.test(mesh.name));
@@ -96,6 +107,7 @@ export class GarmentRenderer {
     this.activePrintId = null;
     this.lastPrintAnchor = null;
     this.isDraggingPrint = false;
+    this.pendingPrintDrag = null;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
       camera: this.camera,
@@ -423,6 +435,7 @@ export class GarmentRenderer {
     this.printLayers.clear();
     this.activePrintId = null;
     this.isDraggingPrint = false;
+    this.pendingPrintDrag = null;
     this.syncPrintAnchor();
   }
 
@@ -435,42 +448,39 @@ export class GarmentRenderer {
 
   handlePointerDown = (event) => {
     const printHit = this.pickPrint(event);
-    if (printHit) {
+    const handledDecoration = !printHit && this.decorationEditor?.handlePointerDown(event);
+    const action = getPrintPointerDownAction({ hasPrintHit: Boolean(printHit), handledDecoration: Boolean(handledDecoration) });
+    if (action === 'select-print') {
       this.activePrintId = printHit.object.userData.printId;
       this.onPrintSelectionChange?.(this.activePrintId);
       this.syncPrintAnchor();
       if (this.isPrintEditable()) {
-        const hit = this.pickJersey(event);
-        if (hit) {
-          this.isDraggingPrint = true;
-          this.controls.enabled = false;
-          this.placePrintAtIntersection(hit, true);
-        }
+        this.pendingPrintDrag = { x: event.clientX, y: event.clientY };
       }
       event.preventDefault();
       return;
     }
-    if (this.decorationEditor?.handlePointerDown(event)) {
+    if (action === 'decoration') {
       this.controls.enabled = !this.decorationEditor.isEditing();
       event.preventDefault();
       return;
     }
+    this.pendingPrintDrag = null;
     this.onPrintSelectionChange?.(null);
     this.lastPrintAnchor = null;
     this.onPrintAnchorChange?.({ visible: false });
-    if (!this.printPlane || !this.isPrintEditable()) return;
-    const hit = this.pickJersey(event);
-    if (!hit) return;
-    event.preventDefault();
-    this.isDraggingPrint = true;
-    this.controls.enabled = false;
-    this.placePrintAtIntersection(hit, true);
   };
 
   handlePointerMove = (event) => {
     if (this.decorationEditor?.handlePointerMove(event)) {
       event.preventDefault();
       return;
+    }
+    if (!this.isDraggingPrint && this.pendingPrintDrag) {
+      if (!hasExceededPrintDragThreshold(this.pendingPrintDrag, event)) return;
+      this.pendingPrintDrag = null;
+      this.isDraggingPrint = true;
+      this.controls.enabled = false;
     }
     if (!this.isDraggingPrint || !this.printPlane) return;
     const hit = this.pickJersey(event);
@@ -484,6 +494,7 @@ export class GarmentRenderer {
       this.controls.enabled = !this.decorationEditor.isEditing();
       return;
     }
+    this.pendingPrintDrag = null;
     if (!this.isDraggingPrint) return;
     this.isDraggingPrint = false;
     this.controls.enabled = true;

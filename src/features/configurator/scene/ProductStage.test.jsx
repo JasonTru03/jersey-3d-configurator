@@ -58,16 +58,19 @@ describe('ProductStage print toolbar', () => {
     expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
   });
 
-  it('rotates the active print through the state patch callback', () => {
+  it('stores the absolute angle emitted by the circular rotation handle', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate print right' }));
+    const handle = screen.getByRole('button', { name: 'Rotate print' });
+    handle.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(handle, { pointerId: 11, clientX: 276, clientY: 247 });
+    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 228, clientY: 295 });
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({
-        printItems: [expect.objectContaining({ id: 'print-1', rotation: 15 })],
+        printItems: [expect.objectContaining({ id: 'print-1', rotation: expect.closeTo(90, 0) })],
       }),
     }));
   });

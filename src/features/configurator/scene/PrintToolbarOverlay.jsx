@@ -14,12 +14,25 @@ function getResizeScale(start, clientX, clientY) {
   return Math.min(MAX_PRINT_SCALE, Math.max(MIN_PRINT_SCALE, start.scale + (distance - start.distance) / PRINT_RESIZE_DISTANCE));
 }
 
+function getPointerAngle(centerX, centerY, clientX, clientY) {
+  return Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI);
+}
+
+function normalizePrintRotation(degrees) {
+  return ((degrees % 360) + 360) % 360;
+}
+
+function getShortestAngleDelta(previous, next) {
+  return ((next - previous + 540) % 360) - 180;
+}
+
 export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
-  const dragStart = useRef(null);
+  const resizeStart = useRef(null);
+  const rotationStart = useRef(null);
   if (!item || !anchor?.visible) return null;
 
   const clearResize = (event) => {
-    if (!dragStart.current || dragStart.current.pointerId === event.pointerId) dragStart.current = null;
+    if (!resizeStart.current || resizeStart.current.pointerId === event.pointerId) resizeStart.current = null;
   };
 
   const startResize = (event) => {
@@ -28,7 +41,7 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
     const centerY = anchor.top + anchor.height / 2;
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    dragStart.current = {
+    resizeStart.current = {
       pointerId: event.pointerId,
       scale: item.scale ?? 1,
       centerX,
@@ -38,10 +51,39 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
   };
 
   const resize = (event) => {
-    const start = dragStart.current;
+    const start = resizeStart.current;
     if (!start || start.pointerId !== event.pointerId || !onScale) return;
     event.preventDefault();
     onScale(item.id, getResizeScale(start, event.clientX, event.clientY));
+  };
+
+  const clearRotation = (event) => {
+    if (!rotationStart.current || rotationStart.current.pointerId === event.pointerId) rotationStart.current = null;
+  };
+
+  const startRotation = (event) => {
+    if (!onRotate) return;
+    const centerX = anchor.left + anchor.width / 2;
+    const centerY = anchor.top + anchor.height / 2;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    rotationStart.current = {
+      pointerId: event.pointerId,
+      centerX,
+      centerY,
+      angle: getPointerAngle(centerX, centerY, event.clientX, event.clientY),
+      rotation: normalizePrintRotation(item.rotation ?? 0),
+    };
+  };
+
+  const rotate = (event) => {
+    const start = rotationStart.current;
+    if (!start || start.pointerId !== event.pointerId || !onRotate) return;
+    event.preventDefault();
+    const angle = getPointerAngle(start.centerX, start.centerY, event.clientX, event.clientY);
+    const rotation = normalizePrintRotation(start.rotation + getShortestAngleDelta(start.angle, angle));
+    rotationStart.current = { ...start, angle, rotation };
+    onRotate(item.id, rotation);
   };
 
   return (
@@ -58,7 +100,16 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
     >
       <div className="print-selection-frame" data-testid="print-selection-frame" />
       <button aria-label="Edit print" className="print-control print-control--edit" onClick={() => onEdit(item.id)} type="button"><Pencil size={15} /></button>
-      <button aria-label="Rotate print right" className="print-control print-control--rotate" onClick={() => onRotate(item.id, 15)} type="button"><RotateCw size={15} /></button>
+      <button
+        aria-label="Rotate print"
+        className="print-control print-control--rotate"
+        onLostPointerCapture={clearRotation}
+        onPointerCancel={clearRotation}
+        onPointerDown={startRotation}
+        onPointerMove={rotate}
+        onPointerUp={clearRotation}
+        type="button"
+      ><RotateCw size={15} /></button>
       <button aria-label="Delete print" className="print-control print-control--delete" onClick={() => onDelete(item.id)} type="button"><Trash2 size={15} /></button>
       <button aria-label="Duplicate print" className="print-control print-control--duplicate" onClick={() => onCopy(item.id)} type="button">×2</button>
       <button

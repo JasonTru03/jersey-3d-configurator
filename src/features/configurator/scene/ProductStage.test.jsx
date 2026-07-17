@@ -12,7 +12,6 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
       constructor(host, options) {
         rendererHarness.options = options;
         this.onPrintAnchorChange = options.onPrintAnchorChange;
-        this.onDecorationAnchorChange = options.onDecorationAnchorChange;
       }
 
       update() {
@@ -47,13 +46,10 @@ beforeEach(() => {
 });
 
 describe('ProductStage print toolbar', () => {
-  it('shows and hides the artwork selection frame from renderer decoration anchors', () => {
+  it('does not inject an artwork anchor callback into the renderer', () => {
     render(<ProductStage onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'none', overrides: {} }} />);
 
-    act(() => rendererHarness.options.onDecorationAnchorChange({ visible: true, left: 180, top: 220, width: 96, height: 54 }));
-    expect(screen.getByTestId('artwork-selection-frame')).toBeInTheDocument();
-
-    act(() => rendererHarness.options.onDecorationAnchorChange({ visible: false }));
+    expect(rendererHarness.options.onDecorationAnchorChange).toBeUndefined();
     expect(screen.queryByTestId('artwork-selection-frame')).not.toBeInTheDocument();
   });
 

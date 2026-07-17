@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   DecorationEditor,
@@ -8,16 +8,14 @@ import {
   getPlacementFromIntersection,
   getRegionAnchor,
   getRegionFrame,
-  resolveDecorationAsset,
   toRegionPosition,
   toRegionTransform,
   toSpriteTransform,
 } from './decorationEditor.js';
 
-const LEGACY_PATTERN_ASSET_URLS = {
-  'golden-stripe': 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cpath fill="%23d1b05d" d="M0 84 240 0v36L0 120z"/%3E%3C/svg%3E',
-  'night-grid': 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cg fill="none" stroke="%2320242a" stroke-width="10" opacity=".85"%3E%3Cpath d="M0 25h240M0 60h240M0 95h240M35 0v120M95 0v120M155 0v120M215 0v120"/%3E%3C/g%3E%3C/svg%3E',
-};
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('decoration editor geometry', () => {
   it('does not report editing when artwork is selected but not being dragged', () => {
@@ -47,6 +45,106 @@ describe('decoration editor geometry', () => {
     expect(editor.handlePointerDown({})).toBe(false);
     expect(editor.selectedId).toBe('crest');
     expect(onSelectionChange).not.toHaveBeenCalled();
+
+    editor.dispose();
+  });
+
+  it('clears the selected artwork and restores its unselected material state', () => {
+    const onSelectionChange = vi.fn();
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onSelectionChange,
+    });
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
+    editor.surfaces.set('crest', surface);
+    editor.selectedId = 'crest';
+
+    editor.clearSelection();
+
+    expect(editor.selectedId).toBeNull();
+    expect(onSelectionChange).toHaveBeenCalledWith(null);
+    expect(surface.material.opacity).toBe(0.92);
+    expect(surface.material.color.getHexString()).toBe('e8e8e8');
+
+    editor.dispose();
+  });
+
+  it('briefly flashes a newly synced artwork selection without persisting a transform', () => {
+    vi.useFakeTimers();
+    const onDecorationsChange = vi.fn();
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onDecorationsChange,
+    });
+    const decoration = {
+      id: 'crest',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      x: 0.25,
+      y: -0.2,
+      scale: 1.2,
+      rotation: 15,
+      placement: { region: 'front', position: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
+    };
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
+    editor.surfaces.set(decoration.id, surface);
+
+    editor.update([decoration], decoration.id, []);
+
+    expect(surface.material.color.getHexString()).toBe('ffd166');
+    expect(surface.material.opacity).toBe(0.72);
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+    expect(decoration).toMatchObject({ x: 0.25, y: -0.2, scale: 1.2, rotation: 15 });
+
+    vi.advanceTimersByTime(200);
+
+    expect(surface.material.color.getHexString()).toBe('ffffff');
+    expect(surface.material.opacity).toBe(1);
+
+    editor.dispose();
+  });
+
+  it('keeps a new canvas selection flashed when its active id is synced back immediately', () => {
+    vi.useFakeTimers();
+    const decoration = {
+      id: 'crest',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotation: 0,
+      placement: { region: 'front', position: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
+    };
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onSelectionChange: vi.fn(),
+    });
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
+    editor.surfaces.set(decoration.id, surface);
+    editor.decorations = [decoration];
+    editor.pickDecoration = () => decoration;
+
+    editor.handlePointerDown({});
+    editor.update([decoration], decoration.id, []);
+
+    expect(surface.material.color.getHexString()).toBe('ffd166');
+    expect(surface.material.opacity).toBe(0.72);
+
+    vi.advanceTimersByTime(200);
+
+    expect(surface.material.color.getHexString()).toBe('ffffff');
+    expect(surface.material.opacity).toBe(1);
 
     editor.dispose();
   });
@@ -90,44 +188,6 @@ describe('decoration editor geometry', () => {
     const position = toRegionPosition('right-sleeve', { x: -0.4, y: 0.35 });
 
     expect(toRegionTransform('right-sleeve', position)).toEqual({ x: -0.4, y: 0.35 });
-  });
-
-  it('resolves the Crest Badge preset to its renderable asset instead of its source id', () => {
-    const assetUrl = 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E';
-
-    expect(resolveDecorationAsset(
-      { kind: 'badge', source: 'crest-badge' },
-      [{ source: 'crest-badge', assetUrl }],
-    )).toBe(assetUrl);
-  });
-
-  it.each(Object.entries(LEGACY_PATTERN_ASSET_URLS))('resolves the legacy %s pattern when it is no longer an active preset', (source, expectedAssetUrl) => {
-    const activePresets = [
-      { source: 'crest-badge', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' },
-      { source: 'roundel-badge', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' },
-    ];
-
-    const assetUrl = resolveDecorationAsset({ kind: 'pattern', source }, activePresets);
-
-    expect(assetUrl).toBe(expectedAssetUrl);
-  });
-
-  it('prefers an active preset asset over a legacy source mapping', () => {
-    const activeAssetUrl = 'data:image/svg+xml,%3Csvg%3E%3Cpath id="active"/%3E%3C/svg%3E';
-
-    expect(resolveDecorationAsset(
-      { kind: 'pattern', source: 'golden-stripe' },
-      [{ source: 'golden-stripe', assetUrl: activeAssetUrl }],
-    )).toBe(activeAssetUrl);
-  });
-
-  it('returns uploaded artwork data URLs unchanged', () => {
-    const uploadDataUrl = 'data:image/png;base64,uploaded-artwork';
-
-    expect(resolveDecorationAsset(
-      { kind: 'upload', source: uploadDataUrl },
-      [{ source: 'golden-stripe', assetUrl: LEGACY_PATTERN_ASSET_URLS['golden-stripe'] }],
-    )).toBe(uploadDataUrl);
   });
 
   it('creates artwork surfaces that participate in garment depth occlusion', () => {

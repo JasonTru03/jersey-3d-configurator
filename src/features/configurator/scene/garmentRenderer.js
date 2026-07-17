@@ -40,11 +40,6 @@ export function getPrintSelectionRect(projectedCorners, { width, height }) {
   return getProjectedSelectionRect(projectedCorners, { width, height });
 }
 
-export function getDecorationSelectionRect(projectedCorners, { width, height }) {
-  if (projectedCorners.length !== 8) return { visible: false };
-  return getProjectedSelectionRect(projectedCorners, { width, height });
-}
-
 function getProjectedSelectionRect(projectedCorners, { width, height }) {
   if (!width || !height || projectedCorners.some((corner) => (
     corner.x < -1 || corner.x > 1 || corner.y < -1 || corner.y > 1 || corner.z < -1 || corner.z > 1
@@ -77,7 +72,6 @@ export class GarmentRenderer {
     this.onStatePatch = options.onStatePatch;
     this.onPrintAnchorChange = options.onPrintAnchorChange;
     this.onPrintSelectionChange = options.onPrintSelectionChange;
-    this.onDecorationAnchorChange = options.onDecorationAnchorChange;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#f3f1ec');
     this.camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
@@ -121,9 +115,9 @@ export class GarmentRenderer {
     this.printLayers = new Map();
     this.activePrintId = null;
     this.lastPrintAnchor = null;
-    this.lastDecorationAnchor = null;
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
+    this.pendingDecorationDeselect = null;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
       camera: this.camera,
@@ -138,6 +132,7 @@ export class GarmentRenderer {
     this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
     this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove);
     window.addEventListener('pointerup', this.handlePointerUp);
+    window.addEventListener('pointercancel', this.handlePointerCancel);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.resize();
@@ -176,7 +171,6 @@ export class GarmentRenderer {
       state.overrides?.activeDecorationId,
       product.decorationPresets ?? [],
     );
-    this.syncDecorationAnchor();
     this.controls.enabled = shouldEnableOrbitControls({
       isDraggingDecoration: this.decorationEditor.isEditing(),
       isDraggingPrint: this.isDraggingPrint,
@@ -206,17 +200,17 @@ export class GarmentRenderer {
   dispose() {
     cancelAnimationFrame(this.frame);
     this.loadToken = Symbol('disposed');
+    this.pendingDecorationDeselect = null;
     this.resizeObserver?.disconnect();
     this.controls?.dispose();
     this.renderer?.domElement.removeEventListener('contextmenu', preventContextMenu);
     this.renderer?.domElement.removeEventListener('pointerdown', this.handlePointerDown);
     this.renderer?.domElement.removeEventListener('pointermove', this.handlePointerMove);
     window.removeEventListener('pointerup', this.handlePointerUp);
+    window.removeEventListener('pointercancel', this.handlePointerCancel);
     this.disposeGroup(this.root);
     this.disposePrintLayer();
     this.decorationEditor?.dispose();
-    this.lastDecorationAnchor = null;
-    this.onDecorationAnchorChange?.({ visible: false });
     this.renderer?.dispose();
     this.renderer?.domElement.remove();
   }
@@ -255,7 +249,6 @@ export class GarmentRenderer {
         this.state?.overrides?.activeDecorationId,
         this.product?.decorationPresets ?? [],
       );
-      this.syncDecorationAnchor();
       this.applyColors(this.selected?.colorway?.swatches);
       this.applyMaterial(this.selected?.material?.material);
       this.updatePrintLayer();
@@ -369,7 +362,6 @@ export class GarmentRenderer {
     this.frame = requestAnimationFrame(this.animate);
     this.controls.update();
     this.syncPrintAnchor();
-    this.syncDecorationAnchor();
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -381,16 +373,6 @@ export class GarmentRenderer {
     if (!hasPrintSelectionRectChanged(this.lastPrintAnchor, anchor)) return;
     this.lastPrintAnchor = anchor;
     this.onPrintAnchorChange?.(anchor);
-  }
-
-  syncDecorationAnchor() {
-    const surface = this.decorationEditor?.selectedSurface;
-    const anchor = surface
-      ? getDecorationSelectionRect(getObjectProjectedCorners(surface, this.camera), this.host.getBoundingClientRect())
-      : { visible: false };
-    if (!hasPrintSelectionRectChanged(this.lastDecorationAnchor, anchor)) return;
-    this.lastDecorationAnchor = anchor;
-    this.onDecorationAnchorChange?.(anchor);
   }
 
   disposeGroup(group) {
@@ -470,6 +452,7 @@ export class GarmentRenderer {
     this.activePrintId = null;
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
+    this.pendingDecorationDeselect = null;
     this.syncPrintAnchor();
   }
 
@@ -485,6 +468,7 @@ export class GarmentRenderer {
     const handledDecoration = !printHit && this.decorationEditor?.handlePointerDown(event);
     const action = getPrintPointerDownAction({ hasPrintHit: Boolean(printHit), handledDecoration: Boolean(handledDecoration) });
     if (action === 'select-print') {
+      this.pendingDecorationDeselect = null;
       this.activePrintId = printHit.object.userData.printId;
       this.onPrintSelectionChange?.(this.activePrintId);
       this.syncPrintAnchor();
@@ -495,6 +479,7 @@ export class GarmentRenderer {
       return;
     }
     if (action === 'decoration') {
+      this.pendingDecorationDeselect = null;
       this.controls.enabled = shouldEnableOrbitControls({
         isDraggingDecoration: this.decorationEditor.isEditing(),
         isDraggingPrint: this.isDraggingPrint,
@@ -504,6 +489,10 @@ export class GarmentRenderer {
     }
     this.pendingPrintDrag = null;
     this.onPrintSelectionChange?.(null);
+    this.pendingDecorationDeselect = this.decorationEditor?.selectedId
+      ? { x: event.clientX, y: event.clientY }
+      : null;
+    if (!this.pendingDecorationDeselect) this.decorationEditor?.clearSelection();
     this.lastPrintAnchor = null;
     this.onPrintAnchorChange?.({ visible: false });
   };
@@ -512,6 +501,10 @@ export class GarmentRenderer {
     if (this.decorationEditor?.handlePointerMove(event)) {
       event.preventDefault();
       return;
+    }
+    if (this.pendingDecorationDeselect
+      && hasExceededPrintDragThreshold(this.pendingDecorationDeselect, event)) {
+      this.pendingDecorationDeselect = null;
     }
     if (!this.isDraggingPrint && this.pendingPrintDrag) {
       if (!hasExceededPrintDragThreshold(this.pendingPrintDrag, event)) return;
@@ -528,17 +521,32 @@ export class GarmentRenderer {
 
   handlePointerUp = () => {
     if (this.decorationEditor?.handlePointerUp()) {
+      this.pendingDecorationDeselect = null;
       this.controls.enabled = shouldEnableOrbitControls({
         isDraggingDecoration: this.decorationEditor.isEditing(),
         isDraggingPrint: this.isDraggingPrint,
       });
       return;
     }
+    const shouldDeselectDecoration = Boolean(this.pendingDecorationDeselect);
+    this.pendingDecorationDeselect = null;
+    if (shouldDeselectDecoration) this.decorationEditor?.clearSelection();
     this.pendingPrintDrag = null;
     if (!this.isDraggingPrint) return;
     this.isDraggingPrint = false;
     this.controls.enabled = true;
     this.emitPrintPlacement();
+  };
+
+  handlePointerCancel = () => {
+    this.decorationEditor?.handlePointerUp();
+    this.pendingDecorationDeselect = null;
+    this.pendingPrintDrag = null;
+    this.isDraggingPrint = false;
+    this.controls.enabled = shouldEnableOrbitControls({
+      isDraggingDecoration: this.decorationEditor?.isEditing(),
+      isDraggingPrint: this.isDraggingPrint,
+    });
   };
 
   isPrintEditable() {
@@ -697,24 +705,6 @@ function getPlaneProjectedCorners(plane, camera) {
     new THREE.Vector3(bounds.min.x, bounds.max.y, 0),
     new THREE.Vector3(bounds.max.x, bounds.max.y, 0),
   ].map((corner) => plane.localToWorld(corner).project(camera));
-}
-
-export function getObjectProjectedCorners(object, camera) {
-  object.updateWorldMatrix(true, false);
-  camera.updateMatrixWorld();
-  const bounds = new THREE.Box3().setFromObject(object);
-  if (bounds.isEmpty()) return [];
-
-  return [
-    new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
-    new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.max.z),
-    new THREE.Vector3(bounds.min.x, bounds.max.y, bounds.min.z),
-    new THREE.Vector3(bounds.min.x, bounds.max.y, bounds.max.z),
-    new THREE.Vector3(bounds.max.x, bounds.min.y, bounds.min.z),
-    new THREE.Vector3(bounds.max.x, bounds.min.y, bounds.max.z),
-    new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.min.z),
-    new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.max.z),
-  ].map((corner) => corner.project(camera));
 }
 
 function distanceBetweenPlacements(first, second) {

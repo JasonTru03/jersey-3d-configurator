@@ -1,14 +1,11 @@
 import * as THREE from 'three';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
-import { clampDecorationTransform, patchDecoration } from '../config/decorations.js';
+import { clampDecorationTransform, patchDecoration, resolveDecorationAsset } from '../config/decorations.js';
 
 const REGION_OFFSET = 0.026;
 const REGION_POSITION_SCALE = 0.48;
 const DECORATION_MIN_DISTANCE = 0.24;
-const LEGACY_PATTERN_ASSET_URLS = {
-  'golden-stripe': 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cpath fill="%23d1b05d" d="M0 84 240 0v36L0 120z"/%3E%3C/svg%3E',
-  'night-grid': 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cg fill="none" stroke="%2320242a" stroke-width="10" opacity=".85"%3E%3Cpath d="M0 25h240M0 60h240M0 95h240M35 0v120M95 0v120M155 0v120M215 0v120"/%3E%3C/g%3E%3C/svg%3E',
-};
+const SELECTION_FLASH_DURATION = 180;
 const DEFAULT_PLACEMENT_OFFSETS = [
   { horizontal: 0, vertical: 0 },
   { horizontal: -0.58, vertical: 0.32 },
@@ -100,13 +97,6 @@ function toVector(value) {
 
 function roundCoordinate(value) {
   return Math.round(value * 10000) / 10000;
-}
-
-export function resolveDecorationAsset(decoration, presets = []) {
-  if (decoration.kind === 'upload') return decoration.source;
-  return presets.find((preset) => preset.source === decoration.source)?.assetUrl
-    ?? LEGACY_PATTERN_ASSET_URLS[decoration.source]
-    ?? decoration.source;
 }
 
 export function createRegionSurface(texture) {
@@ -240,6 +230,8 @@ export class DecorationEditor {
     this.garmentMeshes = [];
     this.decorations = [];
     this.selectedId = null;
+    this.selectionFlashTimer = null;
+    this.selectionFlashId = null;
     this.dragging = false;
     this.migratedDecorationIds = new Set();
   }
@@ -253,6 +245,7 @@ export class DecorationEditor {
   }
 
   update(decorations = [], selectedId = null, presets = []) {
+    const previousSelectedId = this.selectedId;
     this.decorations = decorations;
     this.presets = presets;
     const remaining = new Set(decorations.map((decoration) => decoration.id));
@@ -294,6 +287,12 @@ export class DecorationEditor {
 
     this.selectedId = remaining.has(selectedId) ? selectedId : null;
     this.refreshSelection();
+    if (this.selectionFlashId === this.selectedId) {
+      this.applySelectionFlash(this.selectedId);
+    }
+    if (this.selectedId && this.selectedId !== previousSelectedId) {
+      this.flashSelection(this.selectedId);
+    }
   }
 
   createSurface(decoration, placement) {
@@ -351,11 +350,22 @@ export class DecorationEditor {
     const decoration = this.pickDecoration(event);
     if (!decoration) return false;
 
+    const isNewSelection = this.selectedId !== decoration.id;
     this.selectedId = decoration.id;
     this.onSelectionChange?.(decoration.id);
     this.dragging = true;
     this.refreshSelection();
+    if (isNewSelection) this.flashSelection(decoration.id);
     return true;
+  }
+
+  clearSelection() {
+    this.selectedId = null;
+    clearTimeout(this.selectionFlashTimer);
+    this.selectionFlashTimer = null;
+    this.selectionFlashId = null;
+    this.onSelectionChange?.(null);
+    this.refreshSelection();
   }
 
   handlePointerMove(event) {
@@ -385,6 +395,9 @@ export class DecorationEditor {
   }
 
   dispose() {
+    clearTimeout(this.selectionFlashTimer);
+    this.selectionFlashTimer = null;
+    this.selectionFlashId = null;
     this.surfaces.forEach((surface) => {
       surface.geometry.dispose();
       surface.material.map?.dispose();
@@ -435,5 +448,28 @@ export class DecorationEditor {
       surface.material.opacity = id === this.selectedId ? 1 : 0.92;
       surface.material.color.set(id === this.selectedId ? '#ffffff' : '#e8e8e8');
     });
+  }
+
+  flashSelection(id) {
+    clearTimeout(this.selectionFlashTimer);
+    const surface = this.surfaces.get(id);
+    if (!surface) {
+      this.selectionFlashId = null;
+      return;
+    }
+    this.selectionFlashId = id;
+    this.applySelectionFlash(id);
+    this.selectionFlashTimer = setTimeout(() => {
+      this.selectionFlashTimer = null;
+      this.selectionFlashId = null;
+      if (this.selectedId === id) this.refreshSelection();
+    }, SELECTION_FLASH_DURATION);
+  }
+
+  applySelectionFlash(id) {
+    const surface = this.surfaces.get(id);
+    if (!surface) return;
+    surface.material.opacity = 0.72;
+    surface.material.color.set('#ffd166');
   }
 }

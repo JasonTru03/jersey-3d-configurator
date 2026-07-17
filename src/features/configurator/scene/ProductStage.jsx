@@ -2,6 +2,7 @@ import { Rotate3D, SlidersHorizontal, ZoomIn } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GarmentRenderer } from './garmentRenderer.js';
 import { KeyboardRenderer } from './keyboardRenderer.js';
+import { ArtworkSelectionOverlay } from './ArtworkSelectionOverlay.jsx';
 import { PrintToolbarOverlay } from './PrintToolbarOverlay.jsx';
 import { duplicatePrintItem, getPrintItems, legacyFirstItemFields, patchPrintItem, removePrintItem } from '../config/printItems.js';
 import { getNextPrintPlacement } from './garmentRenderer.js';
@@ -25,6 +26,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
   const [activePrintId, setActivePrintId] = useState(null);
   const [selectedPrintId, setSelectedPrintId] = useState(null);
   const [printAnchor, setPrintAnchor] = useState({ visible: false });
+  const [decorationAnchor, setDecorationAnchor] = useState({ visible: false });
 
   const handlePrintSelectionChange = useCallback((id) => {
     setActivePrintId(id);
@@ -49,6 +51,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
     try {
       rendererRef.current = new Renderer(hostRef.current, {
         onPrintAnchorChange: setPrintAnchor,
+        onDecorationAnchorChange: setDecorationAnchor,
         onPrintSelectionChange: handlePrintSelectionChange,
         onStatePatch,
       });
@@ -75,6 +78,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
     if (rendererRef.current) {
       rendererRef.current.onStatePatch = onStatePatch;
       rendererRef.current.onPrintAnchorChange = setPrintAnchor;
+      rendererRef.current.onDecorationAnchorChange = setDecorationAnchor;
       rendererRef.current.onPrintSelectionChange = handlePrintSelectionChange;
     }
   }, [handlePrintSelectionChange, onStatePatch]);
@@ -138,6 +142,7 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
           onRotate={(id, rotation) => patchPrint(id, { rotation })}
           onScale={(id, scale) => patchPrint(id, { scale })}
         />
+        <ArtworkSelectionOverlay anchor={decorationAnchor} />
       </div>
       <div className="stage-caption">
         <strong>{selected.layout?.label}</strong>

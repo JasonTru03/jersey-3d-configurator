@@ -245,6 +245,15 @@
   pointer-events: none;
 }
 
+.artwork-selection-frame {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 2px solid #ef5d43;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
 .print-control {
   position: absolute;
   display: grid;
@@ -298,7 +307,7 @@
 
 .stage-toolbar {
   position: absolute;
-  z-index: 2;
+  z-index: 4;
   top: 16px;
   left: 16px;
   display: flex;

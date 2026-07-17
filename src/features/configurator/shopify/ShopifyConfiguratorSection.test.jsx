@@ -58,13 +58,13 @@ describe('ShopifyConfiguratorSection', () => {
     render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
 
     expect(await screen.findByText('Customize your match jersey')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Golden Stripe/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Crest Badge/i }));
 
     await waitFor(() => {
       const config = JSON.parse(document.querySelector('input[name="properties[_3D Config JSON]"]').value);
       expect(config.state.overrides.decorations[0]).toMatchObject({
-        kind: 'pattern',
-        source: 'golden-stripe',
+        kind: 'badge',
+        source: 'crest-badge',
         region: 'front',
       });
     });

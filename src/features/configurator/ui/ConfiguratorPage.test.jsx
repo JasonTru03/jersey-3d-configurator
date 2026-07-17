@@ -60,9 +60,9 @@ describe('ConfiguratorPage', () => {
     expect(await screen.findByText('Chelsea Match Jersey')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Artwork' }));
-    fireEvent.click(screen.getByRole('button', { name: /Golden Stripe/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Crest Badge/i }));
 
-    expect(await screen.findByText('Golden Stripe added')).toBeInTheDocument();
+    expect(await screen.findByText('Crest Badge added')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Rotate right' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete artwork' })).toBeInTheDocument();
   });

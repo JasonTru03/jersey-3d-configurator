@@ -5,6 +5,8 @@ import {
   createDecalSurface,
   createRegionSurface,
   getDefaultDecorationPlacement,
+  getDecorationGrabOffset,
+  applyDecorationGrabOffset,
   hasExceededDecorationDragThreshold,
   getPlacementFromIntersection,
   getRegionAnchor,
@@ -117,6 +119,61 @@ describe('decoration editor geometry', () => {
   it('uses a four pixel threshold to distinguish a click from an artwork drag', () => {
     expect(hasExceededDecorationDragThreshold({ x: 100, y: 100 }, { clientX: 103, clientY: 102 })).toBe(false);
     expect(hasExceededDecorationDragThreshold({ x: 100, y: 100 }, { clientX: 105, clientY: 103 })).toBe(true);
+  });
+
+  it('keeps the originally grabbed point under the pointer while artwork is dragged', () => {
+    const originalPlacement = {
+      region: 'front',
+      position: { x: 0.4, y: 0.2, z: 1 },
+      normal: { x: 0, y: 0, z: 1 },
+    };
+    const pointerHit = new THREE.Vector3(0.58, 0.08, 1.03);
+    const nextGarmentHit = {
+      region: 'front',
+      position: { x: -0.1, y: 0.55, z: 1 },
+      normal: { x: 0, y: 0, z: 1 },
+    };
+
+    const offset = getDecorationGrabOffset(pointerHit, originalPlacement);
+    const nextPlacement = applyDecorationGrabOffset(nextGarmentHit, offset);
+
+    expect(offset).toEqual({ x: 0.18, y: -0.12, z: 0 });
+    expect(nextPlacement.position).toEqual({ x: -0.28, y: 0.67, z: 1 });
+  });
+
+  it('preserves the grab offset when the first movement crosses the drag threshold', () => {
+    const onDecorationsChange = vi.fn();
+    const decoration = {
+      id: 'crest',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      placement: { region: 'front', position: { x: 0.2, y: 0.1, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
+    };
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onDecorationsChange,
+      onSelectionChange: vi.fn(),
+    });
+    editor.decorations = [decoration];
+    editor.pickDecoration = () => ({ decoration, point: new THREE.Vector3(0.35, 0.18, 1.02) });
+    editor.pickGarment = () => ({
+      point: new THREE.Vector3(0.7, 0.6, 1),
+      face: { normal: new THREE.Vector3(0, 0, 1) },
+      object: new THREE.Mesh(),
+    });
+
+    editor.handlePointerDown({ clientX: 100, clientY: 100 });
+    editor.handlePointerMove({ clientX: 105, clientY: 100 });
+
+    expect(onDecorationsChange).toHaveBeenCalledWith([expect.objectContaining({
+      placement: expect.objectContaining({ position: { x: 0.55, y: 0.52, z: 1 } }),
+    })]);
+
+    editor.dispose();
   });
 
   it('returns the stored world-facing decal normal for camera focus', () => {

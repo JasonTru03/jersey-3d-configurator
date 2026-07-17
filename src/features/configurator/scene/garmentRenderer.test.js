@@ -63,16 +63,19 @@ function pointerEvent(x, y) {
 }
 
 describe('garment decoration mesh selection', () => {
-  it('focuses a decoration with clamped camera distance and no state mutation', () => {
+  it('focuses a decoration from its outward decal normal with clamped distance and no state mutation', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const renderer = new GarmentRenderer(host);
     const center = new THREE.Vector3(1, 2, 3);
     renderer.camera.position.set(0, 0, 20);
     renderer.controls.target.set(0, 0, 0);
-    const offset = renderer.camera.position.clone().sub(renderer.controls.target);
     const distance = renderer.controls.maxDistance;
-    renderer.decorationEditor = { getDecorationWorldCenter: vi.fn(() => center), dispose: vi.fn() };
+    renderer.decorationEditor = {
+      getDecorationWorldCenter: vi.fn(() => center),
+      getDecorationWorldNormal: vi.fn(() => new THREE.Vector3(0, 0, -1)),
+      dispose: vi.fn(),
+    };
     renderer.state = { overrides: { decorations: [] } };
     renderer.onStatePatch = vi.fn();
     const controlsEnabled = renderer.controls.enabled;
@@ -84,9 +87,9 @@ describe('garment decoration mesh selection', () => {
     expect(gsap.killTweensOf).toHaveBeenCalledWith(renderer.controls.target);
     expect(gsap.to).toHaveBeenCalledTimes(2);
     expect(gsap.to).toHaveBeenNthCalledWith(1, renderer.camera.position, expect.objectContaining({
-      x: center.x + (offset.x / offset.length()) * distance,
-      y: center.y + (offset.y / offset.length()) * distance,
-      z: center.z + (offset.z / offset.length()) * distance,
+      x: center.x,
+      y: center.y,
+      z: center.z - distance,
       duration: 0.4,
       ease: 'power2.out',
     }));
@@ -104,11 +107,38 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('moves to the visible side of front and back artwork instead of retaining the current view direction', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.controls.minDistance = 2;
+    renderer.controls.maxDistance = 8;
+    renderer.camera.position.set(0, 1, -5);
+    renderer.controls.target.set(0, 0, 0);
+    const center = new THREE.Vector3(0.5, 1, 0);
+    renderer.decorationEditor = {
+      getDecorationWorldCenter: vi.fn(() => center),
+      getDecorationWorldNormal: vi.fn()
+        .mockReturnValueOnce(new THREE.Vector3(0, 0, 1))
+        .mockReturnValueOnce(new THREE.Vector3(0, 0, -1)),
+      dispose: vi.fn(),
+    };
+    gsap.to.mockClear();
+
+    renderer.focusDecoration('front-crest');
+    renderer.focusDecoration('back-crest');
+
+    expect(gsap.to).toHaveBeenNthCalledWith(1, renderer.camera.position, expect.objectContaining({ z: Math.sqrt(26) }));
+    expect(gsap.to).toHaveBeenNthCalledWith(3, renderer.camera.position, expect.objectContaining({ z: -Math.sqrt(26) }));
+
+    renderer.dispose();
+  });
+
   it('does not start a focus tween when the decoration has no center', () => {
     const host = document.createElement('div');
     document.body.append(host);
     const renderer = new GarmentRenderer(host);
-    renderer.decorationEditor = { getDecorationWorldCenter: vi.fn(() => null), dispose: vi.fn() };
+    renderer.decorationEditor = { getDecorationWorldCenter: vi.fn(() => null), getDecorationWorldNormal: vi.fn(), dispose: vi.fn() };
     gsap.to.mockClear();
     gsap.killTweensOf.mockClear();
 
@@ -127,7 +157,11 @@ describe('garment decoration mesh selection', () => {
     renderer.controls.target.set(0, 0, 0);
     renderer.controls.minDistance = 2;
     renderer.controls.maxDistance = 8;
-    renderer.decorationEditor = { getDecorationWorldCenter: vi.fn(() => new THREE.Vector3(4, 5, 6)), dispose: vi.fn() };
+    renderer.decorationEditor = {
+      getDecorationWorldCenter: vi.fn(() => new THREE.Vector3(4, 5, 6)),
+      getDecorationWorldNormal: vi.fn(() => new THREE.Vector3(0, 0, 1)),
+      dispose: vi.fn(),
+    };
     gsap.to.mockClear();
     gsap.killTweensOf.mockClear();
 

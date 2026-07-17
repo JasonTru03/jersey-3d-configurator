@@ -207,7 +207,10 @@ export class GarmentRenderer {
       this.controls.minDistance,
       this.controls.maxDistance,
     );
-    const direction = offset.lengthSq() > 0 ? offset.normalize() : new THREE.Vector3(0, 0, 1);
+    const normal = this.decorationEditor?.getDecorationWorldNormal(id);
+    const direction = normal?.lengthSq() > 0
+      ? normal.clone().normalize()
+      : (offset.lengthSq() > 0 ? offset.normalize() : new THREE.Vector3(0, 0, 1));
     const position = center.clone().addScaledVector(direction, distance);
 
     gsap.killTweensOf(this.camera.position);
@@ -515,10 +518,7 @@ export class GarmentRenderer {
     }
     if (action === 'decoration') {
       this.pendingDecorationDeselect = null;
-      this.controls.enabled = shouldEnableOrbitControls({
-        isDraggingDecoration: this.decorationEditor.isEditing(),
-        isDraggingPrint: this.isDraggingPrint,
-      });
+      this.controls.enabled = false;
       event.preventDefault();
       return;
     }

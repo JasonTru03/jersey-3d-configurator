@@ -6,6 +6,7 @@ const REGION_OFFSET = 0.026;
 const REGION_POSITION_SCALE = 0.48;
 const DECORATION_MIN_DISTANCE = 0.24;
 const SELECTION_FLASH_DURATION = 180;
+const DECORATION_DRAG_THRESHOLD = 4;
 const DEFAULT_PLACEMENT_OFFSETS = [
   { horizontal: 0, vertical: 0 },
   { horizontal: -0.58, vertical: 0.32 },
@@ -233,6 +234,7 @@ export class DecorationEditor {
     this.selectionFlashTimer = null;
     this.selectionFlashId = null;
     this.dragging = false;
+    this.pendingDrag = null;
     this.migratedDecorationIds = new Set();
   }
 
@@ -250,6 +252,14 @@ export class DecorationEditor {
     if (!geometry.boundingBox) return null;
 
     return surface.localToWorld(geometry.boundingBox.getCenter(new THREE.Vector3()));
+  }
+
+  getDecorationWorldNormal(id) {
+    const normal = this.surfaces.get(id)?.userData.placement?.normal;
+    if (!normal) return null;
+
+    const worldNormal = toVector(normal);
+    return worldNormal.lengthSq() > 0 ? worldNormal.normalize() : null;
   }
 
   setGarmentMeshes(meshes = []) {
@@ -365,7 +375,8 @@ export class DecorationEditor {
     const isNewSelection = this.selectedId !== decoration.id;
     this.selectedId = decoration.id;
     this.onSelectionChange?.(decoration.id);
-    this.dragging = true;
+    this.pendingDrag = { id: decoration.id, x: event.clientX, y: event.clientY };
+    this.dragging = false;
     this.refreshSelection();
     if (isNewSelection) this.flashSelection(decoration.id);
     return true;
@@ -381,7 +392,11 @@ export class DecorationEditor {
   }
 
   handlePointerMove(event) {
-    if (!this.dragging || !this.selectedId) return false;
+    if (!this.pendingDrag || !this.selectedId) return false;
+    if (!this.dragging) {
+      if (!hasExceededDecorationDragThreshold(this.pendingDrag, event)) return false;
+      this.dragging = true;
+    }
     const decoration = this.decorations.find((item) => item.id === this.selectedId);
     if (!decoration) return false;
     const placement = getPlacementFromIntersection(this.pickGarment(event), decoration.region, null);
@@ -391,9 +406,10 @@ export class DecorationEditor {
   }
 
   handlePointerUp() {
-    const wasDragging = this.dragging;
+    const hadPointerGesture = Boolean(this.pendingDrag);
     this.dragging = false;
-    return wasDragging;
+    this.pendingDrag = null;
+    return hadPointerGesture;
   }
 
   patchSelected(transform) {
@@ -403,13 +419,15 @@ export class DecorationEditor {
   }
 
   isEditing() {
-    return this.dragging;
+    return Boolean(this.pendingDrag);
   }
 
   dispose() {
     clearTimeout(this.selectionFlashTimer);
     this.selectionFlashTimer = null;
     this.selectionFlashId = null;
+    this.pendingDrag = null;
+    this.dragging = false;
     this.surfaces.forEach((surface) => {
       surface.geometry.dispose();
       surface.material.map?.dispose();
@@ -484,4 +502,8 @@ export class DecorationEditor {
     surface.material.opacity = 0.72;
     surface.material.color.set('#ffd166');
   }
+}
+
+export function hasExceededDecorationDragThreshold(start, event) {
+  return Math.hypot(event.clientX - start.x, event.clientY - start.y) > DECORATION_DRAG_THRESHOLD;
 }

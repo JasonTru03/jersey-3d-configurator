@@ -5,6 +5,7 @@ import {
   createDecalSurface,
   createRegionSurface,
   getDefaultDecorationPlacement,
+  hasExceededDecorationDragThreshold,
   getPlacementFromIntersection,
   getRegionAnchor,
   getRegionFrame,
@@ -70,6 +71,66 @@ describe('decoration editor geometry', () => {
     editor.selectedId = 'crest';
 
     expect(editor.isEditing()).toBe(false);
+
+    editor.dispose();
+  });
+
+  it('does not start moving an artwork until its pointer moves beyond the drag threshold', () => {
+    const onDecorationsChange = vi.fn();
+    const decoration = {
+      id: 'crest',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      placement: { region: 'front', position: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
+    };
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onDecorationsChange,
+      onSelectionChange: vi.fn(),
+    });
+    editor.decorations = [decoration];
+    editor.pickDecoration = () => decoration;
+    editor.pickGarment = vi.fn(() => ({
+      point: new THREE.Vector3(0.2, 0.3, 1),
+      face: { normal: new THREE.Vector3(0, 0, 1) },
+      object: new THREE.Mesh(),
+    }));
+
+    editor.handlePointerDown({ clientX: 100, clientY: 100 });
+    expect(editor.isEditing()).toBe(true);
+    expect(editor.handlePointerMove({ clientX: 103, clientY: 102 })).toBe(false);
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+    expect(editor.handlePointerUp()).toBe(true);
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+
+    editor.handlePointerDown({ clientX: 100, clientY: 100 });
+    expect(editor.handlePointerMove({ clientX: 105, clientY: 103 })).toBe(true);
+    expect(onDecorationsChange).toHaveBeenCalledOnce();
+
+    editor.dispose();
+  });
+
+  it('uses a four pixel threshold to distinguish a click from an artwork drag', () => {
+    expect(hasExceededDecorationDragThreshold({ x: 100, y: 100 }, { clientX: 103, clientY: 102 })).toBe(false);
+    expect(hasExceededDecorationDragThreshold({ x: 100, y: 100 }, { clientX: 105, clientY: 103 })).toBe(true);
+  });
+
+  it('returns the stored world-facing decal normal for camera focus', () => {
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+    });
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
+    surface.userData.placement = { normal: { x: 0, y: 0, z: -3 } };
+    editor.surfaces.set('back-badge', surface);
+
+    expect(editor.getDecorationWorldNormal('back-badge')).toEqual(new THREE.Vector3(0, 0, -1));
+    expect(editor.getDecorationWorldNormal('missing')).toBeNull();
 
     editor.dispose();
   });

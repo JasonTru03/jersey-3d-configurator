@@ -699,7 +699,7 @@ function getPlaneProjectedCorners(plane, camera) {
   ].map((corner) => plane.localToWorld(corner).project(camera));
 }
 
-function getObjectProjectedCorners(object, camera) {
+export function getObjectProjectedCorners(object, camera) {
   object.updateWorldMatrix(true, false);
   camera.updateMatrixWorld();
   const bounds = new THREE.Box3().setFromObject(object);

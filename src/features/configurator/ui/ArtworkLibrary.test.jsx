@@ -68,4 +68,26 @@ describe('ArtworkLibrary', () => {
     expect(onDelete).toHaveBeenCalledWith('upload-1');
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it('renders at most eight added artworks', () => {
+    const nineDecorations = Array.from({ length: 9 }, (_, index) => ({
+      id: `artwork-${index + 1}`,
+      label: `Artwork ${index + 1}`,
+      kind: 'upload',
+      source: `data:image/png;base64,${index + 1}`,
+    }));
+
+    render(
+      <ArtworkLibrary
+        activeDecorationId={null}
+        decorations={nineDecorations}
+        onDelete={vi.fn()}
+        onSelect={vi.fn()}
+        resolveAsset={(decoration) => decoration.source}
+      />,
+    );
+
+    expect(screen.getAllByRole('button', { pressed: false })).toHaveLength(8);
+    expect(screen.queryByRole('button', { name: 'Artwork 9' })).not.toBeInTheDocument();
+  });
 });

@@ -1,6 +1,7 @@
 import { ImagePlus, RotateCcw, RotateCw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { createDecoration, MAX_DECORATIONS, patchDecoration, removeDecoration, validateDecorationFile } from '../config/decorations.js';
+import { createDecoration, MAX_DECORATIONS, patchDecoration, removeDecoration, resolveDecorationAsset, validateDecorationFile } from '../config/decorations.js';
+import { ArtworkLibrary } from './ArtworkLibrary.jsx';
 
 export function DecorationPanel({ product, state, updateState }) {
   const inputRef = useRef(null);
@@ -32,8 +33,18 @@ export function DecorationPanel({ product, state, updateState }) {
 
   function removeActive() {
     if (!active) return;
-    updateDecorations(removeDecoration(decorations, active.id), null);
-    setMessage(`${active.label} removed`);
+    removeArtwork(active.id);
+  }
+
+  function selectArtwork(id) {
+    updateDecorations(decorations, id);
+  }
+
+  function removeArtwork(id) {
+    const decoration = decorations.find((item) => item.id === id);
+    if (!decoration) return;
+    updateDecorations(removeDecoration(decorations, id), id === activeId ? null : activeId);
+    setMessage(`${decoration.label} removed`);
   }
 
   function handleUpload(event) {
@@ -82,6 +93,13 @@ export function DecorationPanel({ product, state, updateState }) {
         <ImagePlus size={16} /> Upload artwork
       </button>
       <p className="decoration-slots">{decorations.length} / {MAX_DECORATIONS} artwork slots used</p>
+      <ArtworkLibrary
+        activeDecorationId={activeId}
+        decorations={decorations}
+        onDelete={removeArtwork}
+        onSelect={selectArtwork}
+        resolveAsset={(decoration) => resolveDecorationAsset(decoration, product.decorationPresets)}
+      />
       {active && (
         <div className="decoration-actions">
           <strong>{active.label}</strong>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createDecoration } from '../config/decorations.js';
 import { jerseyProduct } from '../config/productDefinitions.js';
@@ -104,5 +104,60 @@ describe('DecorationPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Crest Badge' }));
     expect(screen.getByText('You can add up to 8 artworks. Remove one to continue.')).toBeInTheDocument();
     expect(updateState).not.toHaveBeenCalled();
+  });
+
+  it('shows the added artwork library and changes only the active artwork when selecting another item', () => {
+    const updateState = vi.fn();
+    const decorations = [
+      createDecoration({ id: 'crest-1', kind: 'badge', source: 'crest', label: 'Crest Badge', region: 'front' }),
+      createDecoration({ id: 'roundel-1', kind: 'badge', source: 'roundel', label: 'Roundel Badge', region: 'front' }),
+    ];
+
+    render(
+      <DecorationPanel
+        product={{
+          decorationPresets: [
+            { id: 'crest', source: 'crest', assetUrl: 'data:image/svg+xml,crest' },
+            { id: 'roundel', source: 'roundel', assetUrl: 'data:image/svg+xml,roundel' },
+          ],
+        }}
+        state={{ overrides: { decorations, activeDecorationId: 'crest-1' } }}
+        updateState={updateState}
+      />,
+    );
+
+    const library = screen.getByLabelText('Added artwork');
+    expect(within(library).getByRole('button', { name: 'Crest Badge' })).toHaveAttribute('aria-pressed', 'true');
+    expect(library.querySelector('img')).toHaveAttribute('src', 'data:image/svg+xml,crest');
+    fireEvent.click(within(library).getByRole('button', { name: 'Roundel Badge' }));
+
+    expect(updateState).toHaveBeenCalledWith({
+      overrides: { decorations, activeDecorationId: 'roundel-1' },
+    });
+  });
+
+  it('clears the active artwork only when deleting the active library item', () => {
+    const first = createDecoration({ id: 'crest-1', kind: 'badge', source: 'crest', label: 'Crest Badge', region: 'front' });
+    const second = createDecoration({ id: 'roundel-1', kind: 'badge', source: 'roundel', label: 'Roundel Badge', region: 'front' });
+    const updateState = vi.fn();
+
+    render(
+      <DecorationPanel
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [first, second], activeDecorationId: 'crest-1' } }}
+        updateState={updateState}
+      />,
+    );
+
+    const library = screen.getByLabelText('Added artwork');
+    fireEvent.click(within(library).getByRole('button', { name: 'Delete Roundel Badge' }));
+    expect(updateState).toHaveBeenLastCalledWith({
+      overrides: { decorations: [first], activeDecorationId: 'crest-1' },
+    });
+
+    fireEvent.click(within(library).getByRole('button', { name: 'Delete Crest Badge' }));
+    expect(updateState).toHaveBeenLastCalledWith({
+      overrides: { decorations: [second], activeDecorationId: null },
+    });
   });
 });

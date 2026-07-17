@@ -643,6 +643,75 @@
   font-weight: 750;
 }
 
+.decoration-panel .artwork-library {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.decoration-panel .artwork-library-item {
+  position: relative;
+  min-width: 0;
+}
+
+.decoration-panel .artwork-library-select {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.decoration-panel .artwork-library-select[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+}
+
+.decoration-panel .artwork-library-select:focus-visible,
+.decoration-panel .artwork-library-delete:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.decoration-panel .artwork-library-select img {
+  width: 100%;
+  height: 58px;
+  border-radius: 5px;
+  background: #e9e5dc;
+  object-fit: contain;
+}
+
+.decoration-panel .artwork-library-select span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decoration-panel .artwork-library-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+
 .decoration-actions {
   display: grid;
   gap: 8px;

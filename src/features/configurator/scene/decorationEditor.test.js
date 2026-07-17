@@ -56,12 +56,12 @@ describe('decoration editor geometry', () => {
     expect(toRegionTransform('right-sleeve', position)).toEqual({ x: -0.4, y: 0.35 });
   });
 
-  it('resolves a pattern preset to its renderable asset instead of its source id', () => {
+  it('resolves the Crest Badge preset to its renderable asset instead of its source id', () => {
     const assetUrl = 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E';
 
     expect(resolveDecorationAsset(
-      { kind: 'pattern', source: 'golden-stripe' },
-      [{ source: 'golden-stripe', assetUrl }],
+      { kind: 'badge', source: 'crest-badge' },
+      [{ source: 'crest-badge', assetUrl }],
     )).toBe(assetUrl);
   });
 

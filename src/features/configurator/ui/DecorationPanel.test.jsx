@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createDecoration } from '../config/decorations.js';
 import { jerseyProduct } from '../config/productDefinitions.js';
@@ -42,6 +42,44 @@ describe('DecorationPanel', () => {
   it('only exposes the two badge artwork presets', () => {
     expect(jerseyProduct).not.toHaveProperty('decorationRegions');
     expect(jerseyProduct.decorationPresets.map(({ id }) => id)).toEqual(['crest-badge', 'roundel-badge']);
+  });
+
+  it('uploads valid artwork onto the front and selects it', async () => {
+    const updateState = vi.fn();
+    const result = 'data:image/png;base64,uploaded-artwork';
+
+    vi.stubGlobal('FileReader', class {
+      readAsDataURL() {
+        setTimeout(() => {
+          this.result = result;
+          this.onload();
+        }, 0);
+      }
+    });
+
+    try {
+      const { container } = render(
+        <DecorationPanel
+          product={product}
+          state={{ overrides: { decorations: [] } }}
+          updateState={updateState}
+        />,
+      );
+      const file = new File(['image-content'], 'crest.png', { type: 'image/png' });
+
+      fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [file] } });
+
+      await waitFor(() => {
+        expect(updateState).toHaveBeenCalledWith({
+          overrides: {
+            decorations: [expect.objectContaining({ kind: 'upload', region: 'front', source: result })],
+            activeDecorationId: expect.any(String),
+          },
+        });
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('explains the artwork limit instead of silently disabling preset selection', () => {

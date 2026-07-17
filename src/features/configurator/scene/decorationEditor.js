@@ -196,6 +196,25 @@ export function getPlacementFromIntersection(hit, region, fallback = null) {
   return hit ? placementFromIntersection(hit, region) : fallback;
 }
 
+export function getDecorationGrabOffset(point, placement) {
+  if (!point || !placement?.position) return null;
+  const offset = toVector(point).sub(toVector(placement.position));
+  const normal = placement.normal ? toVector(placement.normal) : null;
+  if (normal?.lengthSq() > 0) {
+    normal.normalize();
+    offset.addScaledVector(normal, -offset.dot(normal));
+  }
+  return toPlainVector(offset);
+}
+
+export function applyDecorationGrabOffset(placement, grabOffset) {
+  if (!placement || !grabOffset) return placement;
+  return {
+    ...placement,
+    position: toPlainVector(toVector(placement.position).sub(toVector(grabOffset))),
+  };
+}
+
 function findGarmentMeshForPlacement(meshes, placement) {
   if (!placement || !meshes.length) return null;
   const normal = toVector(placement.normal).normalize();
@@ -369,13 +388,19 @@ export class DecorationEditor {
   }
 
   handlePointerDown(event) {
-    const decoration = this.pickDecoration(event);
+    const picked = this.pickDecoration(event);
+    const decoration = picked?.decoration ?? picked;
     if (!decoration) return false;
 
     const isNewSelection = this.selectedId !== decoration.id;
     this.selectedId = decoration.id;
     this.onSelectionChange?.(decoration.id);
-    this.pendingDrag = { id: decoration.id, x: event.clientX, y: event.clientY };
+    this.pendingDrag = {
+      id: decoration.id,
+      x: event.clientX,
+      y: event.clientY,
+      grabOffset: getDecorationGrabOffset(picked?.point, decoration.placement),
+    };
     this.dragging = false;
     this.refreshSelection();
     if (isNewSelection) this.flashSelection(decoration.id);
@@ -401,7 +426,9 @@ export class DecorationEditor {
     if (!decoration) return false;
     const placement = getPlacementFromIntersection(this.pickGarment(event), decoration.region, null);
     if (!placement) return false;
-    this.emitPatch(decoration.id, { placement });
+    this.emitPatch(decoration.id, {
+      placement: applyDecorationGrabOffset(placement, this.pendingDrag.grabOffset),
+    });
     return true;
   }
 
@@ -443,7 +470,8 @@ export class DecorationEditor {
     const targets = [...this.surfaces.values()];
     const hit = this.raycaster.intersectObjects(targets, false)[0];
     if (!hit) return null;
-    return this.decorations.find((decoration) => decoration.id === hit.object.userData.decorationId) ?? null;
+    const decoration = this.decorations.find((item) => item.id === hit.object.userData.decorationId);
+    return decoration ? { decoration, point: hit.point.clone() } : null;
   }
 
   pickGarment(event) {

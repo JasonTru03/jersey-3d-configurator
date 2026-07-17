@@ -12,6 +12,7 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
       constructor(host, options) {
         rendererHarness.options = options;
         this.onPrintAnchorChange = options.onPrintAnchorChange;
+        this.onDecorationAnchorChange = options.onDecorationAnchorChange;
       }
 
       update() {
@@ -46,6 +47,16 @@ beforeEach(() => {
 });
 
 describe('ProductStage print toolbar', () => {
+  it('shows and hides the artwork selection frame from renderer decoration anchors', () => {
+    render(<ProductStage onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'none', overrides: {} }} />);
+
+    act(() => rendererHarness.options.onDecorationAnchorChange({ visible: true, left: 180, top: 220, width: 96, height: 54 }));
+    expect(screen.getByTestId('artwork-selection-frame')).toBeInTheDocument();
+
+    act(() => rendererHarness.options.onDecorationAnchorChange({ visible: false }));
+    expect(screen.queryByTestId('artwork-selection-frame')).not.toBeInTheDocument();
+  });
+
   it('only shows controls after a print is selected and hides them after blank-stage selection clears', () => {
     render(<ProductStage onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
 

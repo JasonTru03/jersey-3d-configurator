@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes, shouldEnableOrbitControls } from './garmentRenderer.js';
+import { getDecorationSelectionRect, getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes, shouldEnableOrbitControls } from './garmentRenderer.js';
 
 describe('garment decoration mesh selection', () => {
   it('enables orbit controls only when no artwork or print drag is active', () => {
@@ -55,6 +55,38 @@ describe('garment decoration mesh selection', () => {
       { x: 0.2, y: 0.3, z: 0 },
       { x: -0.2, y: -0.3, z: 0 },
       { x: 0.2, y: -0.3, z: 1.1 },
+    ], { width: 500, height: 400 })).toEqual({ visible: false });
+  });
+
+  it('converts eight visible artwork bounds corners into a stage-relative selection rectangle', () => {
+    expect(getDecorationSelectionRect([
+      { x: -0.3, y: 0.4, z: -0.2 },
+      { x: 0.3, y: 0.4, z: -0.2 },
+      { x: -0.3, y: -0.2, z: -0.2 },
+      { x: 0.3, y: -0.2, z: -0.2 },
+      { x: -0.3, y: 0.4, z: 0.2 },
+      { x: 0.3, y: 0.4, z: 0.2 },
+      { x: -0.3, y: -0.2, z: 0.2 },
+      { x: 0.3, y: -0.2, z: 0.2 },
+    ], { width: 500, height: 400 })).toEqual({
+      visible: true,
+      left: 175,
+      top: 120,
+      width: 150,
+      height: 120,
+    });
+  });
+
+  it('hides an artwork selection rectangle when any bounds corner is outside the camera view', () => {
+    expect(getDecorationSelectionRect([
+      { x: -0.3, y: 0.4, z: -0.2 },
+      { x: 0.3, y: 0.4, z: -0.2 },
+      { x: -0.3, y: -0.2, z: -0.2 },
+      { x: 0.3, y: -0.2, z: -0.2 },
+      { x: -0.3, y: 0.4, z: 0.2 },
+      { x: 1.01, y: 0.4, z: 0.2 },
+      { x: -0.3, y: -0.2, z: 0.2 },
+      { x: 0.3, y: -0.2, z: 0.2 },
     ], { width: 500, height: 400 })).toEqual({ visible: false });
   });
 

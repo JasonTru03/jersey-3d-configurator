@@ -238,6 +238,10 @@ export class DecorationEditor {
     this.migratedDecorationIds = new Set();
   }
 
+  get selectedSurface() {
+    return this.selectedId ? this.surfaces.get(this.selectedId) ?? null : null;
+  }
+
   setGarmentMeshes(meshes = []) {
     this.garmentMeshes = meshes;
   }

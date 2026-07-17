@@ -141,6 +141,38 @@ describe('decoration editor geometry', () => {
     expect(nextPlacement.position).toEqual({ x: -0.28, y: 0.67, z: 1 });
   });
 
+  it('keeps the same decal-local grab point when a drag crosses surfaces with different normals and rotation', () => {
+    const originalPlacement = {
+      region: 'front',
+      position: { x: 0.4, y: 0.2, z: 1 },
+      normal: { x: 0, y: 0, z: 1 },
+    };
+    const pointerHit = new THREE.Vector3(0.58, 0.08, 1.03);
+    const nextGarmentHit = {
+      region: 'right-sleeve',
+      position: { x: 1.1, y: 0.55, z: 0.35 },
+      normal: { x: 1, y: 0, z: 0 },
+    };
+    const rotation = 37;
+
+    const offset = getDecorationGrabOffset(pointerHit, originalPlacement, rotation);
+    const nextPlacement = applyDecorationGrabOffset(nextGarmentHit, offset, rotation);
+    const orientation = new THREE.Quaternion()
+      .setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0))
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), THREE.MathUtils.degToRad(rotation)));
+    const resolvedGrabPoint = new THREE.Vector3(
+      nextPlacement.position.x,
+      nextPlacement.position.y,
+      nextPlacement.position.z,
+    ).add(new THREE.Vector3(offset.x, offset.y, offset.z).applyQuaternion(orientation));
+
+    expect(resolvedGrabPoint.distanceTo(new THREE.Vector3(
+      nextGarmentHit.position.x,
+      nextGarmentHit.position.y,
+      nextGarmentHit.position.z,
+    ))).toBeLessThan(0.0002);
+  });
+
   it('preserves the grab offset when the first movement crosses the drag threshold', () => {
     const onDecorationsChange = vi.fn();
     const decoration = {

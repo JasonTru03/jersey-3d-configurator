@@ -169,10 +169,7 @@ export function createDecalSurface(texture, mesh, placement, transform) {
 }
 
 function createDecalGeometry(mesh, placement, transform, aspect = 1) {
-  const normal = toVector(placement.normal).normalize();
-  const orientation = new THREE.Quaternion()
-    .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
-    .multiply(new THREE.Quaternion().setFromAxisAngle(normal, THREE.MathUtils.degToRad(transform.rotation ?? 0)));
+  const orientation = getDecalOrientation(placement, transform.rotation);
   const size = 0.6 * toSpriteTransform(transform).scale;
   return new DecalGeometry(
     mesh,
@@ -196,7 +193,7 @@ export function getPlacementFromIntersection(hit, region, fallback = null) {
   return hit ? placementFromIntersection(hit, region) : fallback;
 }
 
-export function getDecorationGrabOffset(point, placement) {
+export function getDecorationGrabOffset(point, placement, rotation = 0) {
   if (!point || !placement?.position) return null;
   const offset = toVector(point).sub(toVector(placement.position));
   const normal = placement.normal ? toVector(placement.normal) : null;
@@ -204,15 +201,24 @@ export function getDecorationGrabOffset(point, placement) {
     normal.normalize();
     offset.addScaledVector(normal, -offset.dot(normal));
   }
-  return toPlainVector(offset);
+  return toPlainVector(offset.applyQuaternion(getDecalOrientation(placement, rotation).invert()));
 }
 
-export function applyDecorationGrabOffset(placement, grabOffset) {
+export function applyDecorationGrabOffset(placement, grabOffset, rotation = 0) {
   if (!placement || !grabOffset) return placement;
   return {
     ...placement,
-    position: toPlainVector(toVector(placement.position).sub(toVector(grabOffset))),
+    position: toPlainVector(toVector(placement.position).sub(
+      toVector(grabOffset).applyQuaternion(getDecalOrientation(placement, rotation)),
+    )),
   };
+}
+
+function getDecalOrientation(placement, rotation = 0) {
+  const normal = toVector(placement?.normal ?? { x: 0, y: 0, z: 1 }).normalize();
+  return new THREE.Quaternion()
+    .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(normal, THREE.MathUtils.degToRad(rotation ?? 0)));
 }
 
 function findGarmentMeshForPlacement(meshes, placement) {
@@ -399,7 +405,7 @@ export class DecorationEditor {
       id: decoration.id,
       x: event.clientX,
       y: event.clientY,
-      grabOffset: getDecorationGrabOffset(picked?.point, decoration.placement),
+      grabOffset: getDecorationGrabOffset(picked?.point, decoration.placement, decoration.rotation),
     };
     this.dragging = false;
     this.refreshSelection();
@@ -427,7 +433,7 @@ export class DecorationEditor {
     const placement = getPlacementFromIntersection(this.pickGarment(event), decoration.region, null);
     if (!placement) return false;
     this.emitPatch(decoration.id, {
-      placement: applyDecorationGrabOffset(placement, this.pendingDrag.grabOffset),
+      placement: applyDecorationGrabOffset(placement, this.pendingDrag.grabOffset, decoration.rotation),
     });
     return true;
   }

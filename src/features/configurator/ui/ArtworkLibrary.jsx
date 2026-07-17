@@ -1,6 +1,6 @@
 import { Trash2 } from 'lucide-react';
 
-export function ArtworkLibrary({ decorations, activeDecorationId, onSelect, onDelete, resolveAsset }) {
+export function ArtworkLibrary({ decorations, activeDecorationId, onSelect, onDelete }) {
   return (
     <section aria-label="Added artwork" className="artwork-library">
       {decorations.slice(0, 8).map((decoration) => (
@@ -11,7 +11,6 @@ export function ArtworkLibrary({ decorations, activeDecorationId, onSelect, onDe
             onClick={() => onSelect(decoration.id)}
             type="button"
           >
-            <img alt="" src={resolveAsset(decoration)} />
             <span>{decoration.label}</span>
           </button>
           <button

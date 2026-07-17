@@ -636,21 +636,23 @@
 
 .decoration-panel .artwork-library {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
 }
 
 .decoration-panel .artwork-library-item {
-  position: relative;
+  display: flex;
+  gap: 6px;
   min-width: 0;
 }
 
 .decoration-panel .artwork-library-select {
-  display: grid;
-  width: 100%;
-  gap: 6px;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-height: 36px;
   min-width: 0;
-  padding: 7px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
@@ -671,14 +673,6 @@
   outline-offset: 2px;
 }
 
-.decoration-panel .artwork-library-select img {
-  width: 100%;
-  height: 58px;
-  border-radius: 5px;
-  background: #e9e5dc;
-  object-fit: contain;
-}
-
 .decoration-panel .artwork-library-select span {
   overflow: hidden;
   font-size: 12px;
@@ -688,12 +682,10 @@
 }
 
 .decoration-panel .artwork-library-delete {
-  position: absolute;
-  top: 4px;
-  right: 4px;
   display: inline-grid;
+  flex: 0 0 36px;
   width: 24px;
-  height: 24px;
+  min-height: 36px;
   padding: 0;
   place-items: center;
   border: 1px solid var(--line);

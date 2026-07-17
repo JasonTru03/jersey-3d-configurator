@@ -128,7 +128,7 @@ describe('DecorationPanel', () => {
 
     const library = screen.getByLabelText('Added artwork');
     expect(within(library).getByRole('button', { name: 'Crest Badge' })).toHaveAttribute('aria-pressed', 'true');
-    expect(library.querySelector('img')).toHaveAttribute('src', 'data:image/svg+xml,crest');
+    expect(library.querySelector('img')).not.toBeInTheDocument();
     fireEvent.click(within(library).getByRole('button', { name: 'Roundel Badge' }));
 
     expect(updateState).toHaveBeenCalledWith({

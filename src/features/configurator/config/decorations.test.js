@@ -101,4 +101,10 @@ describe('decoration helpers', () => {
       [{ source: 'golden-stripe', assetUrl: LEGACY_PATTERN_ASSET_URLS['golden-stripe'] }],
     )).toBe(uploadDataUrl);
   });
+
+  it('returns the source when no preset or legacy asset matches', () => {
+    const source = 'custom-pattern-source';
+
+    expect(resolveDecorationAsset({ kind: 'pattern', source }, [])).toBe(source);
+  });
 });

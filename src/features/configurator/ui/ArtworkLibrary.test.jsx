@@ -21,6 +21,7 @@ describe('ArtworkLibrary', () => {
       />,
     );
 
+    expect(screen.getByRole('region', { name: 'Added artwork' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Crest Badge' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Sponsor Logo' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'Delete Crest Badge' })).toBeInTheDocument();

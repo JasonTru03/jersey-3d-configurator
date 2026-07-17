@@ -2,7 +2,7 @@ import { Trash2 } from 'lucide-react';
 
 export function ArtworkLibrary({ decorations, activeDecorationId, onSelect, onDelete, resolveAsset }) {
   return (
-    <div aria-label="Added artwork" className="artwork-library">
+    <section aria-label="Added artwork" className="artwork-library">
       {decorations.slice(0, 8).map((decoration) => (
         <div className="artwork-library-item" key={decoration.id}>
           <button
@@ -24,6 +24,6 @@ export function ArtworkLibrary({ decorations, activeDecorationId, onSelect, onDe
           </button>
         </div>
       ))}
-    </div>
+    </section>
   );
 }

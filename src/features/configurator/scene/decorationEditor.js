@@ -231,6 +231,7 @@ export class DecorationEditor {
     this.decorations = [];
     this.selectedId = null;
     this.selectionFlashTimer = null;
+    this.selectionFlashId = null;
     this.dragging = false;
     this.migratedDecorationIds = new Set();
   }
@@ -286,6 +287,9 @@ export class DecorationEditor {
 
     this.selectedId = remaining.has(selectedId) ? selectedId : null;
     this.refreshSelection();
+    if (this.selectionFlashId === this.selectedId) {
+      this.applySelectionFlash(this.selectedId);
+    }
     if (this.selectedId && this.selectedId !== previousSelectedId) {
       this.flashSelection(this.selectedId);
     }
@@ -359,6 +363,7 @@ export class DecorationEditor {
     this.selectedId = null;
     clearTimeout(this.selectionFlashTimer);
     this.selectionFlashTimer = null;
+    this.selectionFlashId = null;
     this.onSelectionChange?.(null);
     this.refreshSelection();
   }
@@ -392,6 +397,7 @@ export class DecorationEditor {
   dispose() {
     clearTimeout(this.selectionFlashTimer);
     this.selectionFlashTimer = null;
+    this.selectionFlashId = null;
     this.surfaces.forEach((surface) => {
       surface.geometry.dispose();
       surface.material.map?.dispose();
@@ -447,12 +453,23 @@ export class DecorationEditor {
   flashSelection(id) {
     clearTimeout(this.selectionFlashTimer);
     const surface = this.surfaces.get(id);
+    if (!surface) {
+      this.selectionFlashId = null;
+      return;
+    }
+    this.selectionFlashId = id;
+    this.applySelectionFlash(id);
+    this.selectionFlashTimer = setTimeout(() => {
+      this.selectionFlashTimer = null;
+      this.selectionFlashId = null;
+      if (this.selectedId === id) this.refreshSelection();
+    }, SELECTION_FLASH_DURATION);
+  }
+
+  applySelectionFlash(id) {
+    const surface = this.surfaces.get(id);
     if (!surface) return;
     surface.material.opacity = 0.72;
     surface.material.color.set('#ffd166');
-    this.selectionFlashTimer = setTimeout(() => {
-      this.selectionFlashTimer = null;
-      if (this.selectedId === id) this.refreshSelection();
-    }, SELECTION_FLASH_DURATION);
   }
 }

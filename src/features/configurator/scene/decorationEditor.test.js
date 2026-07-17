@@ -110,6 +110,45 @@ describe('decoration editor geometry', () => {
     editor.dispose();
   });
 
+  it('keeps a new canvas selection flashed when its active id is synced back immediately', () => {
+    vi.useFakeTimers();
+    const decoration = {
+      id: 'crest',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotation: 0,
+      placement: { region: 'front', position: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
+    };
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onSelectionChange: vi.fn(),
+    });
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
+    editor.surfaces.set(decoration.id, surface);
+    editor.decorations = [decoration];
+    editor.pickDecoration = () => decoration;
+
+    editor.handlePointerDown({});
+    editor.update([decoration], decoration.id, []);
+
+    expect(surface.material.color.getHexString()).toBe('ffd166');
+    expect(surface.material.opacity).toBe(0.72);
+
+    vi.advanceTimersByTime(200);
+
+    expect(surface.material.color.getHexString()).toBe('ffffff');
+    expect(surface.material.opacity).toBe(1);
+
+    editor.dispose();
+  });
+
   it('updates an empty decoration collection without invoking removed camera-facing behavior', () => {
     const editor = new DecorationEditor({
       camera: new THREE.PerspectiveCamera(),

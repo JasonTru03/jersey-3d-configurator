@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes } from './garmentRenderer.js';
+import { getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes, shouldEnableOrbitControls } from './garmentRenderer.js';
 
 describe('garment decoration mesh selection', () => {
+  it('enables orbit controls only when no artwork or print drag is active', () => {
+    expect(shouldEnableOrbitControls({ isDraggingDecoration: false, isDraggingPrint: false })).toBe(true);
+    expect(shouldEnableOrbitControls({ isDraggingDecoration: true, isDraggingPrint: false })).toBe(false);
+    expect(shouldEnableOrbitControls({ isDraggingDecoration: false, isDraggingPrint: true })).toBe(false);
+  });
+
   it('uses cloth meshes instead of topstitch meshes for artwork placement', () => {
     const cloth = new THREE.Mesh();
     cloth.name = 'Cloth_mesh';

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   DecorationEditor,
@@ -15,6 +15,37 @@ import {
 } from './decorationEditor.js';
 
 describe('decoration editor geometry', () => {
+  it('does not report editing when artwork is selected but not being dragged', () => {
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+    });
+    editor.selectedId = 'crest';
+
+    expect(editor.isEditing()).toBe(false);
+
+    editor.dispose();
+  });
+
+  it('keeps selected artwork when a pointer starts outside the artwork', () => {
+    const onSelectionChange = vi.fn();
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onSelectionChange,
+    });
+    editor.selectedId = 'crest';
+    editor.pickDecoration = () => null;
+
+    expect(editor.handlePointerDown({})).toBe(false);
+    expect(editor.selectedId).toBe('crest');
+    expect(onSelectionChange).not.toHaveBeenCalled();
+
+    editor.dispose();
+  });
+
   it('updates an empty decoration collection without invoking removed camera-facing behavior', () => {
     const editor = new DecorationEditor({
       camera: new THREE.PerspectiveCamera(),

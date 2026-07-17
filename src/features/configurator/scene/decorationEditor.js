@@ -339,15 +339,7 @@ export class DecorationEditor {
 
   handlePointerDown(event) {
     const decoration = this.pickDecoration(event);
-    if (!decoration) {
-      if (this.selectedId) {
-        this.selectedId = null;
-        this.onSelectionChange?.(null);
-        this.refreshSelection();
-        return true;
-      }
-      return false;
-    }
+    if (!decoration) return false;
 
     this.selectedId = decoration.id;
     this.onSelectionChange?.(decoration.id);
@@ -379,7 +371,7 @@ export class DecorationEditor {
   }
 
   isEditing() {
-    return Boolean(this.selectedId || this.dragging);
+    return this.dragging;
   }
 
   dispose() {

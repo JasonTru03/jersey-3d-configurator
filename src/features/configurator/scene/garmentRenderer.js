@@ -16,6 +16,10 @@ export function getPrintPointerDownAction({ hasPrintHit, handledDecoration }) {
   return 'deselect-print';
 }
 
+export function shouldEnableOrbitControls({ isDraggingDecoration, isDraggingPrint }) {
+  return !isDraggingDecoration && !isDraggingPrint;
+}
+
 export function hasExceededPrintDragThreshold(start, event) {
   return Math.hypot(event.clientX - start.x, event.clientY - start.y) > PRINT_DRAG_THRESHOLD;
 }
@@ -160,7 +164,10 @@ export class GarmentRenderer {
       state.overrides?.activeDecorationId,
       product.decorationPresets ?? [],
     );
-    this.controls.enabled = !this.decorationEditor.isEditing() && !this.isDraggingPrint;
+    this.controls.enabled = shouldEnableOrbitControls({
+      isDraggingDecoration: this.decorationEditor.isEditing(),
+      isDraggingPrint: this.isDraggingPrint,
+    });
   }
 
   setView(view) {
@@ -461,7 +468,10 @@ export class GarmentRenderer {
       return;
     }
     if (action === 'decoration') {
-      this.controls.enabled = !this.decorationEditor.isEditing();
+      this.controls.enabled = shouldEnableOrbitControls({
+        isDraggingDecoration: this.decorationEditor.isEditing(),
+        isDraggingPrint: this.isDraggingPrint,
+      });
       event.preventDefault();
       return;
     }
@@ -491,7 +501,10 @@ export class GarmentRenderer {
 
   handlePointerUp = () => {
     if (this.decorationEditor?.handlePointerUp()) {
-      this.controls.enabled = !this.decorationEditor.isEditing();
+      this.controls.enabled = shouldEnableOrbitControls({
+        isDraggingDecoration: this.decorationEditor.isEditing(),
+        isDraggingPrint: this.isDraggingPrint,
+      });
       return;
     }
     this.pendingPrintDrag = null;

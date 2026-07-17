@@ -117,6 +117,7 @@ export class GarmentRenderer {
     this.lastPrintAnchor = null;
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
+    this.pendingDecorationDeselect = null;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
       camera: this.camera,
@@ -198,6 +199,7 @@ export class GarmentRenderer {
   dispose() {
     cancelAnimationFrame(this.frame);
     this.loadToken = Symbol('disposed');
+    this.pendingDecorationDeselect = null;
     this.resizeObserver?.disconnect();
     this.controls?.dispose();
     this.renderer?.domElement.removeEventListener('contextmenu', preventContextMenu);
@@ -448,6 +450,7 @@ export class GarmentRenderer {
     this.activePrintId = null;
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
+    this.pendingDecorationDeselect = null;
     this.syncPrintAnchor();
   }
 
@@ -463,6 +466,7 @@ export class GarmentRenderer {
     const handledDecoration = !printHit && this.decorationEditor?.handlePointerDown(event);
     const action = getPrintPointerDownAction({ hasPrintHit: Boolean(printHit), handledDecoration: Boolean(handledDecoration) });
     if (action === 'select-print') {
+      this.pendingDecorationDeselect = null;
       this.activePrintId = printHit.object.userData.printId;
       this.onPrintSelectionChange?.(this.activePrintId);
       this.syncPrintAnchor();
@@ -473,6 +477,7 @@ export class GarmentRenderer {
       return;
     }
     if (action === 'decoration') {
+      this.pendingDecorationDeselect = null;
       this.controls.enabled = shouldEnableOrbitControls({
         isDraggingDecoration: this.decorationEditor.isEditing(),
         isDraggingPrint: this.isDraggingPrint,
@@ -482,7 +487,10 @@ export class GarmentRenderer {
     }
     this.pendingPrintDrag = null;
     this.onPrintSelectionChange?.(null);
-    this.decorationEditor?.clearSelection();
+    this.pendingDecorationDeselect = this.decorationEditor?.selectedId
+      ? { x: event.clientX, y: event.clientY }
+      : null;
+    if (!this.pendingDecorationDeselect) this.decorationEditor?.clearSelection();
     this.lastPrintAnchor = null;
     this.onPrintAnchorChange?.({ visible: false });
   };
@@ -491,6 +499,10 @@ export class GarmentRenderer {
     if (this.decorationEditor?.handlePointerMove(event)) {
       event.preventDefault();
       return;
+    }
+    if (this.pendingDecorationDeselect
+      && hasExceededPrintDragThreshold(this.pendingDecorationDeselect, event)) {
+      this.pendingDecorationDeselect = null;
     }
     if (!this.isDraggingPrint && this.pendingPrintDrag) {
       if (!hasExceededPrintDragThreshold(this.pendingPrintDrag, event)) return;
@@ -507,12 +519,16 @@ export class GarmentRenderer {
 
   handlePointerUp = () => {
     if (this.decorationEditor?.handlePointerUp()) {
+      this.pendingDecorationDeselect = null;
       this.controls.enabled = shouldEnableOrbitControls({
         isDraggingDecoration: this.decorationEditor.isEditing(),
         isDraggingPrint: this.isDraggingPrint,
       });
       return;
     }
+    const shouldDeselectDecoration = Boolean(this.pendingDecorationDeselect);
+    this.pendingDecorationDeselect = null;
+    if (shouldDeselectDecoration) this.decorationEditor?.clearSelection();
     this.pendingPrintDrag = null;
     if (!this.isDraggingPrint) return;
     this.isDraggingPrint = false;

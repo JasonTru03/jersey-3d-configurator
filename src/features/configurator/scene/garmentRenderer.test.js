@@ -1,6 +1,59 @@
-import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
+vi.mock('three', async () => {
+  const actual = await vi.importActual('three');
+  return {
+    ...actual,
+    WebGLRenderer: class {
+      constructor() {
+        this.domElement = document.createElement('canvas');
+        this.shadowMap = {};
+      }
+
+      setPixelRatio() {}
+      setSize() {}
+      render() {}
+      dispose() {}
+    },
+  };
+});
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  disconnect() {}
+});
+vi.stubGlobal('requestAnimationFrame', () => 1);
+
+import * as THREE from 'three';
 import { GarmentRenderer, getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes, shouldEnableOrbitControls } from './garmentRenderer.js';
+
+function createPointerRenderer({ selectedDecorationId = null, printHit = null, decorationHit = false } = {}) {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const renderer = new GarmentRenderer(host);
+  renderer.pickPrint = vi.fn(() => printHit);
+  renderer.decorationEditor = {
+    selectedId: selectedDecorationId,
+    handlePointerDown: vi.fn(() => decorationHit),
+    handlePointerMove: vi.fn(() => false),
+    handlePointerUp: vi.fn(() => false),
+    clearSelection: vi.fn(),
+    isEditing: vi.fn(() => false),
+    dispose: vi.fn(),
+  };
+  renderer.controls = { enabled: true, dispose: vi.fn() };
+  renderer.isDraggingPrint = false;
+  renderer.pendingPrintDrag = null;
+  renderer.pendingDecorationDeselect = null;
+  renderer.onPrintSelectionChange = vi.fn();
+  renderer.onPrintAnchorChange = vi.fn();
+  renderer.syncPrintAnchor = vi.fn();
+  renderer.isPrintEditable = vi.fn(() => false);
+  renderer.emitPrintPlacement = vi.fn();
+  return renderer;
+}
+
+function pointerEvent(x, y) {
+  return { clientX: x, clientY: y, preventDefault: vi.fn() };
+}
 
 describe('garment decoration mesh selection', () => {
   it('enables orbit controls only when no artwork or print drag is active', () => {
@@ -78,5 +131,72 @@ describe('garment decoration mesh selection', () => {
   it('does not start a drag until the pointer has moved more than four pixels', () => {
     expect(hasExceededPrintDragThreshold({ x: 100, y: 100 }, { clientX: 103, clientY: 102 })).toBe(false);
     expect(hasExceededPrintDragThreshold({ x: 100, y: 100 }, { clientX: 105, clientY: 103 })).toBe(true);
+  });
+
+  it('clears selected artwork after a short blank-canvas click', () => {
+    const renderer = createPointerRenderer({ selectedDecorationId: 'crest' });
+    const event = pointerEvent(100, 100);
+
+    renderer.handlePointerDown(event);
+    expect(renderer.decorationEditor.clearSelection).not.toHaveBeenCalled();
+    expect(renderer.pendingDecorationDeselect).toEqual({ x: 100, y: 100 });
+    renderer.handlePointerUp();
+
+    expect(renderer.decorationEditor.clearSelection).toHaveBeenCalledOnce();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(renderer.pendingDecorationDeselect).toBeNull();
+  });
+
+  it('keeps selected artwork and orbit controls enabled after dragging from blank canvas', () => {
+    const renderer = createPointerRenderer({ selectedDecorationId: 'crest' });
+    const event = pointerEvent(100, 100);
+
+    renderer.handlePointerDown(event);
+    renderer.handlePointerMove(pointerEvent(106, 100));
+    renderer.handlePointerUp();
+
+    expect(renderer.decorationEditor.clearSelection).not.toHaveBeenCalled();
+    expect(renderer.controls.enabled).toBe(true);
+    expect(renderer.pendingDecorationDeselect).toBeNull();
+  });
+
+  it('does not queue artwork deselection for artwork or print hits', () => {
+    const artworkRenderer = createPointerRenderer({ selectedDecorationId: 'crest', decorationHit: true });
+    const artworkEvent = pointerEvent(100, 100);
+    artworkRenderer.handlePointerDown(artworkEvent);
+
+    const printRenderer = createPointerRenderer({
+      selectedDecorationId: 'crest',
+      printHit: { object: { userData: { printId: 'number-1' } } },
+    });
+    const printEvent = pointerEvent(100, 100);
+    printRenderer.handlePointerDown(printEvent);
+
+    expect(artworkRenderer.pendingDecorationDeselect).toBeNull();
+    expect(artworkEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(artworkRenderer.decorationEditor.clearSelection).not.toHaveBeenCalled();
+    expect(printRenderer.pendingDecorationDeselect).toBeNull();
+    expect(printEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(printRenderer.decorationEditor.clearSelection).not.toHaveBeenCalled();
+  });
+
+  it('clears a pending artwork deselection when print layers are disposed', () => {
+    const renderer = createPointerRenderer();
+    renderer.printLayers = new Map();
+    renderer.activePrintId = 'number-1';
+    renderer.pendingDecorationDeselect = { x: 100, y: 100 };
+
+    renderer.disposePrintLayer();
+
+    expect(renderer.pendingDecorationDeselect).toBeNull();
+  });
+
+  it('clears a pending artwork deselection during renderer disposal', () => {
+    const renderer = createPointerRenderer();
+    renderer.pendingDecorationDeselect = { x: 100, y: 100 };
+
+    renderer.dispose();
+
+    expect(renderer.pendingDecorationDeselect).toBeNull();
   });
 });

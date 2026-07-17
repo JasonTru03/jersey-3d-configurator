@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   DecorationEditor,
@@ -12,6 +12,10 @@ import {
   toRegionTransform,
   toSpriteTransform,
 } from './decorationEditor.js';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('decoration editor geometry', () => {
   it('does not report editing when artwork is selected but not being dragged', () => {
@@ -41,6 +45,67 @@ describe('decoration editor geometry', () => {
     expect(editor.handlePointerDown({})).toBe(false);
     expect(editor.selectedId).toBe('crest');
     expect(onSelectionChange).not.toHaveBeenCalled();
+
+    editor.dispose();
+  });
+
+  it('clears the selected artwork and restores its unselected material state', () => {
+    const onSelectionChange = vi.fn();
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onSelectionChange,
+    });
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
+    editor.surfaces.set('crest', surface);
+    editor.selectedId = 'crest';
+
+    editor.clearSelection();
+
+    expect(editor.selectedId).toBeNull();
+    expect(onSelectionChange).toHaveBeenCalledWith(null);
+    expect(surface.material.opacity).toBe(0.92);
+    expect(surface.material.color.getHexString()).toBe('e8e8e8');
+
+    editor.dispose();
+  });
+
+  it('briefly flashes a newly synced artwork selection without persisting a transform', () => {
+    vi.useFakeTimers();
+    const onDecorationsChange = vi.fn();
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+      onDecorationsChange,
+    });
+    const decoration = {
+      id: 'crest',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      x: 0.25,
+      y: -0.2,
+      scale: 1.2,
+      rotation: 15,
+      placement: { region: 'front', position: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
+    };
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
+    editor.surfaces.set(decoration.id, surface);
+
+    editor.update([decoration], decoration.id, []);
+
+    expect(surface.material.color.getHexString()).toBe('ffd166');
+    expect(surface.material.opacity).toBe(0.72);
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+    expect(decoration).toMatchObject({ x: 0.25, y: -0.2, scale: 1.2, rotation: 15 });
+
+    vi.advanceTimersByTime(200);
+
+    expect(surface.material.color.getHexString()).toBe('ffffff');
+    expect(surface.material.opacity).toBe(1);
 
     editor.dispose();
   });

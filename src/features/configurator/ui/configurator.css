@@ -245,15 +245,6 @@
   pointer-events: none;
 }
 
-.artwork-selection-frame {
-  position: absolute;
-  z-index: 2;
-  box-sizing: border-box;
-  border: 2px solid #ef5d43;
-  border-radius: 3px;
-  pointer-events: none;
-}
-
 .print-control {
   position: absolute;
   display: grid;

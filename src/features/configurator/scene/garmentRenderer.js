@@ -40,11 +40,6 @@ export function getPrintSelectionRect(projectedCorners, { width, height }) {
   return getProjectedSelectionRect(projectedCorners, { width, height });
 }
 
-export function getDecorationSelectionRect(projectedCorners, { width, height }) {
-  if (projectedCorners.length !== 8) return { visible: false };
-  return getProjectedSelectionRect(projectedCorners, { width, height });
-}
-
 function getProjectedSelectionRect(projectedCorners, { width, height }) {
   if (!width || !height || projectedCorners.some((corner) => (
     corner.x < -1 || corner.x > 1 || corner.y < -1 || corner.y > 1 || corner.z < -1 || corner.z > 1
@@ -77,7 +72,6 @@ export class GarmentRenderer {
     this.onStatePatch = options.onStatePatch;
     this.onPrintAnchorChange = options.onPrintAnchorChange;
     this.onPrintSelectionChange = options.onPrintSelectionChange;
-    this.onDecorationAnchorChange = options.onDecorationAnchorChange;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#f3f1ec');
     this.camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
@@ -121,7 +115,6 @@ export class GarmentRenderer {
     this.printLayers = new Map();
     this.activePrintId = null;
     this.lastPrintAnchor = null;
-    this.lastDecorationAnchor = null;
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
     this.printColor = '#20242a';
@@ -176,7 +169,6 @@ export class GarmentRenderer {
       state.overrides?.activeDecorationId,
       product.decorationPresets ?? [],
     );
-    this.syncDecorationAnchor();
     this.controls.enabled = shouldEnableOrbitControls({
       isDraggingDecoration: this.decorationEditor.isEditing(),
       isDraggingPrint: this.isDraggingPrint,
@@ -215,8 +207,6 @@ export class GarmentRenderer {
     this.disposeGroup(this.root);
     this.disposePrintLayer();
     this.decorationEditor?.dispose();
-    this.lastDecorationAnchor = null;
-    this.onDecorationAnchorChange?.({ visible: false });
     this.renderer?.dispose();
     this.renderer?.domElement.remove();
   }
@@ -255,7 +245,6 @@ export class GarmentRenderer {
         this.state?.overrides?.activeDecorationId,
         this.product?.decorationPresets ?? [],
       );
-      this.syncDecorationAnchor();
       this.applyColors(this.selected?.colorway?.swatches);
       this.applyMaterial(this.selected?.material?.material);
       this.updatePrintLayer();
@@ -369,7 +358,6 @@ export class GarmentRenderer {
     this.frame = requestAnimationFrame(this.animate);
     this.controls.update();
     this.syncPrintAnchor();
-    this.syncDecorationAnchor();
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -381,16 +369,6 @@ export class GarmentRenderer {
     if (!hasPrintSelectionRectChanged(this.lastPrintAnchor, anchor)) return;
     this.lastPrintAnchor = anchor;
     this.onPrintAnchorChange?.(anchor);
-  }
-
-  syncDecorationAnchor() {
-    const surface = this.decorationEditor?.selectedSurface;
-    const anchor = surface
-      ? getDecorationSelectionRect(getObjectProjectedCorners(surface, this.camera), this.host.getBoundingClientRect())
-      : { visible: false };
-    if (!hasPrintSelectionRectChanged(this.lastDecorationAnchor, anchor)) return;
-    this.lastDecorationAnchor = anchor;
-    this.onDecorationAnchorChange?.(anchor);
   }
 
   disposeGroup(group) {
@@ -504,6 +482,7 @@ export class GarmentRenderer {
     }
     this.pendingPrintDrag = null;
     this.onPrintSelectionChange?.(null);
+    this.decorationEditor?.clearSelection();
     this.lastPrintAnchor = null;
     this.onPrintAnchorChange?.({ visible: false });
   };
@@ -697,24 +676,6 @@ function getPlaneProjectedCorners(plane, camera) {
     new THREE.Vector3(bounds.min.x, bounds.max.y, 0),
     new THREE.Vector3(bounds.max.x, bounds.max.y, 0),
   ].map((corner) => plane.localToWorld(corner).project(camera));
-}
-
-export function getObjectProjectedCorners(object, camera) {
-  object.updateWorldMatrix(true, false);
-  camera.updateMatrixWorld();
-  const bounds = new THREE.Box3().setFromObject(object);
-  if (bounds.isEmpty()) return [];
-
-  return [
-    new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
-    new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.max.z),
-    new THREE.Vector3(bounds.min.x, bounds.max.y, bounds.min.z),
-    new THREE.Vector3(bounds.min.x, bounds.max.y, bounds.max.z),
-    new THREE.Vector3(bounds.max.x, bounds.min.y, bounds.min.z),
-    new THREE.Vector3(bounds.max.x, bounds.min.y, bounds.max.z),
-    new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.min.z),
-    new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.max.z),
-  ].map((corner) => corner.project(camera));
 }
 
 function distanceBetweenPlacements(first, second) {

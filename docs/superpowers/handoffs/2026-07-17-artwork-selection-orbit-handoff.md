@@ -37,10 +37,10 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm test` | 退出码 `0`，19 个测试文件、81 个测试全部通过。 |
+| `npm test` | 退出码 `0`，19 个测试文件、86 个测试全部通过。 |
 | `npm run build:showcase` | 退出码 `0`，生产 showcase 构建成功。 |
 | `npm run dev` | 本地页面 `http://127.0.0.1:5173/` 返回 HTTP `200`，标题 `3D Product Configurator`；入口、App 与 ConfiguratorPage 模块均返回 HTTP `200`。 |
-| 构建提示 | 存在已知非阻塞 chunk-size warning：`index-B8XwZ_SP.js` 954.23 kB（gzip 264.95 kB），超过 500 kB 默认阈值。 |
+| 构建提示 | 存在已知非阻塞 chunk-size warning：`index-CXdAm99H.js` 954.69 kB（gzip 265.18 kB），超过 500 kB 默认阈值。 |
 
 未完成的真实浏览器验收：当前环境没有可受控的 WebGL 浏览器或 Playwright/Puppeteer 运行时。因此尚需用户在支持 WebGL 的浏览器实际检查 Artwork 三项入口、橙色框、图案拖动、图案外 orbit、右侧操作、删除隐藏、Name set 回归和窄视图布局。不得将这部分手工交互标记为已通过。
 

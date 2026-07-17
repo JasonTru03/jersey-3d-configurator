@@ -18,6 +18,49 @@ afterEach(() => {
 });
 
 describe('decoration editor geometry', () => {
+  it('returns a decoration geometry center in world coordinates', () => {
+    const scene = new THREE.Scene();
+    const parent = new THREE.Group();
+    parent.position.set(10, 20, 30);
+    scene.add(parent);
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: parent,
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      2, 4, 6,
+      6, 8, 10,
+    ], 3));
+    const surface = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+    surface.position.set(1, 2, 3);
+    editor.group.add(surface);
+    editor.surfaces.set('crest', surface);
+
+    expect(editor.getDecorationWorldCenter('crest')).toEqual(new THREE.Vector3(15, 28, 41));
+
+    editor.dispose();
+  });
+
+  it('returns null when a decoration surface or its bounding box is unavailable', () => {
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+    });
+    const surface = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+    surface.geometry.computeBoundingBox = () => {
+      surface.geometry.boundingBox = null;
+    };
+    editor.surfaces.set('empty', surface);
+
+    expect(editor.getDecorationWorldCenter('missing')).toBeNull();
+    expect(editor.getDecorationWorldCenter('empty')).toBeNull();
+
+    editor.dispose();
+  });
+
   it('does not report editing when artwork is selected but not being dragged', () => {
     const editor = new DecorationEditor({
       camera: new THREE.PerspectiveCamera(),

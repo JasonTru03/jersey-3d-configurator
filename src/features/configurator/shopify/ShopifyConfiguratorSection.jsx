@@ -20,6 +20,7 @@ const defaults = {
 export function ShopifyConfiguratorSection({ settings = defaults }) {
   const mergedSettings = { ...defaults, ...settings };
   const { product, quote, selected, state, updateState } = useShopifyConfigurator(mergedSettings);
+  const [artworkFocusId, setArtworkFocusId] = useState(null);
 
   useEffect(() => {
     if (!product || !selected || !state) return;
@@ -44,6 +45,7 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
 
       <div className="pc3d-layout">
         <ProductStage
+          artworkFocusId={artworkFocusId}
           onStatePatch={updateState}
           product={product}
           state={state}
@@ -78,7 +80,7 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
           )}
           <section className="pc3d-group">
             <h3>Artwork</h3>
-            <DecorationPanel product={product} state={state} updateState={updateState} />
+            <DecorationPanel onArtworkSelect={setArtworkFocusId} product={product} state={state} updateState={updateState} />
           </section>
           <ExtrasGroup extras={product.options.extras} state={state} updateState={updateState} />
           <Summary quote={quote} selected={selected} />

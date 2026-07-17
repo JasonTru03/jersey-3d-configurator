@@ -52,6 +52,7 @@ export function ConfiguratorPage() {
   const fileInputRef = useRef(null);
   const nameInputRef = useRef(null);
   const [editingPrintId, setEditingPrintId] = useState(null);
+  const [artworkFocusId, setArtworkFocusId] = useState(null);
   const [section, setSection] = useState('layout');
   const [theme, setTheme] = useState('light');
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -115,6 +116,7 @@ export function ConfiguratorPage() {
         {fileError && <p className="file-error" role="alert">{fileError}</p>}
         <div className="workspace-grid">
           <ProductStage
+            artworkFocusId={artworkFocusId}
             onEditPrint={(id) => {
               setEditingPrintId(id);
               setSection('lighting');
@@ -126,6 +128,7 @@ export function ConfiguratorPage() {
             selected={selected}
           />
           <ConfigPanel
+            onArtworkSelect={setArtworkFocusId}
             product={product}
             quote={quote}
             section={section}
@@ -211,7 +214,7 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThem
   );
 }
 
-function ConfigPanel({ editingPrintId, nameInputRef, onLightingSelect, product, quote, section, selected, state, updateState }) {
+function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLightingSelect, product, quote, section, selected, state, updateState }) {
   return (
     <aside className="config-panel">
       <PanelHeader labels={product.optionLabels} section={section} />
@@ -264,7 +267,7 @@ function ConfigPanel({ editingPrintId, nameInputRef, onLightingSelect, product, 
         />
       )}
       {section === 'decorations' && (
-        <DecorationPanel product={product} state={state} updateState={updateState} />
+        <DecorationPanel onArtworkSelect={onArtworkSelect} product={product} state={state} updateState={updateState} />
       )}
       <BuildSummary quote={quote} selected={selected} />
     </aside>

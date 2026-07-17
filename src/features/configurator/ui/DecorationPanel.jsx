@@ -1,9 +1,9 @@
 import { ImagePlus, RotateCcw, RotateCw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { createDecoration, MAX_DECORATIONS, patchDecoration, removeDecoration, resolveDecorationAsset, validateDecorationFile } from '../config/decorations.js';
+import { createDecoration, MAX_DECORATIONS, patchDecoration, removeDecoration, validateDecorationFile } from '../config/decorations.js';
 import { ArtworkLibrary } from './ArtworkLibrary.jsx';
 
-export function DecorationPanel({ product, state, updateState }) {
+export function DecorationPanel({ onArtworkSelect, product, state, updateState }) {
   const inputRef = useRef(null);
   const [message, setMessage] = useState('');
   const decorations = state.overrides?.decorations ?? [];
@@ -38,6 +38,7 @@ export function DecorationPanel({ product, state, updateState }) {
 
   function selectArtwork(id) {
     updateDecorations(decorations, id);
+    onArtworkSelect?.(id);
   }
 
   function removeArtwork(id) {
@@ -98,7 +99,6 @@ export function DecorationPanel({ product, state, updateState }) {
         decorations={decorations}
         onDelete={removeArtwork}
         onSelect={selectArtwork}
-        resolveAsset={(decoration) => resolveDecorationAsset(decoration, product.decorationPresets)}
       />
       {active && (
         <div className="decoration-actions">

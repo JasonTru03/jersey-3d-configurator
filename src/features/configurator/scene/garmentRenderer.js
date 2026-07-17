@@ -197,10 +197,45 @@ export class GarmentRenderer {
     });
   }
 
+  focusDecoration(id) {
+    const center = this.decorationEditor?.getDecorationWorldCenter(id);
+    if (!center) return false;
+
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const distance = THREE.MathUtils.clamp(
+      offset.length(),
+      this.controls.minDistance,
+      this.controls.maxDistance,
+    );
+    const direction = offset.lengthSq() > 0 ? offset.normalize() : new THREE.Vector3(0, 0, 1);
+    const position = center.clone().addScaledVector(direction, distance);
+
+    gsap.killTweensOf(this.camera.position);
+    gsap.killTweensOf(this.controls.target);
+    gsap.to(this.camera.position, {
+      x: position.x,
+      y: position.y,
+      z: position.z,
+      duration: 0.4,
+      ease: 'power2.out',
+      onUpdate: () => this.camera.lookAt(this.controls.target),
+    });
+    gsap.to(this.controls.target, {
+      x: center.x,
+      y: center.y,
+      z: center.z,
+      duration: 0.4,
+      ease: 'power2.out',
+    });
+    return true;
+  }
+
   dispose() {
     cancelAnimationFrame(this.frame);
     this.loadToken = Symbol('disposed');
     this.pendingDecorationDeselect = null;
+    gsap.killTweensOf(this.camera?.position);
+    gsap.killTweensOf(this.controls?.target);
     this.resizeObserver?.disconnect();
     this.controls?.dispose();
     this.renderer?.domElement.removeEventListener('contextmenu', preventContextMenu);

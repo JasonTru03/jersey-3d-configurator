@@ -1,6 +1,34 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ShopifyConfiguratorSection } from './ShopifyConfiguratorSection.jsx';
+
+const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null }));
+
+vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    GarmentRenderer: class {
+      update() {}
+      setActivePrintId() {}
+      setView() {}
+      focusDecoration(id) { rendererHarness.focusedDecorationId = id; }
+      dispose() {}
+    },
+  };
+});
+
+beforeAll(() => {
+  vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
+
+beforeEach(() => {
+  rendererHarness.focusedDecorationId = null;
+});
 
 describe('ShopifyConfiguratorSection', () => {
   it('renders from section settings and syncs configuration to the native product form', async () => {
@@ -67,6 +95,22 @@ describe('ShopifyConfiguratorSection', () => {
         source: 'crest-badge',
         region: 'front',
       });
+    });
+  });
+
+  it('forwards an artwork list click to the 3D stage without focusing on add', async () => {
+    document.body.innerHTML = '<form action="/cart/add" method="post"><input name="id" value="47824466051223"></form><div id="mount"></div>';
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Roundel Badge$/ }));
+    expect(rendererHarness.focusedDecorationId).toBeNull();
+
+    fireEvent.click(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Crest Badge' }));
+
+    await waitFor(() => {
+      expect(rendererHarness.focusedDecorationId).toMatch(/^preset-crest-badge-/);
     });
   });
 });

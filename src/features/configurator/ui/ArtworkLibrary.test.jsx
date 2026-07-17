@@ -8,16 +8,13 @@ const decorations = [
 ];
 
 describe('ArtworkLibrary', () => {
-  it('renders resolved previews with accessible selection and delete controls', () => {
-    const resolveAsset = vi.fn((decoration) => `resolved:${decoration.id}`);
-
+  it('renders a text-only list with accessible selection and delete controls', () => {
     render(
       <ArtworkLibrary
         activeDecorationId="crest-1"
         decorations={decorations}
         onDelete={vi.fn()}
         onSelect={vi.fn()}
-        resolveAsset={resolveAsset}
       />,
     );
 
@@ -25,10 +22,7 @@ describe('ArtworkLibrary', () => {
     expect(screen.getByRole('button', { name: 'Crest Badge' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Sponsor Logo' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'Delete Crest Badge' })).toBeInTheDocument();
-    const [crestPreview] = document.querySelectorAll('.artwork-library img');
-    expect(crestPreview).toHaveAttribute('alt', '');
-    expect(crestPreview).toHaveAttribute('src', 'resolved:crest-1');
-    expect(resolveAsset).toHaveBeenCalledWith(decorations[0]);
+    expect(document.querySelector('.artwork-library img')).not.toBeInTheDocument();
   });
 
   it('selects an artwork without changing its decoration data', () => {
@@ -40,7 +34,6 @@ describe('ArtworkLibrary', () => {
         decorations={decorations}
         onDelete={vi.fn()}
         onSelect={onSelect}
-        resolveAsset={(decoration) => decoration.source}
       />,
     );
 
@@ -60,7 +53,6 @@ describe('ArtworkLibrary', () => {
         decorations={decorations}
         onDelete={onDelete}
         onSelect={onSelect}
-        resolveAsset={(decoration) => decoration.source}
       />,
     );
 
@@ -84,7 +76,6 @@ describe('ArtworkLibrary', () => {
         decorations={nineDecorations}
         onDelete={vi.fn()}
         onSelect={vi.fn()}
-        resolveAsset={(decoration) => decoration.source}
       />,
     );
 

@@ -7,12 +7,11 @@ export function DecorationPanel({ product, state, updateState }) {
   const [message, setMessage] = useState('');
   const decorations = state.overrides?.decorations ?? [];
   const activeId = state.overrides?.activeDecorationId ?? null;
-  const activeRegion = state.overrides?.activeDecorationRegion ?? 'front';
   const active = decorations.find((item) => item.id === activeId) ?? null;
   const isFull = decorations.length >= MAX_DECORATIONS;
 
-  function updateDecorations(next, nextActiveId = activeId, nextRegion = activeRegion) {
-    updateState({ overrides: { decorations: next, activeDecorationId: nextActiveId, activeDecorationRegion: nextRegion } });
+  function updateDecorations(next, nextActiveId = activeId) {
+    updateState({ overrides: { decorations: next, activeDecorationId: nextActiveId } });
   }
 
   function addPreset(preset) {
@@ -21,21 +20,9 @@ export function DecorationPanel({ product, state, updateState }) {
       return;
     }
     const id = `preset-${preset.id}-${Date.now()}`;
-    const next = createDecoration({ ...preset, id, region: activeRegion });
+    const next = createDecoration({ ...preset, id, region: 'front' });
     updateDecorations([...decorations, next], id);
     setMessage(`${preset.label} added`);
-  }
-
-  function selectRegion(region) {
-    if (!active) {
-      updateState({ overrides: { activeDecorationRegion: region } });
-      return;
-    }
-    updateDecorations(
-      decorations.map((item) => item.id === active.id ? patchDecoration(item, { region }) : item),
-      active.id,
-      region,
-    );
   }
 
   function updateActive(patch) {
@@ -64,7 +51,7 @@ export function DecorationPanel({ product, state, updateState }) {
     const reader = new FileReader();
     reader.onload = () => {
       const id = `upload-${Date.now()}`;
-      const next = createDecoration({ id, kind: 'upload', source: String(reader.result), label: file.name, region: activeRegion });
+      const next = createDecoration({ id, kind: 'upload', source: String(reader.result), label: file.name, region: 'front' });
       updateDecorations([...decorations, next], id);
       setMessage(`${file.name} added`);
     };
@@ -82,13 +69,6 @@ export function DecorationPanel({ product, state, updateState }) {
 
   return (
     <section className="decoration-panel">
-      <div className="region-picker" aria-label="Artwork region">
-        {product.decorationRegions.map((region) => (
-          <button className={activeRegion === region.id ? 'active' : ''} key={region.id} onClick={() => selectRegion(region.id)} type="button">
-            {region.label}
-          </button>
-        ))}
-      </div>
       <div className="preset-grid">
         {product.decorationPresets.map((preset) => (
           <button aria-label={preset.label} key={preset.id} onClick={() => addPreset(preset)} type="button">

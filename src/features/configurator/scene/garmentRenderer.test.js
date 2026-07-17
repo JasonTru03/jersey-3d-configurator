@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+vi.mock('gsap', () => ({
+  default: {
+    killTweensOf: vi.fn(),
+    to: vi.fn(),
+  },
+}));
 vi.mock('three', async () => {
   const actual = await vi.importActual('three');
   return {
@@ -23,6 +29,7 @@ vi.stubGlobal('ResizeObserver', class {
 vi.stubGlobal('requestAnimationFrame', () => 1);
 
 import * as THREE from 'three';
+import gsap from 'gsap';
 import { GarmentRenderer, getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes, shouldEnableOrbitControls } from './garmentRenderer.js';
 
 function createPointerRenderer({ selectedDecorationId = null, printHit = null, decorationHit = false } = {}) {
@@ -56,6 +63,83 @@ function pointerEvent(x, y) {
 }
 
 describe('garment decoration mesh selection', () => {
+  it('focuses a decoration with clamped camera distance and no state mutation', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const center = new THREE.Vector3(1, 2, 3);
+    renderer.camera.position.set(0, 0, 20);
+    renderer.controls.target.set(0, 0, 0);
+    const offset = renderer.camera.position.clone().sub(renderer.controls.target);
+    const distance = renderer.controls.maxDistance;
+    renderer.decorationEditor = { getDecorationWorldCenter: vi.fn(() => center), dispose: vi.fn() };
+    renderer.state = { overrides: { decorations: [] } };
+    renderer.onStatePatch = vi.fn();
+    const controlsEnabled = renderer.controls.enabled;
+    gsap.to.mockClear();
+    gsap.killTweensOf.mockClear();
+
+    expect(renderer.focusDecoration('crest')).toBe(true);
+    expect(gsap.killTweensOf).toHaveBeenCalledWith(renderer.camera.position);
+    expect(gsap.killTweensOf).toHaveBeenCalledWith(renderer.controls.target);
+    expect(gsap.to).toHaveBeenCalledTimes(2);
+    expect(gsap.to).toHaveBeenNthCalledWith(1, renderer.camera.position, expect.objectContaining({
+      x: center.x + (offset.x / offset.length()) * distance,
+      y: center.y + (offset.y / offset.length()) * distance,
+      z: center.z + (offset.z / offset.length()) * distance,
+      duration: 0.4,
+      ease: 'power2.out',
+    }));
+    expect(gsap.to).toHaveBeenNthCalledWith(2, renderer.controls.target, expect.objectContaining({
+      x: 1,
+      y: 2,
+      z: 3,
+      duration: 0.4,
+      ease: 'power2.out',
+    }));
+    expect(renderer.onStatePatch).not.toHaveBeenCalled();
+    expect(renderer.state).toEqual({ overrides: { decorations: [] } });
+    expect(renderer.controls.enabled).toBe(controlsEnabled);
+
+    renderer.dispose();
+  });
+
+  it('does not start a focus tween when the decoration has no center', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.decorationEditor = { getDecorationWorldCenter: vi.fn(() => null), dispose: vi.fn() };
+    gsap.to.mockClear();
+    gsap.killTweensOf.mockClear();
+
+    expect(renderer.focusDecoration('missing')).toBe(false);
+    expect(gsap.to).not.toHaveBeenCalled();
+    expect(gsap.killTweensOf).not.toHaveBeenCalled();
+
+    renderer.dispose();
+  });
+
+  it('uses a forward camera offset when focus starts at its target and cancels tweens on disposal', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.camera.position.set(0, 0, 0);
+    renderer.controls.target.set(0, 0, 0);
+    renderer.controls.minDistance = 2;
+    renderer.controls.maxDistance = 8;
+    renderer.decorationEditor = { getDecorationWorldCenter: vi.fn(() => new THREE.Vector3(4, 5, 6)), dispose: vi.fn() };
+    gsap.to.mockClear();
+    gsap.killTweensOf.mockClear();
+
+    renderer.focusDecoration('crest');
+
+    expect(gsap.to).toHaveBeenNthCalledWith(1, renderer.camera.position, expect.objectContaining({ x: 4, y: 5, z: 8 }));
+    gsap.killTweensOf.mockClear();
+    renderer.dispose();
+    expect(gsap.killTweensOf).toHaveBeenCalledWith(renderer.camera.position);
+    expect(gsap.killTweensOf).toHaveBeenCalledWith(renderer.controls.target);
+  });
+
   it('enables orbit controls only when no artwork or print drag is active', () => {
     expect(shouldEnableOrbitControls({ isDraggingDecoration: false, isDraggingPrint: false })).toBe(true);
     expect(shouldEnableOrbitControls({ isDraggingDecoration: true, isDraggingPrint: false })).toBe(false);

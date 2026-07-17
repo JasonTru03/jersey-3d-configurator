@@ -240,6 +240,18 @@ export class DecorationEditor {
     return this.selectedId ? this.surfaces.get(this.selectedId) ?? null : null;
   }
 
+  getDecorationWorldCenter(id) {
+    const surface = this.surfaces.get(id);
+    const geometry = surface?.geometry;
+    if (!surface?.updateWorldMatrix || !geometry?.computeBoundingBox) return null;
+
+    surface.updateWorldMatrix(true, false);
+    geometry.computeBoundingBox();
+    if (!geometry.boundingBox) return null;
+
+    return surface.localToWorld(geometry.boundingBox.getCenter(new THREE.Vector3()));
+  }
+
   setGarmentMeshes(meshes = []) {
     this.garmentMeshes = meshes;
   }

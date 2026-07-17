@@ -25,7 +25,7 @@
 ## 新增、删除与行为变化
 
 - 新增：`ArtworkSelectionOverlay` 及其测试；当前 Artwork 被选中时，舞台层显示橙色选择框。
-- 删除：产品定义中原有的 20 个示例 Artwork 预设；面板仅保留 Crest Badge、Roundel Badge 及 Upload artwork 入口。
+- 删除：产品定义中的两个示例 Artwork 预设（Golden Stripe、Night Grid）；面板仅保留 Crest Badge、Roundel Badge 及 Upload artwork 入口。
 - 行为变化：拖动选中的 Artwork 移动图案；从图案外区域拖动时保留球衣 orbit；Artwork 被选中时，右侧操作可旋转、缩放或删除当前图案；删除后选择框应隐藏。
 - 行为保持：Name set 的既有功能未在本次变更中修改，并由完整测试套件回归。
 

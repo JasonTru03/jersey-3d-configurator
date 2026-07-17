@@ -96,6 +96,18 @@ describe('decoration editor geometry', () => {
     )).toBe(assetUrl);
   });
 
+  it.each(['golden-stripe', 'night-grid'])('resolves the legacy %s pattern when it is no longer an active preset', (source) => {
+    const activePresets = [
+      { source: 'crest-badge', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' },
+      { source: 'roundel-badge', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' },
+    ];
+
+    const assetUrl = resolveDecorationAsset({ kind: 'pattern', source }, activePresets);
+
+    expect(assetUrl).toMatch(/^data:image\/svg\+xml,/);
+    expect(assetUrl).not.toBe(source);
+  });
+
   it('creates artwork surfaces that participate in garment depth occlusion', () => {
     const surface = createRegionSurface(new THREE.Texture());
 

@@ -5,6 +5,10 @@ import { clampDecorationTransform, patchDecoration } from '../config/decorations
 const REGION_OFFSET = 0.026;
 const REGION_POSITION_SCALE = 0.48;
 const DECORATION_MIN_DISTANCE = 0.24;
+const LEGACY_PATTERN_ASSET_URLS = {
+  'golden-stripe': 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cpath fill="%23d1b05d" d="M0 84 240 0v36L0 120z"/%3E%3C/svg%3E',
+  'night-grid': 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"%3E%3Cg fill="none" stroke="%2320242a" stroke-width="10" opacity=".85"%3E%3Cpath d="M0 25h240M0 60h240M0 95h240M35 0v120M95 0v120M155 0v120M215 0v120"/%3E%3C/g%3E%3C/svg%3E',
+};
 const DEFAULT_PLACEMENT_OFFSETS = [
   { horizontal: 0, vertical: 0 },
   { horizontal: -0.58, vertical: 0.32 },
@@ -100,7 +104,9 @@ function roundCoordinate(value) {
 
 export function resolveDecorationAsset(decoration, presets = []) {
   if (decoration.kind === 'upload') return decoration.source;
-  return presets.find((preset) => preset.source === decoration.source)?.assetUrl ?? decoration.source;
+  return presets.find((preset) => preset.source === decoration.source)?.assetUrl
+    ?? LEGACY_PATTERN_ASSET_URLS[decoration.source]
+    ?? decoration.source;
 }
 
 export function createRegionSurface(texture) {

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  LEGACY_PATTERN_ASSET_URLS,
   MAX_UPLOAD_BYTES,
   clampDecorationTransform,
   createDecoration,
   patchDecoration,
   removeDecoration,
+  resolveDecorationAsset,
   validateDecorationFile,
 } from './decorations.js';
 
@@ -62,5 +64,41 @@ describe('decoration helpers', () => {
       scale: 1.2,
       rotation: -30,
     });
+  });
+
+  it('resolves the current preset asset instead of its source id', () => {
+    const assetUrl = 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E';
+
+    expect(resolveDecorationAsset(
+      { kind: 'badge', source: 'crest-badge' },
+      [{ source: 'crest-badge', assetUrl }],
+    )).toBe(assetUrl);
+  });
+
+  it.each(Object.entries(LEGACY_PATTERN_ASSET_URLS))('resolves the legacy %s pattern when it is no longer an active preset', (source, expectedAssetUrl) => {
+    const activePresets = [
+      { source: 'crest-badge', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' },
+      { source: 'roundel-badge', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' },
+    ];
+
+    expect(resolveDecorationAsset({ kind: 'pattern', source }, activePresets)).toBe(expectedAssetUrl);
+  });
+
+  it('prefers an active preset asset over a legacy source mapping', () => {
+    const activeAssetUrl = 'data:image/svg+xml,%3Csvg%3E%3Cpath id="active"/%3E%3C/svg%3E';
+
+    expect(resolveDecorationAsset(
+      { kind: 'pattern', source: 'golden-stripe' },
+      [{ source: 'golden-stripe', assetUrl: activeAssetUrl }],
+    )).toBe(activeAssetUrl);
+  });
+
+  it('returns uploaded artwork data URLs unchanged', () => {
+    const uploadDataUrl = 'data:image/png;base64,uploaded-artwork';
+
+    expect(resolveDecorationAsset(
+      { kind: 'upload', source: uploadDataUrl },
+      [{ source: 'golden-stripe', assetUrl: LEGACY_PATTERN_ASSET_URLS['golden-stripe'] }],
+    )).toBe(uploadDataUrl);
   });
 });

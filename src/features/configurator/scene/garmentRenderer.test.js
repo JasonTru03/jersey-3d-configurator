@@ -199,4 +199,21 @@ describe('garment decoration mesh selection', () => {
 
     expect(renderer.pendingDecorationDeselect).toBeNull();
   });
+
+  it('clears pending pointer gestures when the browser cancels the pointer', () => {
+    const renderer = createPointerRenderer();
+    renderer.pendingDecorationDeselect = { x: 100, y: 100 };
+    renderer.pendingPrintDrag = { x: 100, y: 100 };
+    renderer.isDraggingPrint = true;
+    renderer.controls.enabled = false;
+
+    renderer.handlePointerCancel();
+
+    expect(renderer.pendingDecorationDeselect).toBeNull();
+    expect(renderer.pendingPrintDrag).toBeNull();
+    expect(renderer.isDraggingPrint).toBe(false);
+    expect(renderer.controls.enabled).toBe(true);
+    expect(renderer.decorationEditor.clearSelection).not.toHaveBeenCalled();
+    expect(renderer.emitPrintPlacement).not.toHaveBeenCalled();
+  });
 });

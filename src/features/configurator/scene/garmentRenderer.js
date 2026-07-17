@@ -132,6 +132,7 @@ export class GarmentRenderer {
     this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
     this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove);
     window.addEventListener('pointerup', this.handlePointerUp);
+    window.addEventListener('pointercancel', this.handlePointerCancel);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.resize();
@@ -206,6 +207,7 @@ export class GarmentRenderer {
     this.renderer?.domElement.removeEventListener('pointerdown', this.handlePointerDown);
     this.renderer?.domElement.removeEventListener('pointermove', this.handlePointerMove);
     window.removeEventListener('pointerup', this.handlePointerUp);
+    window.removeEventListener('pointercancel', this.handlePointerCancel);
     this.disposeGroup(this.root);
     this.disposePrintLayer();
     this.decorationEditor?.dispose();
@@ -534,6 +536,17 @@ export class GarmentRenderer {
     this.isDraggingPrint = false;
     this.controls.enabled = true;
     this.emitPrintPlacement();
+  };
+
+  handlePointerCancel = () => {
+    this.decorationEditor?.handlePointerUp();
+    this.pendingDecorationDeselect = null;
+    this.pendingPrintDrag = null;
+    this.isDraggingPrint = false;
+    this.controls.enabled = shouldEnableOrbitControls({
+      isDraggingDecoration: this.decorationEditor?.isEditing(),
+      isDraggingPrint: this.isDraggingPrint,
+    });
   };
 
   isPrintEditable() {

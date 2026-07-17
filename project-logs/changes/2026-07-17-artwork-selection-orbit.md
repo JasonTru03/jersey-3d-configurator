@@ -22,6 +22,8 @@
 
 对应测试覆盖位于 `DecorationPanel.test.jsx`、`decorationEditor.test.js`、`garmentRenderer.test.js`、`ProductStage.test.jsx`、`ArtworkSelectionOverlay.test.jsx`，并同步回归了 Configurator 页面和 Shopify Section。
 
+`designDocument.test.js` 补充覆盖旧 Artwork 在 `back`、`left-sleeve`、`right-sleeve` 区域及其 mesh placement 经导入、规范化和再次导出后的原样保留。
+
 ## 新增、删除与行为变化
 
 - 新增：`ArtworkSelectionOverlay` 及其测试；当前 Artwork 被选中时，舞台层显示橙色选择框。
@@ -33,7 +35,7 @@
 
 | 命令或检查 | 结果 |
 | --- | --- |
-| `npm test` | 退出码 `0`；`19 passed` 测试文件、`81 passed` 测试。 |
+| `npm test` | 退出码 `0`；`19 passed` 测试文件、`86 passed` 测试。 |
 | `npm run build:showcase` | 退出码 `0`；Vite 8.1.3 构建成功。 |
 | `npm run dev` + HTTP 检查 | 本地 Vite 页面在 `http://127.0.0.1:5173/` 返回 HTTP `200`；标题为 `3D Product Configurator`；`/src/main.jsx`、`/src/app/App.jsx`、`/src/features/configurator/ui/ConfiguratorPage.jsx` 均返回 HTTP `200`。 |
 

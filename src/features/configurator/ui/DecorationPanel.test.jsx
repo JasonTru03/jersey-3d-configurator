@@ -108,6 +108,7 @@ describe('DecorationPanel', () => {
 
   it('shows the added artwork library and changes only the active artwork when selecting another item', () => {
     const updateState = vi.fn();
+    const onArtworkSelect = vi.fn();
     const decorations = [
       createDecoration({ id: 'crest-1', kind: 'badge', source: 'crest', label: 'Crest Badge', region: 'front' }),
       createDecoration({ id: 'roundel-1', kind: 'badge', source: 'roundel', label: 'Roundel Badge', region: 'front' }),
@@ -121,6 +122,7 @@ describe('DecorationPanel', () => {
             { id: 'roundel', source: 'roundel', assetUrl: 'data:image/svg+xml,roundel' },
           ],
         }}
+        onArtworkSelect={onArtworkSelect}
         state={{ overrides: { decorations, activeDecorationId: 'crest-1' } }}
         updateState={updateState}
       />,
@@ -134,16 +136,20 @@ describe('DecorationPanel', () => {
     expect(updateState).toHaveBeenCalledWith({
       overrides: { decorations, activeDecorationId: 'roundel-1' },
     });
+    expect(onArtworkSelect).toHaveBeenCalledWith('roundel-1');
+    expect(updateState.mock.invocationCallOrder[0]).toBeLessThan(onArtworkSelect.mock.invocationCallOrder[0]);
   });
 
   it('clears the active artwork only when deleting the active library item', () => {
     const first = createDecoration({ id: 'crest-1', kind: 'badge', source: 'crest', label: 'Crest Badge', region: 'front' });
     const second = createDecoration({ id: 'roundel-1', kind: 'badge', source: 'roundel', label: 'Roundel Badge', region: 'front' });
     const updateState = vi.fn();
+    const onArtworkSelect = vi.fn();
 
     render(
       <DecorationPanel
         product={{ decorationPresets: [] }}
+        onArtworkSelect={onArtworkSelect}
         state={{ overrides: { decorations: [first, second], activeDecorationId: 'crest-1' } }}
         updateState={updateState}
       />,
@@ -159,5 +165,6 @@ describe('DecorationPanel', () => {
     expect(updateState).toHaveBeenLastCalledWith({
       overrides: { decorations: [second], activeDecorationId: null },
     });
+    expect(onArtworkSelect).not.toHaveBeenCalled();
   });
 });

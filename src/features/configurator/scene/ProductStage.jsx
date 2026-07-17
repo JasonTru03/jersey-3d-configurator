@@ -17,7 +17,7 @@ const rendererRegistry = {
   keyboardRenderer: KeyboardRenderer,
 };
 
-export function ProductStage({ onEditPrint, onStatePatch, product, state, selected }) {
+export function ProductStage({ artworkFocusId, onEditPrint, onStatePatch, product, state, selected }) {
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
   const [view, setView] = useState('orbit');
@@ -66,6 +66,10 @@ export function ProductStage({ onEditPrint, onStatePatch, product, state, select
   useEffect(() => {
     rendererRef.current?.update(product, state, selected);
   }, [product, selected, state]);
+
+  useEffect(() => {
+    if (artworkFocusId) rendererRef.current?.focusDecoration(artworkFocusId);
+  }, [artworkFocusId]);
 
   useEffect(() => {
     rendererRef.current?.setActivePrintId(activePrintId);

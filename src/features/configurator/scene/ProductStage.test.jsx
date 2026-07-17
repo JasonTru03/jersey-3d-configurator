@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductStage } from './ProductStage.jsx';
 
-const rendererHarness = vi.hoisted(() => ({ activePrintId: null, options: null }));
+const rendererHarness = vi.hoisted(() => ({ activePrintId: null, focusedDecorationId: null, options: null }));
 
 vi.mock('./garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -24,6 +24,10 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
         rendererHarness.activePrintId = id;
       }
 
+      focusDecoration(id) {
+        rendererHarness.focusedDecorationId = id;
+      }
+
       dispose() {}
     },
   };
@@ -42,10 +46,17 @@ afterAll(() => {
 
 beforeEach(() => {
   rendererHarness.activePrintId = null;
+  rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
 });
 
 describe('ProductStage print toolbar', () => {
+  it('forwards an artwork selection id to the renderer focus method', () => {
+    render(<ProductStage artworkFocusId="crest-1" onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'none', overrides: {} }} />);
+
+    expect(rendererHarness.focusedDecorationId).toBe('crest-1');
+  });
+
   it('does not inject an artwork anchor callback into the renderer', () => {
     render(<ProductStage onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'none', overrides: {} }} />);
 

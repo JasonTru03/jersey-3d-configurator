@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfiguratorPage } from './ConfiguratorPage.jsx';
 
-const rendererHarness = vi.hoisted(() => ({ options: null }));
+const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
 
 vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -22,6 +22,10 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
 
       setView() {}
 
+      focusDecoration(id) {
+        rendererHarness.focusedDecorationId = id;
+      }
+
       dispose() {}
     },
   };
@@ -36,6 +40,7 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
 });
 
@@ -65,6 +70,22 @@ describe('ConfiguratorPage', () => {
     expect(await screen.findByText('Crest Badge added')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Rotate right' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete artwork' })).toBeInTheDocument();
+  });
+
+  it('focuses the selected artwork only after a shopper clicks its list name', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artwork' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Roundel Badge$/ }));
+    expect(rendererHarness.focusedDecorationId).toBeNull();
+
+    fireEvent.click(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Crest Badge' }));
+
+    await waitFor(() => {
+      expect(rendererHarness.focusedDecorationId).toMatch(/^preset-crest-badge-/);
+    });
   });
 
   it('lets a shopper undo an option change and open the design review', async () => {

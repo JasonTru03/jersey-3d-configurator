@@ -1,3 +1,13 @@
+import { APPEARANCE_TEMPLATES, normalizeAppearance } from './appearance.js';
+
+const homeSwatches = {
+  fabric: '#f7f5ef',
+  trim: '#20242a',
+  accent: '#d8c17a',
+  number: '#20242a',
+  light: '#efe4bb',
+};
+
 export const jerseyProduct = {
   id: 'fn8788-jersey',
   name: 'Chelsea Match Jersey',
@@ -14,6 +24,7 @@ export const jerseyProduct = {
     material: 'Fabric',
     lighting: 'Print',
     extras: 'Extras',
+    templates: 'Template',
   },
   decorationPresets: [
     {
@@ -61,6 +72,7 @@ export const jerseyProduct = {
         },
       ],
       decorations: [],
+      appearance: normalizeAppearance(undefined, homeSwatches),
     },
   },
   options: {
@@ -100,13 +112,7 @@ export const jerseyProduct = {
         label: 'Home White',
         description: 'Clean white body with black trim.',
         priceDelta: 0,
-        swatches: {
-          fabric: '#f7f5ef',
-          trim: '#20242a',
-          accent: '#d8c17a',
-          number: '#20242a',
-          light: '#efe4bb',
-        },
+        swatches: homeSwatches,
       },
       {
         id: 'away',
@@ -135,6 +141,7 @@ export const jerseyProduct = {
         },
       },
     ],
+    templates: APPEARANCE_TEMPLATES,
     material: [
       {
         id: 'stadium',

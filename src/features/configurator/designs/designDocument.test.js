@@ -125,4 +125,52 @@ describe('design document', () => {
 
     expect(document.state.overrides).toMatchObject({ printName: 'MASON', printNumber: '10' });
   });
+
+  it('migrates missing appearance from the document colorway', () => {
+    const state = parseDesignDocument(JSON.stringify({
+      format: 'jersey-design',
+      productId: 'fn8788-jersey',
+      state: { ...defaultState, colorway: 'away' },
+      version: 1,
+    }), {
+      colorways: [{ id: 'away', swatches: { fabric: '#20242a', trim: '#f4efe4', accent: '#c84f3d', number: '#f4efe4' } }],
+      defaultState,
+      expectedProductId: 'fn8788-jersey',
+    });
+
+    expect(state.overrides.appearance).toEqual({
+      template: 'solid',
+      colors: {
+        body: '#20242A', sleeves: '#20242A', shoulderSide: '#F4EFE4',
+        collar: '#F4EFE4', pattern: '#C84F3D', number: '#F4EFE4',
+      },
+    });
+  });
+
+  it('rejects an explicitly invalid appearance as invalid state', () => {
+    let error;
+    try {
+      parseDesignDocument(JSON.stringify({
+      format: 'jersey-design',
+      productId: 'fn8788-jersey',
+      state: { ...defaultState, overrides: { appearance: { colors: { body: '#bad' } } } },
+      version: 1,
+      }), { defaultState, expectedProductId: 'fn8788-jersey' });
+    } catch (caughtError) {
+      error = caughtError;
+    }
+
+    expect(error).toMatchObject({ code: 'invalid-state' });
+  });
+
+  it('preserves appearance through a save and import roundtrip', () => {
+    const appearance = { template: 'gradient', colors: { body: '#20242a', sleeves: '#20242a', shoulderSide: '#f4efe4', collar: '#f4efe4', pattern: '#c84f3d', number: '#f4efe4' } };
+    const saved = createDesignDocument({ productId: 'fn8788-jersey', state: { ...defaultState, overrides: { appearance } } });
+    const loaded = parseDesignDocument(JSON.stringify(saved), { defaultState, expectedProductId: 'fn8788-jersey' });
+
+    expect(loaded.overrides.appearance).toEqual({
+      template: 'gradient',
+      colors: { body: '#20242A', sleeves: '#20242A', shoulderSide: '#F4EFE4', collar: '#F4EFE4', pattern: '#C84F3D', number: '#F4EFE4' },
+    });
+  });
 });

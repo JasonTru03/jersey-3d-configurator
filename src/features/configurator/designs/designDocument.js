@@ -1,3 +1,6 @@
+import { normalizeAppearance } from '../config/appearance.js';
+import { getPrintItems, legacyFirstItemFields } from '../config/printItems.js';
+
 export const DESIGN_DOCUMENT_FORMAT = 'jersey-design';
 export const DESIGN_DOCUMENT_VERSION = 1;
 
@@ -21,7 +24,7 @@ export function createDesignDocument({ productId, variantId = null, state, saved
   };
 }
 
-export function parseDesignDocument(rawText, { expectedProductId, defaultState }) {
+export function parseDesignDocument(rawText, { expectedProductId, defaultState, colorways = [] }) {
   let document;
 
   try {
@@ -46,6 +49,15 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState }
   const mergedOverrides = { ...defaultState.overrides, ...documentOverrides };
   const printSource = hasDocumentPrintData(documentOverrides) ? documentOverrides : mergedOverrides;
   const printItems = getPrintItems(printSource);
+  const colorwayId = document.state.colorway ?? defaultState.colorway;
+  const legacySwatches = colorways.find((colorway) => colorway.id === colorwayId)?.swatches;
+  let appearance;
+
+  try {
+    appearance = normalizeAppearance(documentOverrides.appearance, legacySwatches);
+  } catch (error) {
+    throw new DesignDocumentError('invalid-state', error.message);
+  }
 
   return {
     ...structuredClone(defaultState),
@@ -53,6 +65,7 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState }
     extras: { ...defaultState.extras, ...document.state.extras },
     overrides: {
       ...mergedOverrides,
+      appearance,
       printItems,
       ...legacyFirstItemFields(printItems),
     },
@@ -64,7 +77,12 @@ function normalizePrintState(state) {
   const printItems = getPrintItems(overrides);
   return {
     ...state,
-    overrides: { ...overrides, printItems, ...legacyFirstItemFields(printItems) },
+    overrides: {
+      ...overrides,
+      ...(overrides.appearance ? { appearance: normalizeAppearance(overrides.appearance) } : {}),
+      printItems,
+      ...legacyFirstItemFields(printItems),
+    },
   };
 }
 
@@ -72,4 +90,3 @@ function hasDocumentPrintData(overrides) {
   return Array.isArray(overrides.printItems)
     || Boolean(overrides.printName || overrides.printNumber || overrides.printPlacement);
 }
-import { getPrintItems, legacyFirstItemFields } from '../config/printItems.js';

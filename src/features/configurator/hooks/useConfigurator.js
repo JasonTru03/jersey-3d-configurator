@@ -85,6 +85,7 @@ export function useConfigurator() {
     try {
       const rawText = await readDesignFile(file);
       const nextState = parseDesignDocument(rawText, {
+        colorways: product.options.colorway,
         defaultState: product.defaultState,
         expectedProductId: product.id,
       });

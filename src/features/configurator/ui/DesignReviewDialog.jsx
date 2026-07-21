@@ -1,8 +1,19 @@
+const APPEARANCE_SUMMARY_ROWS = [
+  ['body', 'Body'],
+  ['sleeves', 'Sleeves'],
+  ['shoulderSide', 'Shoulder and side panels'],
+  ['collar', 'Collar'],
+  ['pattern', 'Pattern'],
+  ['number', 'Name and number'],
+];
+
 export function DesignReviewDialog({ onClose, onSave, open, product, quote, selected, state }) {
   if (!open) return null;
 
   const artworkCount = state.overrides?.decorations?.length ?? 0;
   const artworkLabel = `${artworkCount} artwork item${artworkCount === 1 ? '' : 's'}`;
+  const appearance = state.overrides?.appearance;
+  const templateLabel = product.options.templates.find((template) => template.id === appearance?.template)?.label ?? 'Solid';
 
   return (
     <div className="review-backdrop" role="presentation">
@@ -21,6 +32,10 @@ export function DesignReviewDialog({ onClose, onSave, open, product, quote, sele
           <div><dt>Fabric</dt><dd>{selected.material?.shortLabel}</dd></div>
           <div><dt>Print</dt><dd>{selected.lighting?.shortLabel}</dd></div>
           <div><dt>Artwork</dt><dd>{artworkLabel}</dd></div>
+          <div><dt>Template</dt><dd>{templateLabel}</dd></div>
+          {APPEARANCE_SUMMARY_ROWS.map(([zone, label]) => (
+            <div key={zone}><dt>{label}</dt><dd>{`${label}: ${appearance?.colors?.[zone] ?? '—'}`}</dd></div>
+          ))}
         </dl>
         <div className="review-total"><span>Total</span><strong>${quote.total}</strong></div>
         <p className="review-note">Shopping cart and payment will be available after the design service is connected.</p>

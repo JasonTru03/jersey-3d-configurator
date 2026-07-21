@@ -26,6 +26,7 @@ import { DesignReviewDialog } from './DesignReviewDialog.jsx';
 import { TemplateLibrary } from './TemplateLibrary.jsx';
 import { ZoneColorPanel } from './ZoneColorPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
+import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import './configurator.css';
 
 const sectionDefaults = [
@@ -61,6 +62,7 @@ export function ConfiguratorPage() {
   const [theme, setTheme] = useState('light');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [fileError, setFileError] = useState('');
+  const [shopifyContext] = useState(() => parseShopifyLaunch(window.location.search));
 
   const handleLightingSelect = (lighting) => {
     if (lighting === 'none') {
@@ -89,6 +91,15 @@ export function ConfiguratorPage() {
     const result = await loadDesignFile(event.target.files?.[0] ?? null);
     setFileError(result.ok ? '' : result.message);
     event.target.value = '';
+  };
+
+  const handleAddToCart = () => {
+    try {
+      const url = createCartUrl({ context: shopifyContext, state, selected });
+      window.location.assign(url);
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'Cart preparation failed.');
+    }
   };
 
   if (status === 'loading') {
@@ -147,11 +158,14 @@ export function ConfiguratorPage() {
       </section>
       <DesignReviewDialog
         onClose={() => setReviewOpen(false)}
+        onAddToCart={handleAddToCart}
         onSave={handleSaveDesign}
         open={reviewOpen}
         product={product}
         quote={quote}
         selected={selected}
+        shopifyContext={shopifyContext}
+        shopifyPrice="$49.99 fixed Shopify price"
         state={state}
       />
     </main>

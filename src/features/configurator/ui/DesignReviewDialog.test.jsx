@@ -3,6 +3,48 @@ import { describe, expect, it, vi } from 'vitest';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
 
 describe('DesignReviewDialog', () => {
+  it('adds the design to a connected Shopify cart at the fixed price', () => {
+    const onAddToCart = vi.fn();
+    render(
+      <DesignReviewDialog
+        onAddToCart={onAddToCart}
+        onClose={() => {}}
+        onSave={() => {}}
+        open
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ total: 107 }}
+        selected={{}}
+        shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+        state={{ overrides: {} }}
+      />,
+    );
+
+    expect(screen.getByText('$49.99 fixed Shopify price')).toBeInTheDocument();
+    const addToCart = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    expect(addToCart).toBeEnabled();
+    fireEvent.click(addToCart);
+    expect(onAddToCart).toHaveBeenCalledWith();
+  });
+
+  it('explains when the configurator was not launched from Shopify', () => {
+    render(
+      <DesignReviewDialog
+        onAddToCart={() => {}}
+        onClose={() => {}}
+        onSave={() => {}}
+        open
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ total: 107 }}
+        selected={{}}
+        shopifyContext={null}
+        state={{ overrides: {} }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeDisabled();
+    expect(screen.getByText('Open the configurator from a connected Shopify product page to add this design to your cart.')).toBeInTheDocument();
+  });
+
   it('summarizes the design and sends the shopper back to editing', () => {
     const onClose = vi.fn();
     render(

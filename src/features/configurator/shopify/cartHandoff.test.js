@@ -76,4 +76,17 @@ describe('cart handoff', () => {
     expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%5CTARGET%2F`))
       .toBeNull();
   });
+
+  it('rejects control-character return paths while preserving internal queries', () => {
+    const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
+
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%0A%2F%2FTARGET%2F`))
+      .toBeNull();
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%0D%2F%2FTARGET%2F`))
+      .toBeNull();
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%09%2F%2FTARGET%2F`))
+      .toBeNull();
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2Fcart%3Fx%3D1`))
+      .toMatchObject({ returnPath: '/cart?x=1' });
+  });
 });

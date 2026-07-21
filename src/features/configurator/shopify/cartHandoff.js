@@ -6,7 +6,10 @@ export function parseShopifyLaunch(search) {
   const variantMap = parseVariantMap(params.get('variantMap'));
   const returnPath = params.get('returnPath') ?? '';
 
-  if (!SHOP_DOMAIN_PATTERN.test(shop ?? '') || !variantMap || (returnPath && !isInternalReturnPath(returnPath))) return null;
+  if (!SHOP_DOMAIN_PATTERN.test(shop ?? '') || !variantMap) return null;
+
+  const base = new URL(`https://${shop}`);
+  if (returnPath && !isInternalReturnPath(returnPath, base)) return null;
 
   return {
     shop,
@@ -34,8 +37,13 @@ export function createCartUrl({ context, state, selected }) {
   return `https://${context.shop}/cart/${variantId}:1?${query}`;
 }
 
-function isInternalReturnPath(path) {
-  return path.startsWith('/') && !path.startsWith('//') && !path.includes('\\');
+function isInternalReturnPath(path, base) {
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\') || /[\x00-\x1F\x7F]/.test(path)) {
+    return false;
+  }
+
+  const parsed = new URL(path, base);
+  return parsed.origin === base.origin && parsed.pathname.startsWith('/');
 }
 
 function parseVariantMap(rawVariantMap) {

@@ -110,6 +110,7 @@ export class GarmentRenderer {
     this.scene.add(this.root);
     this.modelMaterials = [];
     this.appearanceTexture = null;
+    this.appearanceTextureKey = null;
     this.modelMeshes = [];
     this.decorationMeshes = [];
     this.raycaster = new THREE.Raycaster();
@@ -357,15 +358,22 @@ export class GarmentRenderer {
 
   applyAppearance(appearance) {
     if (!appearance) return;
+    const appearanceKey = getAppearanceTextureKey(appearance);
+    if (this.appearanceTexture && this.appearanceTextureKey === appearanceKey) return;
+    const replacedBaseColorMaps = new Set(this.modelMaterials
+      .map((material) => material.map)
+      .filter((map) => map && map !== this.appearanceTexture));
     const texture = new THREE.CanvasTexture(createGarmentAppearanceCanvas(2048, appearance));
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.flipY = false;
     this.disposeAppearanceTexture();
     this.appearanceTexture = texture;
+    this.appearanceTextureKey = appearanceKey;
     this.modelMaterials.forEach((material) => {
       material.map = texture;
       material.needsUpdate = true;
     });
+    replacedBaseColorMaps.forEach((map) => map.dispose());
     this.printColor = appearance.colors.number;
     this.scene.background.set(appearance.colors.body);
     this.redrawPrintTexture();
@@ -378,6 +386,7 @@ export class GarmentRenderer {
     });
     this.appearanceTexture.dispose();
     this.appearanceTexture = null;
+    this.appearanceTextureKey = null;
   }
 
   applyMaterial(materialOptions) {
@@ -752,4 +761,11 @@ function getPlaneProjectedCorners(plane, camera) {
 
 function distanceBetweenPlacements(first, second) {
   return Math.hypot(first.x - second.x, first.y - second.y, first.z - second.z);
+}
+
+function getAppearanceTextureKey(appearance) {
+  return JSON.stringify({
+    template: appearance.template,
+    colors: Object.entries(appearance.colors ?? {}).sort(([first], [second]) => first.localeCompare(second)),
+  });
 }

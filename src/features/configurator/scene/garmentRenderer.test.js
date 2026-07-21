@@ -3,6 +3,7 @@ vi.mock('gsap', () => ({
   default: {
     killTweensOf: vi.fn(),
     to: vi.fn(),
+    fromTo: vi.fn(),
   },
 }));
 vi.mock('three', async () => {
@@ -62,6 +63,12 @@ function pointerEvent(x, y) {
   return { clientX: x, clientY: y, preventDefault: vi.fn() };
 }
 
+function makeModel(map) {
+  const model = new THREE.Group();
+  model.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ map })));
+  return model;
+}
+
 describe('garment decoration mesh selection', () => {
   it('replaces garment appearance textures and synchronizes the name-set color', () => {
     const host = document.createElement('div');
@@ -102,6 +109,103 @@ describe('garment decoration mesh selection', () => {
     const currentDispose = vi.spyOn(renderer.appearanceTexture, 'dispose');
     renderer.dispose();
     expect(currentDispose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the garment appearance texture during state-only updates', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    HTMLCanvasElement.prototype.getContext = () => ({
+      save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, clip() {}, fill() {}, fillRect() {},
+      createLinearGradient: () => ({ addColorStop() {} }),
+      set fillStyle(_) {},
+    });
+    renderer.modelMaterials = [new THREE.MeshStandardMaterial()];
+    const product = { decorationPresets: [] };
+    const selected = {
+      colorway: { swatches: {} },
+      material: { material: { roughness: 0.7, metalness: 0 } },
+      appearance: { template: 'solid', colors: {
+        body: '#F7F5EF', sleeves: '#1F5B4F', shoulderSide: '#20242A', collar: '#D1B05D', pattern: '#C84F3D', number: '#20242A',
+      } },
+    };
+
+    renderer.update(product, { lighting: 'none', overrides: {} }, selected);
+    const texture = renderer.appearanceTexture;
+    const dispose = vi.spyOn(texture, 'dispose');
+    renderer.update(product, { lighting: 'none', overrides: { decorations: [{ id: 'crest' }] } }, selected);
+
+    expect(renderer.appearanceTexture).toBe(texture);
+    expect(dispose).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it('disposes a shared replaced base-color map once', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    HTMLCanvasElement.prototype.getContext = () => ({
+      save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, clip() {}, fill() {}, fillRect() {},
+      createLinearGradient: () => ({ addColorStop() {} }),
+      set fillStyle(_) {},
+    });
+    const baseColorMap = new THREE.Texture();
+    const dispose = vi.spyOn(baseColorMap, 'dispose');
+    renderer.modelMaterials = [
+      new THREE.MeshStandardMaterial({ map: baseColorMap }),
+      new THREE.MeshStandardMaterial({ map: baseColorMap }),
+    ];
+    const selected = {
+      colorway: { swatches: {} },
+      material: { material: { roughness: 0.7, metalness: 0 } },
+      appearance: { template: 'solid', colors: {
+        body: '#F7F5EF', sleeves: '#1F5B4F', shoulderSide: '#20242A', collar: '#D1B05D', pattern: '#C84F3D', number: '#20242A',
+      } },
+    };
+
+    renderer.update({ decorationPresets: [] }, { lighting: 'none', overrides: {} }, selected);
+
+    expect(dispose).toHaveBeenCalledOnce();
+    renderer.dispose();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('releases each model base-color map once across model replacement', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    HTMLCanvasElement.prototype.getContext = () => ({
+      save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, clip() {}, fill() {}, fillRect() {},
+      createLinearGradient: () => ({ addColorStop() {} }),
+      set fillStyle(_) {},
+    });
+    const firstMap = new THREE.Texture();
+    const secondMap = new THREE.Texture();
+    const firstDispose = vi.spyOn(firstMap, 'dispose');
+    const secondDispose = vi.spyOn(secondMap, 'dispose');
+    const selected = {
+      material: { material: { roughness: 0.7, metalness: 0 } },
+      appearance: { template: 'solid', colors: {
+        body: '#F7F5EF', sleeves: '#1F5B4F', shoulderSide: '#20242A', collar: '#D1B05D', pattern: '#C84F3D', number: '#20242A',
+      } },
+    };
+    renderer.selected = selected;
+    renderer.state = { lighting: 'none', overrides: {} };
+    renderer.product = { decorationPresets: [] };
+    renderer.loader = {
+      loadAsync: vi.fn()
+        .mockResolvedValueOnce({ scene: makeModel(firstMap) })
+        .mockResolvedValueOnce({ scene: makeModel(secondMap) }),
+    };
+
+    await renderer.loadModel('first.glb');
+    await renderer.loadModel('second.glb');
+
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(secondDispose).toHaveBeenCalledOnce();
+    renderer.dispose();
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(secondDispose).toHaveBeenCalledOnce();
   });
 
   it('focuses a decoration from its outward decal normal with clamped distance and no state mutation', () => {

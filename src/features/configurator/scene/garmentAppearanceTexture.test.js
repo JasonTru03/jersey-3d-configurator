@@ -43,6 +43,18 @@ describe('garment appearance texture', () => {
     expect(context.calls.some(([name]) => name === 'clip')).toBe(true);
   });
 
+  it('keeps the 2048 atlas anchors stable for body, sleeves, panels, and collar', () => {
+    const context = createRecordingContext();
+
+    renderGarmentAppearance(context, { width: 2048, height: 2048 }, appearance);
+
+    expect(context.calls).toContainEqual(['moveTo', 61.44, 102.4]);
+    expect(context.calls).toContainEqual(['moveTo', 757.76, 102.4]);
+    expect(context.calls).toContainEqual(['moveTo', 1413.12, 163.84]);
+    expect(context.calls).toContainEqual(['moveTo', 491.52, 102.4]);
+    expect(context.calls).toContainEqual(['moveTo', 245.76, 0]);
+  });
+
   it.each(['solid', 'vertical-stripes', 'horizontal-stripes', 'diagonal', 'gradient', 'color-block'])(
     'renders the %s template through the body and pattern colors',
     (template) => {

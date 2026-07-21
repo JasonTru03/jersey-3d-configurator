@@ -30,8 +30,10 @@
 
       button.addEventListener('click', () => {
         const productForm = document.querySelector('form[action*="/cart/add"]');
-        const variantField = productForm?.querySelector('[name="id"]:checked, select[name="id"], input[name="id"]');
-        const variantId = variantField?.value;
+        const selectVariantField = productForm?.querySelector('select[name="id"]');
+        const checkedVariantField = productForm?.querySelector('input[name="id"]:checked');
+        const hiddenVariantField = productForm?.querySelector('input[type="hidden"][name="id"]');
+        const variantId = selectVariantField?.value || checkedVariantField?.value || hiddenVariantField?.value;
 
         if (!variantId) return;
 

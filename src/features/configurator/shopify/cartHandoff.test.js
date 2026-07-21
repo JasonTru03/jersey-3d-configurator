@@ -63,4 +63,15 @@ describe('cart handoff', () => {
       selected: {},
     })).toThrow('selected size');
   });
+
+  it('accepts an internal return path and rejects external return paths', () => {
+    const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
+
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2Fcart`))
+      .toMatchObject({ returnPath: '/cart' });
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=https%3A%2F%2FTARGET%2F`))
+      .toBeNull();
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%2FTARGET%2F`))
+      .toBeNull();
+  });
 });

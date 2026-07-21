@@ -4,13 +4,14 @@ export function parseShopifyLaunch(search) {
   const params = new URLSearchParams(search);
   const shop = params.get('shop')?.toLowerCase();
   const variantMap = parseVariantMap(params.get('variantMap'));
+  const returnPath = params.get('returnPath') ?? '';
 
-  if (!SHOP_DOMAIN_PATTERN.test(shop ?? '') || !variantMap) return null;
+  if (!SHOP_DOMAIN_PATTERN.test(shop ?? '') || !variantMap || (returnPath && !isInternalReturnPath(returnPath))) return null;
 
   return {
     shop,
     productHandle: params.get('productHandle') ?? '',
-    returnPath: params.get('returnPath') ?? '',
+    returnPath,
     variantId: params.get('variantId') ?? '',
     variantMap,
   };
@@ -31,6 +32,10 @@ export function createCartUrl({ context, state, selected }) {
   });
 
   return `https://${context.shop}/cart/${variantId}:1?${query}`;
+}
+
+function isInternalReturnPath(path) {
+  return path.startsWith('/') && !path.startsWith('//');
 }
 
 function parseVariantMap(rawVariantMap) {

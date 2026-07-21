@@ -111,6 +111,27 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
   });
 
+  it('preserves the selected template when a sleeves color change is undone', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Diagonal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sleeves' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use #C84F3D' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('#C84F3D')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('#F7F5EF')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Diagonal' })).toHaveAttribute('aria-pressed', 'true');
+    });
+  });
+
   it('focuses the name field when editing a selected print', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');

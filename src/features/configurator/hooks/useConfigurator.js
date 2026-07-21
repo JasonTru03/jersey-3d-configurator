@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { productApi } from '../api/productApi.js';
+import { selectedOptions } from '../config/selectors.js';
 import { mergeConfiguratorState } from '../config/state.js';
 import { createDesignDocument, parseDesignDocument } from '../designs/designDocument.js';
 import { createDesignDownload, readDesignFile } from '../designs/designFileBrowser.js';
@@ -85,6 +86,7 @@ export function useConfigurator() {
     try {
       const rawText = await readDesignFile(file);
       const nextState = parseDesignDocument(rawText, {
+        colorways: product.options.colorway,
         defaultState: product.defaultState,
         expectedProductId: product.id,
       });
@@ -102,13 +104,7 @@ export function useConfigurator() {
 
   const selected = useMemo(() => {
     if (!product || !state) return null;
-    return {
-      layout: product.options.layout.find((option) => option.id === state.layout),
-      colorway: product.options.colorway.find((option) => option.id === state.colorway),
-      material: product.options.material.find((option) => option.id === state.material),
-      lighting: product.options.lighting.find((option) => option.id === state.lighting),
-      extras: product.options.extras.filter((option) => state.extras[option.id]),
-    };
+    return selectedOptions(product, state);
   }, [product, state]);
 
   return {

@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DecorationEditor } from './decorationEditor.js';
 import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
+import { createGarmentAppearanceCanvas } from './garmentAppearanceTexture.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
@@ -108,6 +109,8 @@ export class GarmentRenderer {
     this.root.add(this.modelGroup);
     this.scene.add(this.root);
     this.modelMaterials = [];
+    this.appearanceTexture = null;
+    this.appearanceTextureKey = null;
     this.modelMeshes = [];
     this.decorationMeshes = [];
     this.raycaster = new THREE.Raycaster();
@@ -163,7 +166,7 @@ export class GarmentRenderer {
       this.loadModel(modelUrl);
     }
 
-    this.applyColors(selected.colorway.swatches);
+    this.applyAppearance(selected.appearance);
     this.applyMaterial(selected.material.material);
     this.updatePrintLayer();
     this.decorationEditor.update(
@@ -246,6 +249,7 @@ export class GarmentRenderer {
     this.renderer?.domElement.removeEventListener('pointermove', this.handlePointerMove);
     window.removeEventListener('pointerup', this.handlePointerUp);
     window.removeEventListener('pointercancel', this.handlePointerCancel);
+    this.disposeAppearanceTexture();
     this.disposeGroup(this.root);
     this.disposePrintLayer();
     this.decorationEditor?.dispose();
@@ -258,8 +262,12 @@ export class GarmentRenderer {
     this.loadToken = loadToken;
     try {
       const gltf = await this.loader.loadAsync(modelUrl);
-      if (this.loadToken !== loadToken) return;
+      if (this.loadToken !== loadToken) {
+        disposeModelResources(gltf.scene);
+        return;
+      }
 
+      this.disposeAppearanceTexture();
       this.disposeGroup(this.modelGroup);
       this.modelGroup.clear();
       this.modelMaterials = [];
@@ -287,7 +295,7 @@ export class GarmentRenderer {
         this.state?.overrides?.activeDecorationId,
         this.product?.decorationPresets ?? [],
       );
-      this.applyColors(this.selected?.colorway?.swatches);
+      this.applyAppearance(this.selected?.appearance);
       this.applyMaterial(this.selected?.material?.material);
       this.updatePrintLayer();
       gsap.fromTo(model.scale, { x: model.scale.x * 0.94, y: model.scale.y * 0.94, z: model.scale.z * 0.94 }, {
@@ -351,25 +359,37 @@ export class GarmentRenderer {
     this.scene.add(floor);
   }
 
-  applyColors(swatches) {
-    if (!swatches) return;
-    const fabric = new THREE.Color(swatches.fabric ?? swatches.case ?? '#f8f5ed');
-    const trim = new THREE.Color(swatches.trim ?? swatches.accent ?? '#20242a');
-    this.printColor = swatches.number ?? swatches.trim ?? swatches.accent ?? '#20242a';
-    this.modelMaterials.forEach((material, index) => {
-      if (!material.color) return;
-      const target = index % 3 === 0 ? trim : fabric;
-      gsap.to(material.color, {
-        r: target.r,
-        g: target.g,
-        b: target.b,
-        duration: 0.45,
-        ease: 'power2.out',
-        overwrite: 'auto',
-      });
+  applyAppearance(appearance) {
+    if (!appearance) return;
+    const appearanceKey = getAppearanceTextureKey(appearance);
+    if (this.appearanceTexture && this.appearanceTextureKey === appearanceKey) return;
+    const replacedBaseColorMaps = new Set(this.modelMaterials
+      .map((material) => material.map)
+      .filter((map) => map && map !== this.appearanceTexture));
+    const texture = new THREE.CanvasTexture(createGarmentAppearanceCanvas(2048, appearance));
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = false;
+    this.disposeAppearanceTexture();
+    this.appearanceTexture = texture;
+    this.appearanceTextureKey = appearanceKey;
+    this.modelMaterials.forEach((material) => {
+      material.map = texture;
+      material.needsUpdate = true;
     });
-    this.scene.background.set(fabric).lerp(new THREE.Color('#f7f5ef'), 0.84);
+    replacedBaseColorMaps.forEach((map) => map.dispose());
+    this.printColor = appearance.colors.number;
+    this.scene.background.set(appearance.colors.body);
     this.redrawPrintTexture();
+  }
+
+  disposeAppearanceTexture() {
+    if (!this.appearanceTexture) return;
+    this.modelMaterials.forEach((material) => {
+      if (material.map === this.appearanceTexture) material.map = null;
+    });
+    this.appearanceTexture.dispose();
+    this.appearanceTexture = null;
+    this.appearanceTextureKey = null;
   }
 
   applyMaterial(materialOptions) {
@@ -414,10 +434,7 @@ export class GarmentRenderer {
   }
 
   disposeGroup(group) {
-    group.traverse((item) => {
-      if (item.geometry) item.geometry.dispose();
-      if (item.material) disposeMaterials(item.material);
-    });
+    disposeModelResources(group);
   }
 
   updatePrintLayer() {
@@ -744,4 +761,18 @@ function getPlaneProjectedCorners(plane, camera) {
 
 function distanceBetweenPlacements(first, second) {
   return Math.hypot(first.x - second.x, first.y - second.y, first.z - second.z);
+}
+
+function disposeModelResources(group) {
+  group.traverse((item) => {
+    if (item.geometry) item.geometry.dispose();
+    if (item.material) disposeMaterials(item.material);
+  });
+}
+
+function getAppearanceTextureKey(appearance) {
+  return JSON.stringify({
+    template: appearance.template,
+    colors: Object.entries(appearance.colors ?? {}).sort(([first], [second]) => first.localeCompare(second)),
+  });
 }

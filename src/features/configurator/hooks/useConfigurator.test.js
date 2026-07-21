@@ -3,6 +3,24 @@ import { describe, expect, it } from 'vitest';
 import { useConfigurator } from './useConfigurator.js';
 
 describe('useConfigurator design files', () => {
+  it('exposes normalized appearance in selected options for the garment renderer', async () => {
+    const { result } = renderHook(() => useConfigurator());
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(result.current.selected.appearance).toEqual({
+      template: 'solid',
+      colors: {
+        body: '#F7F5EF',
+        sleeves: '#F7F5EF',
+        shoulderSide: '#20242A',
+        collar: '#20242A',
+        pattern: '#D8C17A',
+        number: '#20242A',
+      },
+    });
+  });
+
   it('exports and restores a saved design through its public actions', async () => {
     const { result } = renderHook(() => useConfigurator());
 

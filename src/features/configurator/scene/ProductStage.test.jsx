@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductStage } from './ProductStage.jsx';
 
-const rendererHarness = vi.hoisted(() => ({ activePrintId: null, focusedDecorationId: null, options: null }));
+const rendererHarness = vi.hoisted(() => ({ activePrintId: null, focusedDecorationId: null, options: null, updateArgs: null }));
 
 vi.mock('./garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -14,7 +14,8 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
         this.onPrintAnchorChange = options.onPrintAnchorChange;
       }
 
-      update() {
+      update(...args) {
+        rendererHarness.updateArgs = args;
         this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
       }
 
@@ -48,9 +49,17 @@ beforeEach(() => {
   rendererHarness.activePrintId = null;
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
+  rendererHarness.updateArgs = null;
 });
 
 describe('ProductStage print toolbar', () => {
+  it('forwards selected appearance to the garment renderer', () => {
+    const appearance = { template: 'gradient', colors: { body: '#F7F5EF' } };
+    render(<ProductStage onStatePatch={vi.fn()} product={product} selected={{ ...selected, appearance }} state={{ lighting: 'none', overrides: {} }} />);
+
+    expect(rendererHarness.updateArgs[2].appearance).toBe(appearance);
+  });
+
   it('forwards an artwork selection id to the renderer focus method', () => {
     render(<ProductStage artworkFocusId="crest-1" onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'none', overrides: {} }} />);
 

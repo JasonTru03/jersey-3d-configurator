@@ -28,4 +28,23 @@ describe('mergeConfiguratorState', () => {
       overrides: {},
     });
   });
+
+  it('deep merges appearance colors without dropping the existing zones', () => {
+    const current = {
+      extras: {},
+      overrides: {
+        appearance: {
+          colors: { body: '#F7F5EF', collar: '#20242A' },
+          template: 'solid',
+        },
+      },
+    };
+
+    expect(mergeConfiguratorState(current, {
+      overrides: { appearance: { colors: { collar: '#C84F3D' } } },
+    }).overrides.appearance).toEqual({
+      colors: { body: '#F7F5EF', collar: '#C84F3D' },
+      template: 'solid',
+    });
+  });
 });

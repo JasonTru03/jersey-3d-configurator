@@ -23,11 +23,15 @@ import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
+import { TemplateLibrary } from './TemplateLibrary.jsx';
+import { ZoneColorPanel } from './ZoneColorPanel.jsx';
+import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import './configurator.css';
 
 const sectionDefaults = [
   { id: 'layout', label: 'Size', icon: Shirt },
   { id: 'colorway', label: 'Color', icon: Palette },
+  { id: 'templates', label: 'Template', icon: Palette },
   { id: 'material', label: 'Fabric', icon: Layers3 },
   { id: 'lighting', label: 'Print', icon: Lightbulb },
   { id: 'decorations', label: 'Artwork', icon: Sticker },
@@ -215,6 +219,22 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThem
 }
 
 function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLightingSelect, product, quote, section, selected, state, updateState }) {
+  const patchAppearance = (patch) => {
+    const currentAppearance = state.overrides?.appearance ?? {};
+    updateState({
+      overrides: {
+        appearance: {
+          ...currentAppearance,
+          ...patch,
+          colors: {
+            ...currentAppearance.colors,
+            ...patch.colors,
+          },
+        },
+      },
+    });
+  };
+
   return (
     <aside className="config-panel">
       <PanelHeader labels={product.optionLabels} section={section} />
@@ -232,6 +252,20 @@ function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLighting
           selectedId={state.colorway}
           onSelect={(colorway) => updateState({ colorway })}
         />
+      )}
+      {section === 'templates' && (
+        <>
+          <TemplateLibrary
+            activeTemplate={state.overrides?.appearance?.template}
+            onSelect={(template) => patchAppearance({ template })}
+            templates={product.options.templates}
+          />
+          <ZoneColorPanel
+            colors={state.overrides?.appearance?.colors ?? {}}
+            onColorChange={(colors) => patchAppearance({ colors })}
+            palette={APPEARANCE_PALETTE}
+          />
+        </>
       )}
       {section === 'material' && (
         <OptionGrid

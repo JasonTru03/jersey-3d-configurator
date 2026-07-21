@@ -2,11 +2,11 @@ const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 
 export function parseShopifyLaunch(search) {
   const params = new URLSearchParams(search);
-  const shop = params.get('shop')?.toLowerCase();
+  const shop = normalizeShop(params.get('shop'));
   const variantMap = parseVariantMap(params.get('variantMap'));
   const returnPath = params.get('returnPath') ?? '';
 
-  if (!SHOP_DOMAIN_PATTERN.test(shop ?? '') || !variantMap) return null;
+  if (!shop || !variantMap) return null;
 
   const base = new URL(`https://${shop}`);
   if (returnPath && !isInternalReturnPath(returnPath, base)) return null;
@@ -21,6 +21,9 @@ export function parseShopifyLaunch(search) {
 }
 
 export function createCartUrl({ context, state, selected }) {
+  const shop = normalizeShop(context?.shop);
+  if (!shop) throw new Error('Invalid Shopify shop host.');
+
   const layout = state?.layout;
   const variantId = context?.variantMap?.[layout];
 
@@ -34,7 +37,12 @@ export function createCartUrl({ context, state, selected }) {
     storefront: 'true',
   });
 
-  return `https://${context.shop}/cart/${variantId}:1?${query}`;
+  return `https://${shop}/cart/${variantId}:1?${query}`;
+}
+
+function normalizeShop(value) {
+  const shop = value?.toLowerCase();
+  return SHOP_DOMAIN_PATTERN.test(shop ?? '') ? shop : null;
 }
 
 function isInternalReturnPath(path, base) {

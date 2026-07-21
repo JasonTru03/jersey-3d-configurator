@@ -58,6 +58,11 @@ describe('cart handoff', () => {
     expect(parseShopifyLaunch('?shop=example.com')).toBeNull();
     expect(parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%22abc%22%7D')).toBeNull();
     expect(() => createCartUrl({
+      context: { shop: 'testcsj.myshopify.com@TARGET', variantMap: { s: '48039101890711' } },
+      state: { layout: 's' },
+      selected: {},
+    })).toThrow('Invalid Shopify shop host.');
+    expect(() => createCartUrl({
       context: { shop: 'testcsj.myshopify.com', variantMap: {} },
       state: { layout: 'xl' },
       selected: {},

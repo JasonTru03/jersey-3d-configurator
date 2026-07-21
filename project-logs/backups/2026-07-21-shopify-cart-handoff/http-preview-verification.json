@@ -1,0 +1,10 @@
+{
+  "preview_url": "https://testcsj.myshopify.com/products/custom-3d-football-jersey?preview_theme_id=152001609879",
+  "final_url": "https://testcsj.myshopify.com/password",
+  "http_status": 200,
+  "launcher_marker_present": false,
+  "worker_url_present": false,
+  "password_indicators": [
+    "password"
+  ]
+}

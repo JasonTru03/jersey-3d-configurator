@@ -1,0 +1,46 @@
+{
+  "theme": {
+    "id": 152001609879,
+    "name": "3D Configurator Cart Handoff - 2026-07-21",
+    "role": "unpublished",
+    "processing": false
+  },
+  "product": {
+    "id": 9676223545495,
+    "handle": "custom-3d-football-jersey",
+    "template_suffix": "",
+    "variants": [
+      {
+        "id": 48039101890711,
+        "title": "S",
+        "option1": "S"
+      },
+      {
+        "id": 48039101923479,
+        "title": "M",
+        "option1": "M"
+      },
+      {
+        "id": 48039101956247,
+        "title": "L",
+        "option1": "L"
+      },
+      {
+        "id": 48039101989015,
+        "title": "XL",
+        "option1": "XL"
+      }
+    ]
+  },
+  "asset_key": "templates/product.json",
+  "template_sha256": "4874e3bf75e8131ca032c4961196afd01c83ed6c0e1d25611711d9bd0672625a",
+  "template_sections": [
+    "product_3d_configurator",
+    "main"
+  ],
+  "template_order": [
+    "product_3d_configurator",
+    "main"
+  ],
+  "launcher_sha256": "021e95b90342190607fd484546ee7f27cd9b638e3d8960c3af08a15ad2d2004c"
+}

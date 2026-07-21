@@ -1,0 +1,16 @@
+{
+  "theme_id": 152001609879,
+  "theme_role": "unpublished",
+  "theme_processing": false,
+  "section_key": "sections/product-3d-configurator-launch.liquid",
+  "section_sha256": "021e95b90342190607fd484546ee7f27cd9b638e3d8960c3af08a15ad2d2004c",
+  "template_key": "templates/product.json",
+  "template_before_sha256": "4874e3bf75e8131ca032c4961196afd01c83ed6c0e1d25611711d9bd0672625a",
+  "template_after_sha256": "113606a4e5c2248ac0644ea5e56c62801fa997e179c3ff1b52f103582b92b293",
+  "launcher_section_id": "product_3d_configurator_launch",
+  "template_order": [
+    "product_3d_configurator",
+    "main",
+    "product_3d_configurator_launch"
+  ]
+}

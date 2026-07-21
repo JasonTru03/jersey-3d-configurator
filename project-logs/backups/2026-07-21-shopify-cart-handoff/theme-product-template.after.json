@@ -1,0 +1,32 @@
+{
+  "sections": {
+    "product_3d_configurator": {
+      "type": "product-3d-configurator",
+      "settings": {
+        "enabled": true,
+        "heading": "Customize your match jersey",
+        "subheading": "Preview the FN8788 shirt in 3D before adding it to cart.",
+        "default_layout": "m",
+        "default_colorway": "home",
+        "default_material": "stadium",
+        "default_lighting": "none"
+      }
+    },
+    "main": {
+      "type": "main-product",
+      "settings": {}
+    },
+    "product_3d_configurator_launch": {
+      "type": "product-3d-configurator-launch",
+      "settings": {
+        "enabled": true,
+        "button_label": "Start 3D customization"
+      }
+    }
+  },
+  "order": [
+    "product_3d_configurator",
+    "main",
+    "product_3d_configurator_launch"
+  ]
+}

@@ -378,7 +378,6 @@ export class GarmentRenderer {
     });
     replacedBaseColorMaps.forEach((map) => map.dispose());
     this.printColor = appearance.colors.number;
-    this.scene.background.set(appearance.colors.body);
     this.redrawPrintTexture();
   }
 

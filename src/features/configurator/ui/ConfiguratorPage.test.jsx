@@ -42,9 +42,24 @@ afterAll(() => {
 beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
+  window.history.replaceState(null, '', '/');
 });
 
 describe('ConfiguratorPage', () => {
+  it('initializes the layout from the Shopify-selected XL variant', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%2C%22m%22%3A%2248039101923479%22%2C%22l%22%3A%2248039101956247%22%2C%22xl%22%3A%2248039101989015%22%7D&variantId=48039101989015',
+    );
+
+    render(<ConfiguratorPage />);
+
+    expect(await screen.findByText('Chelsea Match Jersey')).toBeInTheDocument();
+    expect(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'))
+      .toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('loads the jersey product and updates the quote when an extra is toggled', async () => {
     render(<ConfiguratorPage />);
 

@@ -1,8 +1,75 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
 
 describe('DesignReviewDialog', () => {
+  it('shows a cart generation error inside the open review dialog', () => {
+    function CartErrorHarness() {
+      const [cartError, setCartError] = useState('');
+      return (
+        <DesignReviewDialog
+          cartError={cartError}
+          onAddToCart={() => setCartError('No Shopify variant exists for the selected size.')}
+          onClose={() => {}}
+          onSave={() => {}}
+          open
+          product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+          quote={{ total: 107 }}
+          selected={{}}
+          shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+          state={{ overrides: {} }}
+        />
+      );
+    }
+
+    render(<CartErrorHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('No Shopify variant exists for the selected size.');
+  });
+
+  it('adds the design to a connected Shopify cart at the fixed price', () => {
+    const onAddToCart = vi.fn();
+    render(
+      <DesignReviewDialog
+        onAddToCart={onAddToCart}
+        onClose={() => {}}
+        onSave={() => {}}
+        open
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ total: 107 }}
+        selected={{}}
+        shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+        state={{ overrides: {} }}
+      />,
+    );
+
+    expect(screen.getByText('$49.99 fixed Shopify price')).toBeInTheDocument();
+    const addToCart = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    expect(addToCart).toBeEnabled();
+    fireEvent.click(addToCart);
+    expect(onAddToCart).toHaveBeenCalledWith();
+  });
+
+  it('explains when the configurator was not launched from Shopify', () => {
+    render(
+      <DesignReviewDialog
+        onAddToCart={() => {}}
+        onClose={() => {}}
+        onSave={() => {}}
+        open
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ total: 107 }}
+        selected={{}}
+        shopifyContext={null}
+        state={{ overrides: {} }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeDisabled();
+    expect(screen.getByText('Open the configurator from a connected Shopify product page to add this design to your cart.')).toBeInTheDocument();
+  });
+
   it('summarizes the design and sends the shopper back to editing', () => {
     const onClose = vi.fn();
     render(

@@ -1,8 +1,23 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { useConfigurator } from './useConfigurator.js';
+import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
 
 describe('useConfigurator design files', () => {
+  it('initializes the Shopify-selected XL variant and retains its cart variant ID', async () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%2C%22m%22%3A%2248039101923479%22%2C%22l%22%3A%2248039101956247%22%2C%22xl%22%3A%2248039101989015%22%7D&variantId=48039101989015',
+    );
+    const { result } = renderHook(() => useConfigurator({ layout: context?.initialLayout }));
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(context?.initialLayout).toBe('xl');
+    expect(result.current.state.layout).toBe('xl');
+    expect(createCartUrl({ context, state: result.current.state, selected: result.current.selected }))
+      .toContain('/cart/48039101989015:1');
+  });
+
   it('exposes normalized appearance in selected options for the garment renderer', async () => {
     const { result } = renderHook(() => useConfigurator());
 

@@ -11,7 +11,7 @@ import {
   recordDesignState,
 } from '../designs/designHistory.js';
 
-export function useConfigurator() {
+export function useConfigurator(initialStateOverride) {
   const [product, setProduct] = useState(null);
   const [history, setHistory] = useState(null);
   const [quote, setQuote] = useState(null);
@@ -24,14 +24,17 @@ export function useConfigurator() {
       try {
         const products = await productApi.getProducts();
         const definition = await productApi.getProductDefinition(products[0].id);
+        const initialState = definition.options.layout.some((option) => option.id === initialStateOverride?.layout)
+          ? mergeConfiguratorState(definition.defaultState, { layout: initialStateOverride.layout })
+          : definition.defaultState;
         const initialQuote = await productApi.quoteConfiguration(
           definition.id,
-          definition.defaultState,
+          initialState,
         );
 
         if (!active) return;
         setProduct(definition);
-        setHistory(createDesignHistory(definition.defaultState));
+        setHistory(createDesignHistory(initialState));
         setQuote(initialQuote);
         setStatus('ready');
       } catch (error) {

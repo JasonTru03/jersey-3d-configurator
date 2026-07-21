@@ -171,6 +171,40 @@ describe('garment decoration mesh selection', () => {
     expect(currentDispose).toHaveBeenCalledOnce();
   });
 
+  it('keeps the scene background fixed while updating the body appearance color', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    HTMLCanvasElement.prototype.getContext = () => ({
+      save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, clip() {}, fill() {}, fillRect() {},
+      createLinearGradient: () => ({ addColorStop() {} }),
+      set fillStyle(_) {},
+    });
+    renderer.modelMaterials = [new THREE.MeshStandardMaterial()];
+    const product = { decorationPresets: [] };
+    const state = { lighting: 'none', overrides: {} };
+    const selected = {
+      colorway: { swatches: {} },
+      material: { material: { roughness: 0.7, metalness: 0 } },
+      appearance: { template: 'solid', colors: {
+        body: '#F7F5EF', sleeves: '#1F5B4F', shoulderSide: '#20242A', collar: '#D1B05D', pattern: '#C84F3D', number: '#20242A',
+      } },
+    };
+
+    renderer.scene.background.set('#f3f1ec');
+    renderer.update(product, state, selected);
+    const firstTexture = renderer.appearanceTexture;
+    renderer.update(product, state, {
+      ...selected,
+      appearance: { ...selected.appearance, colors: { ...selected.appearance.colors, body: '#123456' } },
+    });
+
+    expect(renderer.scene.background.getHexString()).toBe('f3f1ec');
+    expect(renderer.appearanceTexture).not.toBe(firstTexture);
+    expect(renderer.modelMaterials[0].map).toBe(renderer.appearanceTexture);
+    renderer.dispose();
+  });
+
   it('keeps the garment appearance texture during state-only updates', () => {
     const host = document.createElement('div');
     document.body.append(host);

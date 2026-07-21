@@ -4,6 +4,7 @@ export function parseShopifyLaunch(search) {
   const params = new URLSearchParams(search);
   const shop = normalizeShop(params.get('shop'));
   const variantMap = parseVariantMap(params.get('variantMap'));
+  const variantId = params.get('variantId') ?? '';
   const returnPath = params.get('returnPath') ?? '';
 
   if (!shop || !variantMap) return null;
@@ -15,8 +16,9 @@ export function parseShopifyLaunch(search) {
     shop,
     productHandle: params.get('productHandle') ?? '',
     returnPath,
-    variantId: params.get('variantId') ?? '',
+    variantId,
     variantMap,
+    initialLayout: Object.entries(variantMap).find(([, mappedVariantId]) => mappedVariantId === variantId)?.[0],
   };
 }
 

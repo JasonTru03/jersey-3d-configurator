@@ -40,6 +40,7 @@ const sectionDefaults = [
 ];
 
 export function ConfiguratorPage() {
+  const [shopifyContext] = useState(() => parseShopifyLaunch(window.location.search));
   const {
     canRedo,
     canUndo,
@@ -53,7 +54,7 @@ export function ConfiguratorPage() {
     status,
     undo,
     updateState,
-  } = useConfigurator();
+  } = useConfigurator(shopifyContext?.initialLayout ? { layout: shopifyContext.initialLayout } : undefined);
   const fileInputRef = useRef(null);
   const nameInputRef = useRef(null);
   const [editingPrintId, setEditingPrintId] = useState(null);
@@ -63,7 +64,6 @@ export function ConfiguratorPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [fileError, setFileError] = useState('');
   const [cartError, setCartError] = useState('');
-  const [shopifyContext] = useState(() => parseShopifyLaunch(window.location.search));
 
   const handleLightingSelect = (lighting) => {
     if (lighting === 'none') {

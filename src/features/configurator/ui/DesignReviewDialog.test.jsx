@@ -1,8 +1,33 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
 
 describe('DesignReviewDialog', () => {
+  it('shows a cart generation error inside the open review dialog', () => {
+    function CartErrorHarness() {
+      const [cartError, setCartError] = useState('');
+      return (
+        <DesignReviewDialog
+          cartError={cartError}
+          onAddToCart={() => setCartError('No Shopify variant exists for the selected size.')}
+          onClose={() => {}}
+          onSave={() => {}}
+          open
+          product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+          quote={{ total: 107 }}
+          selected={{}}
+          shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+          state={{ overrides: {} }}
+        />
+      );
+    }
+
+    render(<CartErrorHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('No Shopify variant exists for the selected size.');
+  });
+
   it('adds the design to a connected Shopify cart at the fixed price', () => {
     const onAddToCart = vi.fn();
     render(

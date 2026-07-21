@@ -7,7 +7,7 @@ const APPEARANCE_SUMMARY_ROWS = [
   ['number', 'Name and number'],
 ];
 
-export function DesignReviewDialog({ onAddToCart, onClose, onSave, open, product, quote, selected, shopifyContext, shopifyPrice = '$49.99 fixed Shopify price', state }) {
+export function DesignReviewDialog({ cartError, onAddToCart, onClose, onSave, open, product, quote, selected, shopifyContext, shopifyPrice = '$49.99 fixed Shopify price', state }) {
   if (!open) return null;
 
   const artworkCount = state.overrides?.decorations?.length ?? 0;
@@ -42,6 +42,7 @@ export function DesignReviewDialog({ onAddToCart, onClose, onSave, open, product
         {!shopifyContext && (
           <p className="review-note">Open the configurator from a connected Shopify product page to add this design to your cart.</p>
         )}
+        {cartError && <p className="review-note" role="alert">{cartError}</p>}
         <div className="review-actions">
           <button className="soft-button" onClick={onClose} type="button">Continue editing</button>
           <button className="soft-button" onClick={onSave} type="button">Save design file</button>

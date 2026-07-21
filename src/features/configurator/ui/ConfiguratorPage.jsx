@@ -62,6 +62,7 @@ export function ConfiguratorPage() {
   const [theme, setTheme] = useState('light');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [fileError, setFileError] = useState('');
+  const [cartError, setCartError] = useState('');
   const [shopifyContext] = useState(() => parseShopifyLaunch(window.location.search));
 
   const handleLightingSelect = (lighting) => {
@@ -95,10 +96,11 @@ export function ConfiguratorPage() {
 
   const handleAddToCart = () => {
     try {
+      setCartError('');
       const url = createCartUrl({ context: shopifyContext, state, selected });
       window.location.assign(url);
     } catch (error) {
-      setFileError(error instanceof Error ? error.message : 'Cart preparation failed.');
+      setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
     }
   };
 
@@ -157,6 +159,7 @@ export function ConfiguratorPage() {
         </div>
       </section>
       <DesignReviewDialog
+        cartError={cartError}
         onClose={() => setReviewOpen(false)}
         onAddToCart={handleAddToCart}
         onSave={handleSaveDesign}

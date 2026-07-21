@@ -262,7 +262,10 @@ export class GarmentRenderer {
     this.loadToken = loadToken;
     try {
       const gltf = await this.loader.loadAsync(modelUrl);
-      if (this.loadToken !== loadToken) return;
+      if (this.loadToken !== loadToken) {
+        disposeModelResources(gltf.scene);
+        return;
+      }
 
       this.disposeAppearanceTexture();
       this.disposeGroup(this.modelGroup);
@@ -431,10 +434,7 @@ export class GarmentRenderer {
   }
 
   disposeGroup(group) {
-    group.traverse((item) => {
-      if (item.geometry) item.geometry.dispose();
-      if (item.material) disposeMaterials(item.material);
-    });
+    disposeModelResources(group);
   }
 
   updatePrintLayer() {
@@ -761,6 +761,13 @@ function getPlaneProjectedCorners(plane, camera) {
 
 function distanceBetweenPlacements(first, second) {
   return Math.hypot(first.x - second.x, first.y - second.y, first.z - second.z);
+}
+
+function disposeModelResources(group) {
+  group.traverse((item) => {
+    if (item.geometry) item.geometry.dispose();
+    if (item.material) disposeMaterials(item.material);
+  });
 }
 
 function getAppearanceTextureKey(appearance) {

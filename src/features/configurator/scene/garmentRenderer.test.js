@@ -63,6 +63,47 @@ function pointerEvent(x, y) {
 }
 
 describe('garment decoration mesh selection', () => {
+  it('replaces garment appearance textures and synchronizes the name-set color', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    HTMLCanvasElement.prototype.getContext = () => ({
+      save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, clip() {}, fill() {}, fillRect() {},
+      createLinearGradient: () => ({ addColorStop() {} }),
+      set fillStyle(_) {},
+    });
+    renderer.modelMaterials = [new THREE.MeshStandardMaterial(), new THREE.MeshStandardMaterial()];
+    const product = { decorationPresets: [] };
+    const state = { lighting: 'none', overrides: {} };
+    const selected = {
+      colorway: { swatches: {} },
+      material: { material: { roughness: 0.7, metalness: 0 } },
+      appearance: { template: 'vertical-stripes', colors: {
+        body: '#F7F5EF', sleeves: '#1F5B4F', shoulderSide: '#20242A', collar: '#D1B05D', pattern: '#C84F3D', number: '#20242A',
+      } },
+    };
+
+    renderer.update(product, state, selected);
+
+    expect(renderer.appearanceTexture).toBeInstanceOf(THREE.CanvasTexture);
+    expect(renderer.appearanceTexture.colorSpace).toBe(THREE.SRGBColorSpace);
+    expect(renderer.appearanceTexture.flipY).toBe(false);
+    expect(renderer.modelMaterials.every((material) => material.map === renderer.appearanceTexture)).toBe(true);
+    const previousTexture = renderer.appearanceTexture;
+    const dispose = vi.spyOn(previousTexture, 'dispose');
+
+    renderer.update(product, state, {
+      ...selected,
+      appearance: { ...selected.appearance, colors: { ...selected.appearance.colors, number: '#FFCC00' } },
+    });
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(renderer.printColor).toBe('#FFCC00');
+    const currentDispose = vi.spyOn(renderer.appearanceTexture, 'dispose');
+    renderer.dispose();
+    expect(currentDispose).toHaveBeenCalledOnce();
+  });
+
   it('focuses a decoration from its outward decal normal with clamped distance and no state mutation', () => {
     const host = document.createElement('div');
     document.body.append(host);

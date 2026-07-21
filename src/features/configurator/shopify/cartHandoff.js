@@ -35,7 +35,7 @@ export function createCartUrl({ context, state, selected }) {
 }
 
 function isInternalReturnPath(path) {
-  return path.startsWith('/') && !path.startsWith('//');
+  return path.startsWith('/') && !path.startsWith('//') && !path.includes('\\');
 }
 
 function parseVariantMap(rawVariantMap) {

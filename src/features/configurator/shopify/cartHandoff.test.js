@@ -73,5 +73,7 @@ describe('cart handoff', () => {
       .toBeNull();
     expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%2FTARGET%2F`))
       .toBeNull();
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%5CTARGET%2F`))
+      .toBeNull();
   });
 });

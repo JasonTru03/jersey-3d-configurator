@@ -28,6 +28,10 @@ export function mergeConfiguratorState(current, patch) {
         bottomPattern: {
           ...currentBottomPattern,
           ...patchBottomPattern,
+          source: {
+            ...currentBottomPattern?.source,
+            ...patchBottomPattern?.source,
+          },
           transform: {
             ...currentBottomPattern?.transform,
             ...patchBottomPattern?.transform,

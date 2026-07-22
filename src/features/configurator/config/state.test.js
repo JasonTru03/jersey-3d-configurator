@@ -48,6 +48,25 @@ describe('mergeConfiguratorState', () => {
     });
   });
 
+  it('deep merges bottom pattern sources without dropping existing metadata', () => {
+    const current = {
+      extras: {},
+      overrides: {
+        bottomPattern: {
+          source: { kind: 'uploaded', id: 'asset-1', assetRef: 'asset:1' },
+          transform: {},
+        },
+      },
+    };
+
+    expect(mergeConfiguratorState(current, {
+      overrides: { bottomPattern: { source: { id: 'asset-2' } } },
+    }).overrides.bottomPattern.source).toEqual({
+      kind: 'uploaded',
+      id: 'asset-2',
+      assetRef: 'asset:1',
+    });
+  });
   it('deep merges bottom pattern transforms without dropping source metadata', () => {
     const current = {
       extras: {},

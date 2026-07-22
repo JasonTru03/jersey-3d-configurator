@@ -10,6 +10,10 @@ describe('bottom pattern configuration', () => {
   it('exposes versioned defaults and returns an independent default state', () => {
     expect(BOTTOM_PATTERN_VERSION).toBe(1);
     expect(Object.isFrozen(DEFAULT_BOTTOM_PATTERN)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_BOTTOM_PATTERN.source)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_BOTTOM_PATTERN.transform)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_BOTTOM_PATTERN.transform.offset)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_BOTTOM_PATTERN.transform.repeat)).toBe(true);
     expect(DEFAULT_BOTTOM_PATTERN).toEqual({
       enabled: false,
       source: { kind: 'preset', id: 'none', assetRef: '' },

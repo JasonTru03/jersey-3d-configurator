@@ -1,6 +1,6 @@
 export const BOTTOM_PATTERN_VERSION = 1;
 
-export const DEFAULT_BOTTOM_PATTERN = Object.freeze({
+export const DEFAULT_BOTTOM_PATTERN = deepFreeze({
   enabled: false,
   source: {
     kind: 'preset',
@@ -52,6 +52,12 @@ export function normalizeBottomPattern(bottomPattern = {}) {
   };
 }
 
+function deepFreeze(value) {
+  Object.values(value).forEach((child) => {
+    if (child && typeof child === 'object') deepFreeze(child);
+  });
+  return Object.freeze(value);
+}
 function normalizeSourceKind(value) {
   if (value === 'preset') return value;
   if (value === 'upload' || value === 'uploaded') return 'uploaded';

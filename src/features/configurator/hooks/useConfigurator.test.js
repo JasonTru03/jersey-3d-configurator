@@ -14,7 +14,7 @@ describe('useConfigurator design files', () => {
 
     expect(context?.initialLayout).toBe('xl');
     expect(result.current.state.layout).toBe('xl');
-    expect(createCartUrl({ context, state: result.current.state, selected: result.current.selected }))
+    expect(createCartUrl({ context, state: result.current.state, designAsset: { designId: 'dsg_test', url: 'https://TARGET/atlas.png', sha256: 'abc', version: 2 } }))
       .toContain('/cart/48039101989015:1');
   });
 

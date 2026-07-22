@@ -17,7 +17,7 @@ const rendererRegistry = {
   keyboardRenderer: KeyboardRenderer,
 };
 
-export function ProductStage({ artworkFocusId, onEditPrint, onStatePatch, product, state, selected }) {
+export function ProductStage({ artworkFocusId, onBakeProvider, onEditPrint, onStatePatch, product, state, selected }) {
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
   const [view, setView] = useState('orbit');
@@ -86,6 +86,11 @@ export function ProductStage({ artworkFocusId, onEditPrint, onStatePatch, produc
   useEffect(() => {
     rendererRef.current?.setView(view);
   }, [view]);
+
+  useEffect(() => {
+    onBakeProvider?.(() => rendererRef.current?.ensureLatestBottomPatternBake?.());
+    return () => onBakeProvider?.(null);
+  }, [onBakeProvider]);
 
   return (
     <section className="stage-wrap">

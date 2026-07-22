@@ -22,18 +22,17 @@ export function parseShopifyLaunch(search) {
   };
 }
 
-export function createCartUrl({ context, state, selected }) {
+export function createCartUrl({ context, state, designAsset }) {
   const shop = normalizeShop(context?.shop);
   if (!shop) throw new Error('Invalid Shopify shop host.');
 
-  const layout = state?.layout;
-  const variantId = context?.variantMap?.[layout];
+  const variantId = context?.variantMap?.[state?.layout];
 
   if (!isNumericId(variantId)) {
     throw new Error('No Shopify variant exists for the selected size.');
   }
 
-  const properties = createProperties({ state, selected });
+  const properties = createProperties(designAsset);
   const query = new URLSearchParams({
     properties: encodeBase64Url(JSON.stringify(properties)),
     storefront: 'true',
@@ -72,32 +71,14 @@ function parseVariantMap(rawVariantMap) {
   }
 }
 
-function createProperties({ state, selected }) {
-  const appearance = state?.overrides?.appearance;
-  const colors = appearance?.colors ?? {};
-  const decorations = state?.overrides?.decorations ?? [];
-
+function createProperties(designAsset) {
+  if (!designAsset?.designId || !designAsset?.url || !designAsset?.sha256 || !designAsset?.version) throw new Error('Design asset upload did not return a complete reference.');
   return {
-    Size: String(state?.layout ?? '').toUpperCase(),
-    Template: appearance?.template ?? 'solid',
-    'Body Color': colors.body ?? '',
-    'Sleeves Color': colors.sleeves ?? '',
-    'Shoulder and Side Color': colors.shoulderSide ?? '',
-    'Collar Color': colors.collar ?? '',
-    'Pattern Color': colors.pattern ?? '',
-    'Number Color': colors.number ?? '',
-    'Print Name': state?.overrides?.printName ?? '',
-    'Print Number': state?.overrides?.printNumber ?? '',
-    'Print Type': selected?.lighting?.shortLabel ?? 'None',
-    Extras: joinLabels(selected?.extras),
-    Artwork: joinLabels(decorations),
-    '_3D Configuration Version': '1',
+    'Design ID': designAsset.designId,
+    'UV Atlas URL': designAsset.url,
+    SHA: designAsset.sha256,
+    'Projection Version': String(designAsset.version),
   };
-}
-
-function joinLabels(items) {
-  const labels = (items ?? []).map((item) => item?.label).filter(Boolean);
-  return labels.join(', ') || 'None';
 }
 
 function isNumericId(value) {

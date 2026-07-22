@@ -439,7 +439,7 @@ export class GarmentRenderer {
   }
 
   async createBottomPatternTexture(pattern, sourceTexture) {
-    const { canvas, metadata } = await bakeBottomPatternAtlas({
+    const { blob, canvas, metadata } = await bakeBottomPatternAtlas({
       meshEntries: this.patternMeshes,
       pattern: {
         ...pattern,
@@ -452,7 +452,20 @@ export class GarmentRenderer {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.flipY = false;
     texture.userData.bottomPatternBakeMetadata = metadata;
+    texture.userData.bottomPatternBlob = blob;
     return texture;
+  }
+
+  async ensureLatestBottomPatternBake() {
+    const pattern = this.state?.overrides?.bottomPattern;
+    if (!pattern?.enabled) throw new Error('Enable a bottom pattern before adding this design to cart.');
+    await this.updateBottomPattern();
+    while (this.bottomPatternPendingKey) await new Promise((resolve) => setTimeout(resolve, 10));
+    const texture = this.bottomPatternTexture;
+    const metadata = texture?.userData?.bottomPatternBakeMetadata;
+    const blob = texture?.userData?.bottomPatternBlob;
+    if (!blob || !metadata) throw new Error('The latest UV atlas is not ready.');
+    return { blob, metadata };
   }
 
   applyBottomPatternTexture(texture) {

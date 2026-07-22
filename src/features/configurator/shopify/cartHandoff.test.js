@@ -31,26 +31,16 @@ describe('cart handoff', () => {
           decorations: [],
         },
       },
-      selected: { lighting: { shortLabel: 'Name set' }, extras: [] },
+      designAsset: { designId: 'dsg_123', url: 'https://TARGET/api/design-assets/dsg_123/atlas.png', sha256: 'abc123', version: 2 },
     });
 
     expect(url).toContain('/cart/48039101890711:1');
     expect(url).toContain('storefront=true');
     expect(decodeProperties(url)).toEqual({
-      Size: 'S',
-      Template: 'solid',
-      'Body Color': '#fff',
-      'Sleeves Color': '#fff',
-      'Shoulder and Side Color': '#111',
-      'Collar Color': '#111',
-      'Pattern Color': '#d8c17a',
-      'Number Color': '#111',
-      'Print Name': 'PLAYER',
-      'Print Number': '10',
-      'Print Type': 'Name set',
-      Extras: 'None',
-      Artwork: 'None',
-      '_3D Configuration Version': '1',
+      'Design ID': 'dsg_123',
+      'UV Atlas URL': 'https://TARGET/api/design-assets/dsg_123/atlas.png',
+      SHA: 'abc123',
+      'Projection Version': '2',
     });
   });
 
@@ -60,12 +50,12 @@ describe('cart handoff', () => {
     expect(() => createCartUrl({
       context: { shop: 'testcsj.myshopify.com@TARGET', variantMap: { s: '48039101890711' } },
       state: { layout: 's' },
-      selected: {},
+      designAsset: { designId: 'dsg_1', url: 'https://TARGET/atlas.png', sha256: 'x', version: 1 },
     })).toThrow('Invalid Shopify shop host.');
     expect(() => createCartUrl({
       context: { shop: 'testcsj.myshopify.com', variantMap: {} },
       state: { layout: 'xl' },
-      selected: {},
+      designAsset: { designId: 'dsg_1', url: 'https://TARGET/atlas.png', sha256: 'x', version: 1 },
     })).toThrow('selected size');
   });
 

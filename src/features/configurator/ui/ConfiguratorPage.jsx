@@ -28,6 +28,8 @@ import { ZoneColorPanel } from './ZoneColorPanel.jsx';
 import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
+import { uploadDesignAsset } from '../api/designAssetApi.js';
+import { createDesignDocument } from '../designs/designDocument.js';
 import './configurator.css';
 
 const sectionDefaults = [
@@ -65,6 +67,7 @@ export function ConfiguratorPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [fileError, setFileError] = useState('');
   const [cartError, setCartError] = useState('');
+  const bakeProviderRef = useRef(null);
 
   const handleLightingSelect = (lighting) => {
     if (lighting === 'none') {
@@ -95,10 +98,14 @@ export function ConfiguratorPage() {
     event.target.value = '';
   };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     try {
       setCartError('');
-      const url = createCartUrl({ context: shopifyContext, state, selected });
+      const bake = await bakeProviderRef.current?.();
+      if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
+      const design = createDesignDocument({ productId: product.id, variantId: shopifyContext?.variantId, state });
+      const designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata });
+      const url = createCartUrl({ context: shopifyContext, state, designAsset });
       window.location.assign(url);
     } catch (error) {
       setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
@@ -135,6 +142,7 @@ export function ConfiguratorPage() {
         <div className="workspace-grid">
           <ProductStage
             artworkFocusId={artworkFocusId}
+            onBakeProvider={(provider) => { bakeProviderRef.current = provider; }}
             onEditPrint={(id) => {
               setEditingPrintId(id);
               setSection('lighting');

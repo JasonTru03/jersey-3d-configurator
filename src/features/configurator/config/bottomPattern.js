@@ -1,6 +1,6 @@
 export const BOTTOM_PATTERN_VERSION = 1;
 
-export const DEFAULT_BOTTOM_PATTERN = {
+export const DEFAULT_BOTTOM_PATTERN = Object.freeze({
   enabled: false,
   source: {
     kind: 'preset',
@@ -15,7 +15,7 @@ export const DEFAULT_BOTTOM_PATTERN = {
   },
   projectionVersion: BOTTOM_PATTERN_VERSION,
   modelProjectionId: 'chelsea-jersey-cylindrical-v1',
-};
+});
 
 export function createDefaultBottomPattern() {
   return structuredClone(DEFAULT_BOTTOM_PATTERN);
@@ -31,7 +31,7 @@ export function normalizeBottomPattern(bottomPattern = {}) {
   return {
     enabled: typeof bottomPattern?.enabled === 'boolean' ? bottomPattern.enabled : defaults.enabled,
     source: {
-      kind: validSourceKind(source.kind) ? source.kind : defaults.source.kind,
+      kind: normalizeSourceKind(source.kind) ?? defaults.source.kind,
       id: validSourceId(source.id) ? source.id : defaults.source.id,
       assetRef: typeof source.assetRef === 'string' ? source.assetRef : defaults.source.assetRef,
     },
@@ -52,8 +52,10 @@ export function normalizeBottomPattern(bottomPattern = {}) {
   };
 }
 
-function validSourceKind(value) {
-  return value === 'preset' || value === 'upload';
+function normalizeSourceKind(value) {
+  if (value === 'preset') return value;
+  if (value === 'upload' || value === 'uploaded') return 'uploaded';
+  return undefined;
 }
 
 function validSourceId(value) {

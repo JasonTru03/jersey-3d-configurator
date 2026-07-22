@@ -9,6 +9,7 @@ import {
 describe('bottom pattern configuration', () => {
   it('exposes versioned defaults and returns an independent default state', () => {
     expect(BOTTOM_PATTERN_VERSION).toBe(1);
+    expect(Object.isFrozen(DEFAULT_BOTTOM_PATTERN)).toBe(true);
     expect(DEFAULT_BOTTOM_PATTERN).toEqual({
       enabled: false,
       source: { kind: 'preset', id: 'none', assetRef: '' },
@@ -33,9 +34,19 @@ describe('bottom pattern configuration', () => {
 
   it('preserves uploaded pattern sources', () => {
     expect(normalizeBottomPattern({
+      source: { kind: 'uploaded', id: 'asset-1', assetRef: 'asset:1' },
+    }).source).toEqual({
+      kind: 'uploaded',
+      id: 'asset-1',
+      assetRef: 'asset:1',
+    });
+  });
+
+  it('normalizes legacy upload sources to uploaded', () => {
+    expect(normalizeBottomPattern({
       source: { kind: 'upload', id: 'uploaded-pattern', assetRef: 'assets/pattern.png' },
     }).source).toEqual({
-      kind: 'upload',
+      kind: 'uploaded',
       id: 'uploaded-pattern',
       assetRef: 'assets/pattern.png',
     });

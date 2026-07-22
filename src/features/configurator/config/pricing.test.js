@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { calculateQuote } from './pricing.js';
 import { jerseyProduct } from './productDefinitions.js';
+import { createDefaultBottomPattern } from './bottomPattern.js';
 
 describe('calculateQuote', () => {
+  it('includes the v1 default bottom pattern in the product state', () => {
+    expect(jerseyProduct.defaultState.overrides.bottomPattern)
+      .toEqual(createDefaultBottomPattern());
+  });
   it('adds layout, finish, lighting, and enabled extras to the base price', () => {
     const quote = calculateQuote(jerseyProduct, {
       productId: 'fn8788-jersey',

@@ -173,4 +173,52 @@ describe('design document', () => {
       colors: { body: '#20242A', sleeves: '#20242A', shoulderSide: '#F4EFE4', collar: '#F4EFE4', pattern: '#C84F3D', number: '#F4EFE4' },
     });
   });
+
+  it('migrates a v1 document without a bottom pattern to a disabled bottom pattern', () => {
+    const state = parseDesignDocument(JSON.stringify({
+      format: 'jersey-design',
+      productId: 'fn8788-jersey',
+      state: defaultState,
+      version: 1,
+    }), { defaultState, expectedProductId: 'fn8788-jersey' });
+
+    expect(state.overrides.bottomPattern).toMatchObject({ enabled: false });
+  });
+
+  it('saves v2 bottom-pattern metadata without baking image payloads and round-trips its controls', () => {
+    const bottomPattern = {
+      enabled: true,
+      source: { kind: 'preset', id: 'micro-chevron', assetRef: '/patterns/micro-chevron.svg' },
+      transform: { offset: { u: 0, v: 0 }, scale: 1.5, rotationDeg: 45, repeat: { u: 5, v: 6 } },
+      projectionVersion: 1,
+      modelProjectionId: 'chelsea-jersey-cylindrical-v1',
+      bakeMetadata: { key: 'bottom-pattern-atlas:abc', mimeType: 'image/png', width: 2048, dataUrl: 'data:image/png;base64,abc' },
+    };
+    const document = createDesignDocument({ productId: 'fn8788-jersey', state: { ...defaultState, overrides: { bottomPattern } } });
+    const loaded = parseDesignDocument(JSON.stringify(document), { defaultState, expectedProductId: 'fn8788-jersey' });
+
+    expect(document.version).toBe(2);
+    expect(document.state.overrides.bottomPattern.bakeMetadata).toEqual({ key: 'bottom-pattern-atlas:abc', mimeType: 'image/png', width: 2048 });
+    expect(JSON.stringify(document)).not.toContain('data:image/png');
+    expect(loaded.overrides.bottomPattern).toMatchObject({ enabled: true, transform: bottomPattern.transform, bakeMetadata: { key: 'bottom-pattern-atlas:abc' } });
+  });
+
+  it('does not embed a bottom-pattern Data URL in a v2 document', () => {
+    const document = createDesignDocument({
+      productId: 'fn8788-jersey',
+      state: {
+        ...defaultState,
+        overrides: {
+          bottomPattern: {
+            enabled: true,
+            source: { kind: 'uploaded', id: 'pattern-upload-1', assetRef: 'data:image/png;base64,abc' },
+            transform: { offset: { u: 0, v: 0 }, scale: 1, rotationDeg: 0, repeat: { u: 3, v: 4 } },
+          },
+        },
+      },
+    });
+
+    expect(document.state.overrides.bottomPattern.source).toEqual({ kind: 'uploaded', id: 'pattern-upload-1', assetRef: '' });
+    expect(JSON.stringify(document)).not.toContain('data:image/png');
+  });
 });

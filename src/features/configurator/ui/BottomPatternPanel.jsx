@@ -1,0 +1,35 @@
+import { createDefaultBottomPattern } from '../config/bottomPattern.js';
+
+const defaults = createDefaultBottomPattern();
+
+export function BottomPatternPanel({ pattern = defaults, onChange }) {
+  const transform = { ...defaults.transform, ...pattern.transform };
+  const repeat = { ...defaults.transform.repeat, ...transform.repeat };
+
+  return (
+    <section aria-label="Continuous bottom pattern" className="bottom-pattern-panel">
+      <label className="bottom-pattern-toggle">
+        <input
+          checked={Boolean(pattern.enabled)}
+          onChange={(event) => onChange({ enabled: event.target.checked })}
+          type="checkbox"
+        />
+        <span>Enable continuous bottom pattern</span>
+      </label>
+      <PatternControl label="Pattern scale" max="8" min="0.1" onChange={(value) => onChange({ transform: { scale: value } })} step="0.1" value={transform.scale} />
+      <PatternControl label="Pattern rotation" max="359" min="0" onChange={(value) => onChange({ transform: { rotationDeg: value } })} step="1" value={transform.rotationDeg} />
+      <PatternControl label="Horizontal repeat" max="16" min="1" onChange={(value) => onChange({ transform: { repeat: { u: value } } })} step="1" value={repeat.u} />
+      <PatternControl label="Vertical repeat" max="16" min="1" onChange={(value) => onChange({ transform: { repeat: { v: value } } })} step="1" value={repeat.v} />
+      <button className="soft-button bottom-pattern-reset" onClick={() => onChange({ enabled: defaults.enabled, transform: { scale: defaults.transform.scale, rotationDeg: defaults.transform.rotationDeg, repeat: structuredClone(defaults.transform.repeat) } })} type="button">Reset controls</button>
+    </section>
+  );
+}
+
+function PatternControl({ label, max, min, onChange, step, value }) {
+  return (
+    <label className="bottom-pattern-control">
+      <span>{label}<output>{value}</output></span>
+      <input aria-label={label} max={max} min={min} onChange={(event) => onChange(Number(event.target.value))} step={step} type="range" value={value} />
+    </label>
+  );
+}

@@ -1,8 +1,9 @@
 import { normalizeAppearance } from '../config/appearance.js';
+import { createDefaultBottomPattern, normalizeBottomPattern } from '../config/bottomPattern.js';
 import { getPrintItems, legacyFirstItemFields } from '../config/printItems.js';
 
 export const DESIGN_DOCUMENT_FORMAT = 'jersey-design';
-export const DESIGN_DOCUMENT_VERSION = 1;
+export const DESIGN_DOCUMENT_VERSION = 2;
 
 export class DesignDocumentError extends Error {
   constructor(code, message) {
@@ -33,7 +34,7 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
     throw new DesignDocumentError('invalid-json', 'This design file is not valid JSON.');
   }
 
-  if (document?.format !== DESIGN_DOCUMENT_FORMAT || document.version !== DESIGN_DOCUMENT_VERSION) {
+  if (document?.format !== DESIGN_DOCUMENT_FORMAT || ![1, DESIGN_DOCUMENT_VERSION].includes(document.version)) {
     throw new DesignDocumentError('unsupported-version', 'This design file format is not supported.');
   }
 
@@ -58,6 +59,7 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
   } catch (error) {
     throw new DesignDocumentError('invalid-state', error.message);
   }
+  const bottomPattern = normalizeDocumentBottomPattern(documentOverrides.bottomPattern, document.version);
 
   return {
     ...structuredClone(defaultState),
@@ -66,6 +68,7 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
     overrides: {
       ...mergedOverrides,
       appearance,
+      bottomPattern,
       printItems,
       ...legacyFirstItemFields(printItems),
     },
@@ -80,10 +83,34 @@ function normalizePrintState(state) {
     overrides: {
       ...overrides,
       ...(overrides.appearance ? { appearance: normalizeAppearance(overrides.appearance) } : {}),
+      ...(overrides.bottomPattern ? { bottomPattern: normalizeDocumentBottomPattern(overrides.bottomPattern, DESIGN_DOCUMENT_VERSION) } : {}),
       printItems,
       ...legacyFirstItemFields(printItems),
     },
   };
+}
+
+function normalizeDocumentBottomPattern(pattern, version) {
+  const normalized = normalizeBottomPattern(pattern ?? createDefaultBottomPattern());
+  const source = normalized.source.assetRef.startsWith('data:')
+    ? { ...normalized.source, assetRef: '' }
+    : normalized.source;
+  const safePattern = { ...normalized, source };
+  const bakeMetadata = sanitizeBakeMetadata(pattern?.bakeMetadata);
+  if (!bakeMetadata) return safePattern;
+  return { ...safePattern, bakeMetadata };
+}
+
+function sanitizeBakeMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const safeKeys = ['key', 'mimeType', 'size', 'width', 'height', 'meshCount', 'sourceHash', 'projectionVersion', 'projectionId'];
+  const safeMetadata = safeKeys.reduce((result, key) => {
+    const value = metadata[key];
+    if (typeof value === 'string' && !value.startsWith('data:')) result[key] = value;
+    if (Number.isFinite(value)) result[key] = value;
+    return result;
+  }, {});
+  return Object.keys(safeMetadata).length ? safeMetadata : null;
 }
 
 function hasDocumentPrintData(overrides) {

@@ -429,6 +429,8 @@ export class GarmentRenderer {
       this.bottomPatternTexture = texture;
       this.bottomPatternKey = key;
       this.applyBottomPatternTexture(texture);
+      const bakeMetadata = texture.userData?.bottomPatternBakeMetadata;
+      if (bakeMetadata) this.onStatePatch?.({ overrides: { bottomPattern: { bakeMetadata } } });
     } catch (error) {
       if (this.bottomPatternRequest === request) console.error(`Unable to bake bottom pattern: ${sourceRef}`, error);
     } finally {
@@ -437,7 +439,7 @@ export class GarmentRenderer {
   }
 
   async createBottomPatternTexture(pattern, sourceTexture) {
-    const { canvas } = await bakeBottomPatternAtlas({
+    const { canvas, metadata } = await bakeBottomPatternAtlas({
       meshEntries: this.patternMeshes,
       pattern: {
         ...pattern,
@@ -449,6 +451,7 @@ export class GarmentRenderer {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.flipY = false;
+    texture.userData.bottomPatternBakeMetadata = metadata;
     return texture;
   }
 

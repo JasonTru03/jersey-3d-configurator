@@ -274,6 +274,27 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('records the completed bottom-pattern bake metadata in configurator state', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const material = new THREE.MeshStandardMaterial();
+    const texture = new THREE.Texture();
+    texture.userData = { bottomPatternBakeMetadata: { key: 'bottom-pattern-atlas:latest', mimeType: 'image/png', width: 2048 } };
+    renderer.patternMeshes = [new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material)];
+    renderer.textureLoader = { loadAsync: vi.fn().mockResolvedValue({ image: { width: 16, height: 16 } }) };
+    renderer.createBottomPatternTexture = vi.fn().mockResolvedValue(texture);
+    renderer.onStatePatch = vi.fn();
+    renderer.state = { overrides: { bottomPattern: enabledBottomPattern() } };
+
+    await renderer.updateBottomPattern();
+
+    expect(renderer.onStatePatch).toHaveBeenCalledWith({
+      overrides: { bottomPattern: { bakeMetadata: texture.userData.bottomPatternBakeMetadata } },
+    });
+    renderer.dispose();
+  });
+
   it('does not let a stale bottom-pattern bake replace a newer pattern texture', async () => {
     const host = document.createElement('div');
     document.body.append(host);

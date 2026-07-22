@@ -25,6 +25,7 @@ import { DecorationPanel } from './DecorationPanel.jsx';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
 import { TemplateLibrary } from './TemplateLibrary.jsx';
 import { ZoneColorPanel } from './ZoneColorPanel.jsx';
+import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import './configurator.css';
@@ -251,6 +252,7 @@ function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLighting
       },
     });
   };
+  const patchBottomPattern = (patch) => updateState({ overrides: { bottomPattern: patch } });
 
   return (
     <aside className="config-panel">
@@ -281,6 +283,10 @@ function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLighting
             colors={state.overrides?.appearance?.colors ?? {}}
             onColorChange={(colors) => patchAppearance({ colors })}
             palette={APPEARANCE_PALETTE}
+          />
+          <BottomPatternPanel
+            pattern={state.overrides?.bottomPattern}
+            onChange={patchBottomPattern}
           />
         </>
       )}

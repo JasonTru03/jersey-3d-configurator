@@ -109,4 +109,31 @@ describe('bottom pattern baker', () => {
     expect(context.clearRect).toHaveBeenCalledWith(0, 0, 2048, 2048);
     expect(context.drawImage).toHaveBeenCalledWith(sourceTexture, 0, 0, 2048, 2048);
   });
+
+  it('bakes projected garment triangles into the model UV atlas instead of copying source metadata only', async () => {
+    const context = {
+      clearRect: vi.fn(), drawImage: vi.fn(), createPattern: vi.fn(() => ({ setTransform: vi.fn() })),
+      save: vi.fn(), restore: vi.fn(), transform: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(),
+      set fillStyle(_) {},
+    };
+    const canvas = {
+      width: 0, height: 0, getContext: vi.fn(() => context),
+      toBlob: (callback) => callback(new Blob(['png'], { type: 'image/png' })),
+    };
+    vi.spyOn(document, 'createElement').mockReturnValue(canvas);
+    const geometry = {
+      attributes: {
+        position: { count: 3, getX: (index) => [0, 1, 0][index], getY: (index) => [0, 0, 1][index], getZ: () => 0 },
+        uv: { getX: (index) => [0, 1, 0][index], getY: (index) => [0, 0, 1][index] },
+      },
+    };
+
+    await bakeBottomPatternAtlas({
+      meshEntries: [{ geometry, localToWorld: (point) => point }], pattern: bakeInput, sourceTexture: { width: 16, height: 16 }, size: 64,
+    });
+
+    expect(context.createPattern).toHaveBeenCalledWith(expect.anything(), 'repeat');
+    expect(context.transform).toHaveBeenCalled();
+    expect(context.fill).toHaveBeenCalledOnce();
+  });
 });

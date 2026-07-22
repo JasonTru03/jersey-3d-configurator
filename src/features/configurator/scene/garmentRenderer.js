@@ -5,6 +5,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DecorationEditor } from './decorationEditor.js';
 import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 import { createGarmentAppearanceCanvas } from './garmentAppearanceTexture.js';
+import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
+import { selectGarmentPatternMeshes } from './modelProjection.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
@@ -111,8 +113,14 @@ export class GarmentRenderer {
     this.modelMaterials = [];
     this.appearanceTexture = null;
     this.appearanceTextureKey = null;
+    this.bottomPatternTexture = null;
+    this.bottomPatternKey = null;
+    this.bottomPatternRequest = Symbol('initial-bottom-pattern');
+    this.bottomPatternPendingKey = null;
     this.modelMeshes = [];
     this.decorationMeshes = [];
+    this.patternMeshes = [];
+    this.textureLoader = new THREE.TextureLoader();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.printLayers = new Map();
@@ -168,6 +176,7 @@ export class GarmentRenderer {
 
     this.applyAppearance(selected.appearance);
     this.applyMaterial(selected.material.material);
+    this.updateBottomPattern();
     this.updatePrintLayer();
     this.decorationEditor.update(
       state.overrides?.decorations ?? [],
@@ -239,6 +248,8 @@ export class GarmentRenderer {
   dispose() {
     cancelAnimationFrame(this.frame);
     this.loadToken = Symbol('disposed');
+    this.bottomPatternRequest = Symbol('disposed-bottom-pattern');
+    this.bottomPatternPendingKey = null;
     this.pendingDecorationDeselect = null;
     gsap.killTweensOf(this.camera?.position);
     gsap.killTweensOf(this.controls?.target);
@@ -250,6 +261,7 @@ export class GarmentRenderer {
     window.removeEventListener('pointerup', this.handlePointerUp);
     window.removeEventListener('pointercancel', this.handlePointerCancel);
     this.disposeAppearanceTexture();
+    this.disposeBottomPatternTexture();
     this.disposeGroup(this.root);
     this.disposePrintLayer();
     this.decorationEditor?.dispose();
@@ -260,6 +272,8 @@ export class GarmentRenderer {
   async loadModel(modelUrl) {
     const loadToken = Symbol(modelUrl);
     this.loadToken = loadToken;
+    this.bottomPatternRequest = Symbol('model-loading-bottom-pattern');
+    this.bottomPatternPendingKey = null;
     try {
       const gltf = await this.loader.loadAsync(modelUrl);
       if (this.loadToken !== loadToken) {
@@ -267,12 +281,14 @@ export class GarmentRenderer {
         return;
       }
 
+      this.disposeBottomPatternTexture();
       this.disposeAppearanceTexture();
       this.disposeGroup(this.modelGroup);
       this.modelGroup.clear();
       this.modelMaterials = [];
       this.modelMeshes = [];
       this.decorationMeshes = [];
+      this.patternMeshes = [];
       const model = gltf.scene;
       model.traverse((item) => {
         if (!item.isMesh) return;
@@ -285,6 +301,7 @@ export class GarmentRenderer {
       });
 
       this.decorationMeshes = selectDecorationMeshes(this.modelMeshes);
+      this.patternMeshes = selectGarmentPatternMeshes(this.modelMeshes);
 
       this.modelGroup.add(model);
       this.fitModel(model);
@@ -297,6 +314,7 @@ export class GarmentRenderer {
       );
       this.applyAppearance(this.selected?.appearance);
       this.applyMaterial(this.selected?.material?.material);
+      this.updateBottomPattern();
       this.updatePrintLayer();
       gsap.fromTo(model.scale, { x: model.scale.x * 0.94, y: model.scale.y * 0.94, z: model.scale.z * 0.94 }, {
         x: model.scale.x,
@@ -365,7 +383,7 @@ export class GarmentRenderer {
     if (this.appearanceTexture && this.appearanceTextureKey === appearanceKey) return;
     const replacedBaseColorMaps = new Set(this.modelMaterials
       .map((material) => material.map)
-      .filter((map) => map && map !== this.appearanceTexture));
+      .filter((map) => map && map !== this.appearanceTexture && map !== this.bottomPatternTexture));
     const texture = new THREE.CanvasTexture(createGarmentAppearanceCanvas(2048, appearance));
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.flipY = false;
@@ -379,6 +397,79 @@ export class GarmentRenderer {
     replacedBaseColorMaps.forEach((map) => map.dispose());
     this.printColor = appearance.colors.number;
     this.redrawPrintTexture();
+  }
+
+  async updateBottomPattern() {
+    const pattern = this.state?.overrides?.bottomPattern;
+    const sourceRef = pattern?.source?.assetRef;
+    const key = getBottomPatternKey(pattern);
+    if (!pattern?.enabled || !sourceRef || !this.patternMeshes.length) {
+      this.bottomPatternRequest = Symbol('disabled-bottom-pattern');
+      this.bottomPatternPendingKey = null;
+      this.disposeBottomPatternTexture();
+      return;
+    }
+    if (this.bottomPatternTexture && this.bottomPatternKey === key) {
+      this.applyBottomPatternTexture(this.bottomPatternTexture);
+      return;
+    }
+    if (this.bottomPatternPendingKey === key) return;
+
+    const request = Symbol(key);
+    this.bottomPatternRequest = request;
+    this.bottomPatternPendingKey = key;
+    try {
+      const sourceTexture = await this.textureLoader.loadAsync(sourceRef);
+      const texture = await this.createBottomPatternTexture(pattern, sourceTexture);
+      if (this.bottomPatternRequest !== request) {
+        texture.dispose();
+        return;
+      }
+      this.disposeBottomPatternTexture();
+      this.bottomPatternTexture = texture;
+      this.bottomPatternKey = key;
+      this.applyBottomPatternTexture(texture);
+    } catch (error) {
+      if (this.bottomPatternRequest === request) console.error(`Unable to bake bottom pattern: ${sourceRef}`, error);
+    } finally {
+      if (this.bottomPatternRequest === request) this.bottomPatternPendingKey = null;
+    }
+  }
+
+  async createBottomPatternTexture(pattern, sourceTexture) {
+    const { canvas } = await bakeBottomPatternAtlas({
+      meshEntries: this.patternMeshes,
+      pattern: {
+        ...pattern,
+        sourceHash: pattern.source?.assetRef,
+        projectionId: pattern.modelProjectionId,
+      },
+      sourceTexture,
+    });
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = false;
+    return texture;
+  }
+
+  applyBottomPatternTexture(texture) {
+    collectMeshMaterials(this.patternMeshes).forEach((material) => {
+      material.map = texture;
+      material.needsUpdate = true;
+    });
+  }
+
+  disposeBottomPatternTexture() {
+    if (!this.bottomPatternTexture) return;
+    collectMeshMaterials(this.patternMeshes).forEach((material) => {
+      if (material.map === this.bottomPatternTexture) {
+        material.map = this.appearanceTexture;
+        material.needsUpdate = true;
+      }
+    });
+    this.bottomPatternTexture.dispose();
+    this.bottomPatternTexture = null;
+    this.bottomPatternKey = null;
   }
 
   disposeAppearanceTexture() {
@@ -704,6 +795,12 @@ function collectMaterials(material, materials) {
   if (material) materials.push(material);
 }
 
+function collectMeshMaterials(meshes) {
+  const materials = [];
+  meshes.forEach((mesh) => collectMaterials(mesh.material, materials));
+  return [...new Set(materials)];
+}
+
 function disposeMaterials(material) {
   if (Array.isArray(material)) {
     material.forEach(disposeMaterials);
@@ -773,5 +870,15 @@ function getAppearanceTextureKey(appearance) {
   return JSON.stringify({
     template: appearance.template,
     colors: Object.entries(appearance.colors ?? {}).sort(([first], [second]) => first.localeCompare(second)),
+  });
+}
+
+function getBottomPatternKey(pattern) {
+  if (!pattern?.enabled) return null;
+  return JSON.stringify({
+    source: pattern.source,
+    transform: pattern.transform,
+    projectionVersion: pattern.projectionVersion,
+    modelProjectionId: pattern.modelProjectionId,
   });
 }

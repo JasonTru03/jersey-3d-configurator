@@ -75,6 +75,16 @@ function deferred() {
   return { promise, resolve };
 }
 
+function enabledBottomPattern(id = 'pattern') {
+  return {
+    enabled: true,
+    source: { kind: 'preset', id, assetRef: `${id}.png` },
+    transform: { offset: { u: 0, v: 0 }, scale: 1, rotationDeg: 0, repeat: { u: 3, v: 4 } },
+    projectionVersion: 1,
+    modelProjectionId: 'chelsea-jersey-cylindrical-v1',
+  };
+}
+
 function makeDisposableModel() {
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   const map = new THREE.Texture();
@@ -231,6 +241,67 @@ describe('garment decoration mesh selection', () => {
 
     expect(renderer.appearanceTexture).toBe(texture);
     expect(dispose).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it('uses a baked bottom-pattern texture for garment meshes and restores the appearance map when disabled', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const material = new THREE.MeshStandardMaterial();
+    const garmentMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
+    const appearanceTexture = new THREE.Texture();
+    const bakedTexture = new THREE.Texture();
+    const bakedDispose = vi.spyOn(bakedTexture, 'dispose');
+    renderer.modelMaterials = [material];
+    renderer.patternMeshes = [garmentMesh];
+    renderer.appearanceTexture = appearanceTexture;
+    material.map = appearanceTexture;
+    renderer.textureLoader = { loadAsync: vi.fn().mockResolvedValue({ image: { width: 16, height: 16 } }) };
+    renderer.createBottomPatternTexture = vi.fn().mockResolvedValue(bakedTexture);
+    renderer.state = { overrides: { bottomPattern: enabledBottomPattern() } };
+
+    await renderer.updateBottomPattern();
+
+    expect(renderer.createBottomPatternTexture).toHaveBeenCalledOnce();
+    expect(material.map).toBe(bakedTexture);
+
+    renderer.state = { overrides: { bottomPattern: { enabled: false } } };
+    await renderer.updateBottomPattern();
+
+    expect(material.map).toBe(appearanceTexture);
+    expect(bakedDispose).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
+  it('does not let a stale bottom-pattern bake replace a newer pattern texture', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const material = new THREE.MeshStandardMaterial();
+    renderer.modelMaterials = [material];
+    renderer.patternMeshes = [new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material)];
+    renderer.appearanceTexture = new THREE.Texture();
+    material.map = renderer.appearanceTexture;
+    const first = deferred();
+    const second = deferred();
+    const firstTexture = new THREE.Texture();
+    const secondTexture = new THREE.Texture();
+    const firstDispose = vi.spyOn(firstTexture, 'dispose');
+    renderer.textureLoader = { loadAsync: vi.fn().mockResolvedValue({ image: { width: 16, height: 16 } }) };
+    renderer.createBottomPatternTexture = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    renderer.state = { overrides: { bottomPattern: enabledBottomPattern('first') } };
+    const firstUpdate = renderer.updateBottomPattern();
+    renderer.state = { overrides: { bottomPattern: enabledBottomPattern('second') } };
+    const secondUpdate = renderer.updateBottomPattern();
+    second.resolve(secondTexture);
+    await secondUpdate;
+    first.resolve(firstTexture);
+    await firstUpdate;
+
+    expect(material.map).toBe(secondTexture);
+    expect(firstDispose).toHaveBeenCalledOnce();
     renderer.dispose();
   });
 

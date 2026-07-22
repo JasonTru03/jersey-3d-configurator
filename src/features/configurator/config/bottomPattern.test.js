@@ -31,6 +31,15 @@ describe('bottom pattern configuration', () => {
     expect(normalizeBottomPattern()).toEqual(DEFAULT_BOTTOM_PATTERN);
   });
 
+  it('preserves uploaded pattern sources', () => {
+    expect(normalizeBottomPattern({
+      source: { kind: 'upload', id: 'uploaded-pattern', assetRef: 'assets/pattern.png' },
+    }).source).toEqual({
+      kind: 'upload',
+      id: 'uploaded-pattern',
+      assetRef: 'assets/pattern.png',
+    });
+  });
   it('clamps invalid transform values and preserves valid preset sources', () => {
     expect(normalizeBottomPattern({
       enabled: true,

@@ -31,8 +31,8 @@ export function normalizeBottomPattern(bottomPattern = {}) {
   return {
     enabled: typeof bottomPattern?.enabled === 'boolean' ? bottomPattern.enabled : defaults.enabled,
     source: {
-      kind: source.kind === 'preset' ? source.kind : defaults.source.kind,
-      id: validPresetId(source.id) ? source.id : defaults.source.id,
+      kind: validSourceKind(source.kind) ? source.kind : defaults.source.kind,
+      id: validSourceId(source.id) ? source.id : defaults.source.id,
       assetRef: typeof source.assetRef === 'string' ? source.assetRef : defaults.source.assetRef,
     },
     transform: {
@@ -52,7 +52,11 @@ export function normalizeBottomPattern(bottomPattern = {}) {
   };
 }
 
-function validPresetId(value) {
+function validSourceKind(value) {
+  return value === 'preset' || value === 'upload';
+}
+
+function validSourceId(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 

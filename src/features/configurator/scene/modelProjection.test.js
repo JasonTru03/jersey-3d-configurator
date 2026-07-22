@@ -32,6 +32,16 @@ describe('model projection', () => {
     )).toBeLessThan(0.001);
   });
 
+  it('keeps v finite when the garment height range is zero', () => {
+    const projector = createCylindricalProjector({
+      center: { x: 0, z: 0 },
+      minY: 5,
+      maxY: 5,
+    });
+
+    expect(Number.isFinite(projector.project({ x: 0, y: 5, z: 1 }).v)).toBe(true);
+  });
+
   it('selects garment cloth meshes by name', () => {
     const meshes = [
       { name: 'Jersey_Cloth' },

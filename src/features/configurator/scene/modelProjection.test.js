@@ -32,14 +32,32 @@ describe('model projection', () => {
     )).toBeLessThan(0.001);
   });
 
-  it('keeps v finite when the garment height range is zero', () => {
+  it('normalizes u around the seam after applying the front angle', () => {
+    const projector = createCylindricalProjector({
+      center: { x: 0, z: 0 },
+      minY: 0,
+      maxY: 1,
+      frontAngleDeg: 270,
+    });
+
+    const front = projector.project({ x: 0, y: 0.5, z: 1 });
+    const back = projector.project({ x: 0, y: 0.5, z: -1 });
+
+    expect(front.u).toBeCloseTo(0.75);
+    expect(back.u).toBeCloseTo(0.25);
+    expect(front.u).toBeGreaterThanOrEqual(0);
+    expect(front.u).toBeLessThan(1);
+  });
+
+  it('uses v zero when the garment height range is zero', () => {
     const projector = createCylindricalProjector({
       center: { x: 0, z: 0 },
       minY: 5,
       maxY: 5,
     });
 
-    expect(Number.isFinite(projector.project({ x: 0, y: 5, z: 1 }).v)).toBe(true);
+    expect(projector.project({ x: 0, y: 5, z: 1 }).v).toBe(0);
+    expect(projector.project({ x: 0, y: 100, z: 1 }).v).toBe(0);
   });
 
   it('selects garment cloth meshes by name', () => {
@@ -51,5 +69,11 @@ describe('model projection', () => {
     ];
 
     expect(selectGarmentPatternMeshes(meshes)).toEqual(meshes.slice(0, 3));
+  });
+
+  it('falls back to all meshes when no garment names match', () => {
+    const meshes = [{ name: 'SleeveTrim' }, { name: 'Collar' }];
+
+    expect(selectGarmentPatternMeshes(meshes)).toEqual(meshes);
   });
 });

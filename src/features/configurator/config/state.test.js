@@ -47,4 +47,35 @@ describe('mergeConfiguratorState', () => {
       template: 'solid',
     });
   });
+
+  it('deep merges bottom pattern transforms without dropping source metadata', () => {
+    const current = {
+      extras: {},
+      overrides: {
+        bottomPattern: {
+          enabled: true,
+          source: { kind: 'preset', id: 'micro-chevron', assetRef: 'patterns/micro-chevron.svg' },
+          transform: {
+            offset: { u: 0.25, v: -0.5 },
+            scale: 1.5,
+            rotationDeg: 30,
+            repeat: { u: 3, v: 4 },
+          },
+        },
+      },
+    };
+
+    expect(mergeConfiguratorState(current, {
+      overrides: { bottomPattern: { transform: { scale: 2, repeat: { v: 6 } } } },
+    }).overrides.bottomPattern).toEqual({
+      enabled: true,
+      source: { kind: 'preset', id: 'micro-chevron', assetRef: 'patterns/micro-chevron.svg' },
+      transform: {
+        offset: { u: 0.25, v: -0.5 },
+        scale: 2,
+        rotationDeg: 30,
+        repeat: { u: 3, v: 6 },
+      },
+    });
+  });
 });

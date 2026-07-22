@@ -1,4 +1,5 @@
 import { APPEARANCE_TEMPLATES, normalizeAppearance } from './appearance.js';
+import { createDefaultBottomPattern } from './bottomPattern.js';
 
 const homeSwatches = {
   fabric: '#f7f5ef',
@@ -73,6 +74,7 @@ export const jerseyProduct = {
       ],
       decorations: [],
       appearance: normalizeAppearance(undefined, homeSwatches),
+      bottomPattern: createDefaultBottomPattern(),
     },
   },
   options: {

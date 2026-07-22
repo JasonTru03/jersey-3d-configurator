@@ -1,6 +1,8 @@
 export function mergeConfiguratorState(current, patch) {
   const currentAppearance = current.overrides?.appearance;
   const patchAppearance = patch.overrides?.appearance;
+  const currentBottomPattern = current.overrides?.bottomPattern;
+  const patchBottomPattern = patch.overrides?.bottomPattern;
 
   return {
     ...current,
@@ -19,6 +21,24 @@ export function mergeConfiguratorState(current, patch) {
           colors: {
             ...currentAppearance?.colors,
             ...patchAppearance?.colors,
+          },
+        },
+      } : {}),
+      ...(currentBottomPattern || patchBottomPattern ? {
+        bottomPattern: {
+          ...currentBottomPattern,
+          ...patchBottomPattern,
+          transform: {
+            ...currentBottomPattern?.transform,
+            ...patchBottomPattern?.transform,
+            offset: {
+              ...currentBottomPattern?.transform?.offset,
+              ...patchBottomPattern?.transform?.offset,
+            },
+            repeat: {
+              ...currentBottomPattern?.transform?.repeat,
+              ...patchBottomPattern?.transform?.repeat,
+            },
           },
         },
       } : {}),

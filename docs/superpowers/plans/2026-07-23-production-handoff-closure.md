@@ -208,7 +208,7 @@ Push only `codex/continuous-bottom-pattern`. Do not merge or deploy from `showca
 - [x] **Step 1: Verify launcher position on desktop**
 - [ ] **Step 2: Verify launcher position on mobile**
 - [x] **Step 3: Verify Worker launch parameters for S/M/L/XL**
-- [ ] **Step 4: Verify the production ZIP and JSON reload**
+- [x] **Step 4: Verify the production ZIP and JSON reload**
 - [x] **Step 5: Verify Shopify cart variant and production properties**
 - [x] **Step 6: Record screenshots, browser state, and any password/session boundary**
 
@@ -234,4 +234,4 @@ Stop before checkout and order creation.
 - [x] **Step 6: Run both production builds**
 - [x] **Step 7: Extract a generated bundle with Windows `Expand-Archive`**
 - [x] **Step 8: Reproduce the lost synthetic download and replace it with a native link**
-- [ ] **Step 9: Redeploy and repeat the real download/cart acceptance**
+- [x] **Step 9: Redeploy and repeat the real download/cart acceptance**

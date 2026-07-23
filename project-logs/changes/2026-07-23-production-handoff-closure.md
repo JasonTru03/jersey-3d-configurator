@@ -111,7 +111,50 @@ The first ZIP deployment exposed a second browser-specific edge: preparing the b
 
 Remaining real acceptance after redeploy:
 
-- one real ZIP download and extracted-file inspection;
-- Shopify cart readback of the new `Local ZIP download` and `Bundle File` properties;
-- JSON reload;
 - mobile storefront verification through a stable mobile session.
+
+### Final native-download acceptance
+
+Cloudflare Worker version:
+
+```text
+5f29e35d-3db8-47cf-a1f4-a495b02d7370
+```
+
+The versioned Worker entry loaded `/assets/index-BLrlGbv_.js` and
+`/assets/index-D7hOy3wQ.css`.
+
+- A real browser click downloaded `C:\Users\Administrator\Downloads\fn8788-jersey-production.zip`.
+- The ZIP was 91,801 bytes and extracted to `fn8788-jersey-design.json` (2,839 bytes) plus `fn8788-jersey-uv-atlas.png` (88,686 bytes).
+- The extracted atlas hash was `sha256:cfe512b6b2d769474e00338ce2e30c821c449600a092f7b7f4ee2edecf7be878`, exactly matching `bakeMetadata.atlasSha256` in the JSON.
+- The JSON reported format `jersey-design`, version 2, layout XL, bottom pattern enabled, and preset `chelsea-stripe`.
+- After changing the browser design to S, opening the extracted JSON restored XL and the `$93` configurator quote.
+- The resulting Shopify cart used variant `48039101989015`, total `$49.99 USD`, and showed `Production Files: Local ZIP download`, `Bundle File: fn8788-jersey-production.zip`, the design filename, and the exact atlas SHA-256.
+- Acceptance stopped before checkout and order creation.
+
+The production-file/cart gap is closed. The remaining storefront acceptance item is a stable mobile session.
+
+## Horizon-native launcher staging
+
+The existing standalone launcher remains live while a native Horizon block is staged for the next scoped rollout.
+
+- Staging theme: `152059117719` (`3D native launcher staging - 2026-07-23`, unpublished).
+- New block: `blocks/product-3d-configurator-launch.liquid`.
+- The migration inserted `product_3d_configurator_launch` inside `main -> product-details` between `variant_picker_R3rGDr` and `buy_buttons_eYQEYi`.
+- The old top-level launcher was removed from the staged template, leaving the top-level order `main -> product_recommendations_qggXJq`.
+- Staging readback hashes:
+  - block: `4375302408bb72ba7eb295fed5de821eebd61be58b79b25a5db4996dbd8a60dc`
+  - template: `f1852723f530b0c7a692c3470b8c3d621e6bf94a9debc73dc153375619f82148`
+- Desktop preview showed the launcher exactly once after the size picker and before quantity/add/buy controls without DOM relocation.
+- Theme Check found no issue in the new block or migrated template. Its six errors and four warnings belong to pre-existing Horizon core files.
+- Staged mobile preview and the native block's four-size parameter sweep remain open.
+- Live theme `152029888663` was not modified by this native-block staging work.
+
+### Final repository verification
+
+- Horizon source and migration tests: 2 files, 5 tests passed.
+- Full test suite: 36 files, 219 tests passed.
+- Application build passed: `index-BLrlGbv_.js`, 985.83 kB, gzip 274.91 kB.
+- Shopify build passed: 1,348.32 kB, gzip 381.14 kB.
+- `git diff --check` passed.
+- The existing large-chunk and `inlineDynamicImports` warnings remain non-blocking.

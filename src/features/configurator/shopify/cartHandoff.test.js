@@ -29,6 +29,7 @@ describe('cart handoff', () => {
           printName: 'PLAYER',
           printNumber: '10',
           decorations: [],
+          bottomPattern: { enabled: true },
         },
       },
       designAsset: { designId: 'dsg_123', url: 'https://TARGET/api/design-assets/dsg_123/atlas.png', sha256: 'abc123', version: 2 },
@@ -37,11 +38,25 @@ describe('cart handoff', () => {
     expect(url).toContain('/cart/48039101890711:1');
     expect(url).toContain('storefront=true');
     expect(decodeProperties(url)).toEqual({
+      Size: 's',
+      Template: 'solid',
+      Colors: JSON.stringify({ body: '#fff', sleeves: '#fff', shoulderSide: '#111', collar: '#111', pattern: '#d8c17a', number: '#111' }),
+      Print: 'PLAYER #10',
+      Extras: '',
+      Artwork: '',
       'Design ID': 'dsg_123',
       'UV Atlas URL': 'https://TARGET/api/design-assets/dsg_123/atlas.png',
-      SHA: 'abc123',
+      'UV Atlas SHA-256': 'abc123',
       'Projection Version': '2',
     });
+  });
+
+  it('keeps the normal cart properties without requiring an asset when the bottom pattern is disabled', () => {
+    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D');
+    const url = createCartUrl({ context, state: { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: false } } } });
+
+    expect(decodeProperties(url)).toMatchObject({ Size: 's', Template: '', Colors: '{}', Print: '', Extras: '', Artwork: '' });
+    expect(decodeProperties(url)).not.toHaveProperty('Design ID');
   });
 
   it('rejects an invalid shop host, malformed maps, and missing selected-size variants', () => {

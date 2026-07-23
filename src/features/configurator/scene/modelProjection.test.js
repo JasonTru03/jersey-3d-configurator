@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createCylindricalProjector, selectGarmentPatternMeshes } from './modelProjection.js';
+import { CHELSEA_V1_PROJECTION, createCylindricalProjector, selectGarmentPatternMeshes } from './modelProjection.js';
 
 describe('model projection', () => {
+  it('defines the versioned Chelsea front angle used for UV projection', () => {
+    expect(CHELSEA_V1_PROJECTION).toEqual({ id: 'chelsea-jersey-cylindrical-v1', version: 1, frontAngleDeg: 0 });
+  });
   it('projects v from the garment height range', () => {
     const projector = createCylindricalProjector({
       center: { x: 10, z: -4 },

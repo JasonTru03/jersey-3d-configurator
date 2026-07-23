@@ -22,6 +22,7 @@ async function uploadDesignAsset(request, env, url) {
   let parsedDesign; let parsedMetadata;
   try { parsedDesign = JSON.parse(await design.text()); parsedMetadata = JSON.parse(metadata); } catch { return json({ error: 'design and metadata must be valid JSON.' }, 400); }
   if (!parsedDesign || typeof parsedDesign !== 'object' || !parsedMetadata || typeof parsedMetadata !== 'object') return json({ error: 'design and metadata must be JSON objects.' }, 400);
+  if (parsedMetadata.atlasSize !== 2048 || parsedMetadata.projectionVersion !== 1) return json({ error: 'metadata must specify atlasSize 2048 and projectionVersion 1.' }, 400);
 
   const designId = `dsg_${crypto.randomUUID()}`;
   const bytes = await atlas.arrayBuffer();
@@ -31,7 +32,7 @@ async function uploadDesignAsset(request, env, url) {
   await env.DESIGN_ASSETS.put(`${prefix}/design.json`, JSON.stringify(parsedDesign), { httpMetadata: { contentType: 'application/json' } });
   await env.DESIGN_ASSETS.put(`${prefix}/metadata.json`, JSON.stringify(parsedMetadata), { httpMetadata: { contentType: 'application/json' } });
   const atlasUrl = `${url.origin}/api/design-assets/${designId}/atlas.png`;
-  return json({ designId, url: atlasUrl, sha256, size: atlas.size, version: parsedMetadata.projectionVersion });
+  return json({ designId, url: atlasUrl, sha256, size: atlas.size, version: parsedMetadata.projectionVersion }, 201);
 }
 
 async function getAtlas(url, env) {

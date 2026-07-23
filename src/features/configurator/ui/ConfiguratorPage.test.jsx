@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConfiguratorPage } from './ConfiguratorPage.jsx';
+import { ConfiguratorPage, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
 
 const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
 
@@ -46,6 +46,11 @@ beforeEach(() => {
 });
 
 describe('ConfiguratorPage', () => {
+  it('only requires a baked asset when the bottom pattern is enabled', () => {
+    expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: false } } })).toBe(false);
+    expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: true } } })).toBe(true);
+  });
+
   it('initializes the layout from the Shopify-selected XL variant', async () => {
     window.history.replaceState(
       null,

@@ -1,5 +1,10 @@
 const EPSILON = Number.EPSILON;
 const TWO_PI = Math.PI * 2;
+export const CHELSEA_V1_PROJECTION = Object.freeze({ id: 'chelsea-jersey-cylindrical-v1', version: 1, frontAngleDeg: 0 });
+
+export function getModelProjection(id) {
+  return id === CHELSEA_V1_PROJECTION.id ? CHELSEA_V1_PROJECTION : null;
+}
 
 export function createCylindricalProjector({ center, minY, maxY, frontAngleDeg = 0 }) {
   const front = (frontAngleDeg * Math.PI) / 180;

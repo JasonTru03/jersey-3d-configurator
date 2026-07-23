@@ -1,4 +1,4 @@
-import { createCylindricalProjector } from './modelProjection.js';
+import { createCylindricalProjector, getModelProjection } from './modelProjection.js';
 import { Vector3 } from 'three';
 
 const PNG_MIME_TYPE = 'image/png';
@@ -36,6 +36,7 @@ export async function bakeBottomPatternAtlas({ meshEntries, pattern, sourceTextu
     metadata: {
       key,
       mimeType: PNG_MIME_TYPE,
+      atlasSize: size,
       size,
       width: size,
       height: size,
@@ -51,6 +52,7 @@ export async function bakeBottomPatternAtlas({ meshEntries, pattern, sourceTextu
 function renderProjectedPatternAtlas(context, size, meshEntries, pattern, sourceTexture) {
   const source = sourceTexture.image ?? sourceTexture;
   const projectionBounds = getProjectionBounds(meshEntries);
+  const projection = getModelProjection(pattern.projectionId ?? pattern.modelProjectionId);
   const patternFill = context.createPattern?.(source, 'repeat');
   if (!patternFill) {
     context.drawImage(source, 0, 0, size, size);
@@ -58,7 +60,7 @@ function renderProjectedPatternAtlas(context, size, meshEntries, pattern, source
   }
 
   patternFill.setTransform?.(getPatternTransform(pattern, source, size));
-  meshEntries.forEach((mesh) => renderMeshTriangles(context, mesh, projectionBounds, size, patternFill));
+  meshEntries.forEach((mesh) => renderMeshTriangles(context, mesh, projectionBounds, size, patternFill, projection));
 }
 
 function getProjectionBounds(meshEntries) {
@@ -76,7 +78,7 @@ function getProjectionBounds(meshEntries) {
   return bounds;
 }
 
-function renderMeshTriangles(context, mesh, bounds, size, patternFill) {
+function renderMeshTriangles(context, mesh, bounds, size, patternFill, projection) {
   const geometry = mesh.geometry;
   const position = geometry?.attributes?.position;
   const uv = geometry?.attributes?.uv;
@@ -85,7 +87,7 @@ function renderMeshTriangles(context, mesh, bounds, size, patternFill) {
   const triangleCount = index ? index.count / 3 : position.count / 3;
   for (let triangle = 0; triangle < triangleCount; triangle += 1) {
     const vertexIndexes = [0, 1, 2].map((offset) => index ? index.getX(triangle * 3 + offset) : triangle * 3 + offset);
-    const sourcePoints = unwrapU(vertexIndexes.map((vertex) => projectPoint(transformPoint(mesh, position, vertex), bounds)));
+    const sourcePoints = unwrapU(vertexIndexes.map((vertex) => projectPoint(transformPoint(mesh, position, vertex), bounds, projection)));
     const targetPoints = vertexIndexes.map((vertex) => ({ x: uv.getX(vertex) * size, y: (1 - uv.getY(vertex)) * size }));
     const matrix = affineTransform(sourcePoints, targetPoints);
     if (!matrix) continue;
@@ -98,6 +100,9 @@ function renderMeshTriangles(context, mesh, bounds, size, patternFill) {
     context.lineTo(sourcePoints[2].x, sourcePoints[2].y);
     context.closePath();
     context.fill();
+    context.lineWidth = 8;
+    context.strokeStyle = patternFill;
+    context.stroke();
     context.restore();
   }
 }
@@ -107,10 +112,10 @@ function transformPoint(mesh, position, index) {
   return mesh.localToWorld ? mesh.localToWorld(point) : point;
 }
 
-function projectPoint(point, bounds) {
+function projectPoint(point, bounds, projection) {
   const projector = createCylindricalProjector({
     center: { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2 },
-    minY: bounds.minY,
+    minY: bounds.minY, frontAngleDeg: projection?.frontAngleDeg ?? 0,
     maxY: bounds.maxY,
   });
   const projected = projector.project(point);

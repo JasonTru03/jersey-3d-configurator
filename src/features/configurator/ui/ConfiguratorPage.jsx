@@ -101,10 +101,13 @@ export function ConfiguratorPage() {
   const handleAddToCart = async () => {
     try {
       setCartError('');
-      const bake = await bakeProviderRef.current?.();
-      if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
-      const design = createDesignDocument({ productId: product.id, variantId: shopifyContext?.variantId, state });
-      const designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata });
+      let designAsset;
+      if (shouldPrepareBottomPatternAsset(state)) {
+        const bake = await bakeProviderRef.current?.();
+        if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
+        const design = createDesignDocument({ productId: product.id, variantId: shopifyContext?.variantId, state });
+        designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata });
+      }
       const url = createCartUrl({ context: shopifyContext, state, designAsset });
       window.location.assign(url);
     } catch (error) {
@@ -182,6 +185,10 @@ export function ConfiguratorPage() {
       />
     </main>
   );
+}
+
+export function shouldPrepareBottomPatternAsset(state) {
+  return state?.overrides?.bottomPattern?.enabled === true;
 }
 
 function Sidebar({ activeSection, labels, onSelect }) {

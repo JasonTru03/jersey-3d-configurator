@@ -1,6 +1,7 @@
 import { createDefaultBottomPattern } from '../config/bottomPattern.js';
 
 const defaults = createDefaultBottomPattern();
+const presets = [{ id: 'none', label: 'No preset', assetRef: '' }, { id: 'chelsea-stripe', label: 'Chelsea stripe', assetRef: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"%3E%3Cpath fill="%230343a3" d="M0 0h16v32H0z"/%3E%3Cpath fill="%23fff" d="M16 0h16v32H16z"/%3E%3C/svg%3E' }];
 
 export function BottomPatternPanel({ pattern = defaults, onChange }) {
   const transform = { ...defaults.transform, ...pattern.transform };
@@ -15,6 +16,11 @@ export function BottomPatternPanel({ pattern = defaults, onChange }) {
           type="checkbox"
         />
         <span>Enable continuous bottom pattern</span>
+      </label>
+      <label className="bottom-pattern-control">Pattern preset
+        <select aria-label="Pattern preset" onChange={(event) => { const preset = presets.find((item) => item.id === event.target.value) ?? presets[0]; onChange({ source: { kind: 'preset', id: preset.id, assetRef: preset.assetRef } }); }} value={pattern.source?.id ?? 'none'}>
+          {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+        </select>
       </label>
       <PatternControl label="Pattern scale" max="8" min="0.1" onChange={(value) => onChange({ transform: { scale: value } })} step="0.1" value={transform.scale} />
       <PatternControl label="Pattern rotation" max="359" min="0" onChange={(value) => onChange({ transform: { rotationDeg: value } })} step="1" value={transform.rotationDeg} />

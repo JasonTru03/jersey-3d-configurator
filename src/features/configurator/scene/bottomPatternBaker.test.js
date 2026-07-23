@@ -95,6 +95,7 @@ describe('bottom pattern baker', () => {
     expect(result.metadata).toEqual({
       key: createPatternBakeKey(bakeInput),
       mimeType: 'image/png',
+      atlasSize: 2048,
       size: 2048,
       width: 2048,
       height: 2048,
@@ -113,7 +114,7 @@ describe('bottom pattern baker', () => {
   it('bakes projected garment triangles into the model UV atlas instead of copying source metadata only', async () => {
     const context = {
       clearRect: vi.fn(), drawImage: vi.fn(), createPattern: vi.fn(() => ({ setTransform: vi.fn() })),
-      save: vi.fn(), restore: vi.fn(), transform: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(),
+      save: vi.fn(), restore: vi.fn(), transform: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
       set fillStyle(_) {},
     };
     const canvas = {
@@ -135,5 +136,7 @@ describe('bottom pattern baker', () => {
     expect(context.createPattern).toHaveBeenCalledWith(expect.anything(), 'repeat');
     expect(context.transform).toHaveBeenCalled();
     expect(context.fill).toHaveBeenCalledOnce();
+    expect(context.lineWidth).toBe(8);
+    expect(context.stroke).toHaveBeenCalledOnce();
   });
 });

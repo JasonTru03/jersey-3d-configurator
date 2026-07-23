@@ -32,7 +32,7 @@ export function createCartUrl({ context, state, designAsset }) {
     throw new Error('No Shopify variant exists for the selected size.');
   }
 
-  const properties = createProperties(designAsset);
+  const properties = createProperties(state, designAsset);
   const query = new URLSearchParams({
     properties: encodeBase64Url(JSON.stringify(properties)),
     storefront: 'true',
@@ -71,14 +71,22 @@ function parseVariantMap(rawVariantMap) {
   }
 }
 
-function createProperties(designAsset) {
-  if (!designAsset?.designId || !designAsset?.url || !designAsset?.sha256 || !designAsset?.version) throw new Error('Design asset upload did not return a complete reference.');
-  return {
-    'Design ID': designAsset.designId,
-    'UV Atlas URL': designAsset.url,
-    SHA: designAsset.sha256,
-    'Projection Version': String(designAsset.version),
+function createProperties(state, designAsset) {
+  const appearance = state?.overrides?.appearance ?? {};
+  const print = state?.overrides?.printName || state?.overrides?.printNumber
+    ? `${state.overrides.printName ?? ''}${state.overrides.printNumber ? ` #${state.overrides.printNumber}` : ''}`.trim()
+    : '';
+  const properties = {
+    Size: state?.layout ?? '',
+    Template: appearance.template ?? '',
+    Colors: JSON.stringify(appearance.colors ?? {}),
+    Print: print,
+    Extras: Object.entries(state?.extras ?? {}).filter(([, enabled]) => enabled).map(([id]) => id).join(', '),
+    Artwork: (state?.overrides?.decorations ?? []).map((item) => item.name ?? item.id).join(', '),
   };
+  if (!state?.overrides?.bottomPattern?.enabled) return properties;
+  if (!designAsset?.designId || !designAsset?.url || !designAsset?.sha256 || !designAsset?.version) throw new Error('Design asset upload did not return a complete reference.');
+  return { ...properties, 'Design ID': designAsset.designId, 'UV Atlas URL': designAsset.url, 'UV Atlas SHA-256': designAsset.sha256, 'Projection Version': String(designAsset.version) };
 }
 
 function isNumericId(value) {

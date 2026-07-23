@@ -38,4 +38,15 @@ describe('BottomPatternPanel', () => {
       transform: { scale: 1, rotationDeg: 0, repeat: { u: 3, v: 4 } },
     });
   });
+
+  it('selects a usable built-in preset source', () => {
+    const onChange = vi.fn();
+    render(<BottomPatternPanel pattern={pattern} onChange={onChange} />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Pattern preset' }), { target: { value: 'chelsea-stripe' } });
+
+    expect(onChange).toHaveBeenCalledWith({
+      source: expect.objectContaining({ id: 'chelsea-stripe', assetRef: expect.stringMatching(/^data:image\/svg\+xml/) }),
+    });
+  });
 });

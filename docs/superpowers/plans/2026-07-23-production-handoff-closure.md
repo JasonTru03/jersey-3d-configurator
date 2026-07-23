@@ -233,5 +233,5 @@ Stop before checkout and order creation.
 - [x] **Step 5: Run focused and full tests**
 - [x] **Step 6: Run both production builds**
 - [x] **Step 7: Extract a generated bundle with Windows `Expand-Archive`**
-- [x] **Step 8: Reproduce and fix the immediate object-URL revocation**
+- [x] **Step 8: Reproduce the lost synthetic download and replace it with a native link**
 - [ ] **Step 9: Redeploy and repeat the real download/cart acceptance**

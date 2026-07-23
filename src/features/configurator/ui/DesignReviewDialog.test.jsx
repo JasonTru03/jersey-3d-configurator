@@ -66,7 +66,7 @@ describe('DesignReviewDialog', () => {
       />,
     );
 
-    expect(screen.getByText('Production uses the design JSON and UV Atlas PNG downloaded from Save design.')).toBeInTheDocument();
+    expect(screen.getByText('Prepare the production ZIP, then use its download link before adding this design to the cart.')).toBeInTheDocument();
   });
 
   it('explains when the configurator was not launched from Shopify', () => {

@@ -7,7 +7,7 @@ const APPEARANCE_SUMMARY_ROWS = [
   ['number', 'Name and number'],
 ];
 
-export function DesignReviewDialog({ cartError, onAddToCart, onClose, onSave, open, product, quote, selected, shopifyContext, shopifyPrice = '$49.99 fixed Shopify price', state }) {
+export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload, onSave, open, preparedDownload, product, quote, selected, shopifyContext, shopifyPrice = '$49.99 fixed Shopify price', state }) {
   if (!open) return null;
 
   const artworkCount = state.overrides?.decorations?.length ?? 0;
@@ -40,7 +40,7 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onSave, op
         <div className="review-total"><span>Total</span><strong>${quote.total}</strong></div>
         <p className="review-note">{shopifyPrice}</p>
         {state.overrides?.bottomPattern?.enabled && (
-          <p className="review-note">Production uses the design JSON and UV Atlas PNG downloaded from Save design.</p>
+          <p className="review-note">Prepare the production ZIP, then use its download link before adding this design to the cart.</p>
         )}
         {!shopifyContext && (
           <p className="review-note">Open the configurator from a connected Shopify product page to add this design to your cart.</p>
@@ -49,6 +49,16 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onSave, op
         <div className="review-actions">
           <button className="soft-button" onClick={onClose} type="button">Continue editing</button>
           <button className="soft-button" onClick={onSave} type="button">Save design file</button>
+          {preparedDownload && (
+            <a
+              className="soft-button"
+              download={preparedDownload.filename}
+              href={preparedDownload.url}
+              onClick={onDownload}
+            >
+              {preparedDownload.label}
+            </a>
+          )}
           <button className="primary-button" disabled={!shopifyContext} onClick={() => onAddToCart?.()} type="button">Add to Shopify cart</button>
         </div>
       </section>

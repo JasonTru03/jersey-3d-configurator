@@ -624,6 +624,16 @@
   font-weight: 700;
 }
 
+.prepared-download {
+  display: flex;
+  margin: 0 24px 12px;
+}
+
+.prepared-download a,
+.review-actions a {
+  text-decoration: none;
+}
+
 .review-backdrop {
   position: fixed;
   z-index: 10;

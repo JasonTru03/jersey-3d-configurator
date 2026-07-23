@@ -1,32 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { triggerBrowserDownload } from './browserDownload.js';
+import { createBrowserDownload } from './browserDownload.js';
 
 describe('triggerBrowserDownload', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:production-bundle');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.useRealTimers();
   });
 
-  it('keeps a large Blob URL alive long enough for the browser to consume it', () => {
-    triggerBrowserDownload({
+  it('creates a native-link target and releases it only when requested', () => {
+    const prepared = createBrowserDownload({
       blob: new Blob(['production-bundle'], { type: 'application/zip' }),
       filename: 'fn8788-jersey-production.zip',
     });
 
-    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+    expect(prepared).toMatchObject({
+      filename: 'fn8788-jersey-production.zip',
+      url: 'blob:production-bundle',
+    });
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(59_999);
-    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(1);
+    prepared.release();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:production-bundle');
   });
 });

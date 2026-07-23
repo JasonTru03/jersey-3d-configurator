@@ -17,7 +17,7 @@ import {
   Sun,
   Undo2,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ensurePrintItems, getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
@@ -29,7 +29,7 @@ import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import { hashAtlasBlob } from '../scene/bottomPatternBaker.js';
-import { triggerBrowserDownload } from '../designs/browserDownload.js';
+import { createBrowserDownload } from '../designs/browserDownload.js';
 import {
   createLocalProductionReceipt,
   getCurrentLocalProductionFiles,
@@ -73,7 +73,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [fileError, setFileError] = useState('');
   const [cartError, setCartError] = useState('');
   const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
+  const [preparedDownload, setPreparedDownload] = useState(null);
   const bakeProviderRef = useRef(null);
+
+  useEffect(() => () => preparedDownload?.release(), [preparedDownload]);
 
   const handleLightingSelect = (lighting) => {
     if (lighting === 'none') {
@@ -95,21 +98,26 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         : null;
       const download = saveDesignFile(productionFiles?.bakeMetadata);
       if (!download) return;
+      let artifact = download;
+      let receipt = null;
       if (productionFiles) {
         const bundle = await createProductionBundle({
           productId: product.id,
           design: download,
           atlas: { blob: productionFiles.atlas, filename: productionFiles.atlasFilename },
         });
-        triggerBrowserDownload(bundle);
-        setLocalProductionReceipt(createLocalProductionReceipt({
+        artifact = bundle;
+        receipt = createLocalProductionReceipt({
           state,
           productionFiles: { ...productionFiles, bundleFilename: bundle.filename },
-        }));
-      } else {
-        triggerBrowserDownload(download);
-        setLocalProductionReceipt(null);
+        });
       }
+      setLocalProductionReceipt(null);
+      setPreparedDownload({
+        ...createBrowserDownload(artifact),
+        label: productionFiles ? 'Download production ZIP' : 'Download design JSON',
+        receipt,
+      });
     } catch (error) {
       setFileError(error instanceof Error ? error.message : 'Design file preparation failed.');
     }
@@ -159,9 +167,17 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           product={product}
           quote={quote}
           theme={theme}
-        />
-        <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
-        {fileError && <p className="file-error" role="alert">{fileError}</p>}
+          />
+          <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
+          {fileError && <p className="file-error" role="alert">{fileError}</p>}
+          {preparedDownload && !reviewOpen && (
+            <div className="prepared-download">
+              <PreparedDownloadLink
+                download={preparedDownload}
+                onDownload={() => setLocalProductionReceipt(preparedDownload.receipt)}
+              />
+            </div>
+          )}
         <div className="workspace-grid">
           <ProductStage
             artworkFocusId={artworkFocusId}
@@ -194,8 +210,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         cartError={cartError}
         onClose={() => setReviewOpen(false)}
         onAddToCart={handleAddToCart}
+        onDownload={() => setLocalProductionReceipt(preparedDownload?.receipt ?? null)}
         onSave={handleSaveDesign}
         open={reviewOpen}
+        preparedDownload={preparedDownload}
         product={product}
         quote={quote}
         selected={selected}
@@ -230,6 +248,15 @@ async function getLatestPatternBake(bakeProviderRef) {
 
 function defaultNavigateToCart(url) {
   window.location.assign(url);
+}
+
+function PreparedDownloadLink({ download, onDownload }) {
+  return (
+    <a className="soft-button" download={download.filename} href={download.url} onClick={onDownload}>
+      <Save size={17} />
+      {download.label}
+    </a>
+  );
 }
 
 function Sidebar({ activeSection, labels, onSelect }) {

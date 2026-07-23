@@ -98,11 +98,11 @@ Desktop live-theme evidence:
 
 The same acceptance exposed the browser delivery defect: `fn8788-jersey-design.json` reached the Downloads folder, while the second automatic `fn8788-jersey-uv-atlas.png` download was suppressed. The ZIP-bundle change is the direct fix.
 
-The first ZIP deployment exposed a second browser-specific edge: the page revoked the large bundle's object URL immediately after the synthetic anchor click. The component produced a valid receipt, but Chrome had no file on disk. `browserDownload.js` now mounts the download anchor and keeps the object URL alive for 60 seconds before cleanup.
+The first ZIP deployment exposed a second browser-specific edge: preparing the bundle asynchronously and then creating a synthetic anchor click did not produce a file in the authenticated Chrome session. Extending the object-URL lifetime alone did not change that result, and an unpatterned JSON control download from the same implementation also stayed absent. The production flow now separates preparation from delivery: **Save design** prepares the Blob and exposes a native `Download production ZIP` link; the user's second click performs the browser-native download and records the cart receipt.
 
 ### ZIP regression verification
 
-- Red evidence: the new bundle test failed because `productionBundle.js` did not exist, both UI flow tests failed because the old implementation still initiated two downloads, and the lifecycle test failed because `browserDownload.js` did not exist.
+- Red evidence: the new bundle test failed because `productionBundle.js` did not exist, both UI flow tests failed because the old implementation still initiated two downloads, and the native-link tests failed while the page still used a synthetic click.
 - Focused result: 4 files, 24 tests passed.
 - Full result: 33 files, 213 tests passed.
 - Application build passed: `index-DD39jI1W.js`, 985.20 kB, gzip 274.73 kB.

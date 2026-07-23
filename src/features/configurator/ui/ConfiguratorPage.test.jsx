@@ -189,10 +189,10 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
-    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(1));
-    expect(downloadClick.mock.instances.map((link) => link.download)).toEqual([
-      'fn8788-jersey-production.zip',
-    ]);
+    const productionDownload = await screen.findByRole('link', { name: 'Download production ZIP' });
+    expect(productionDownload).toHaveAttribute('download', 'fn8788-jersey-production.zip');
+    expect(downloadClick).not.toHaveBeenCalled();
+    fireEvent.click(productionDownload);
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
@@ -215,7 +215,7 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
-    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole('link', { name: 'Download production ZIP' }));
     fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
     fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));

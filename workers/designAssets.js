@@ -6,11 +6,20 @@ const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/sit
 export function createDesignAssetsHandler(env) {
   return async function handleDesignAssets(request) {
     const url = new URL(request.url);
+    if (isLocalProductionFilesMode(env) && url.pathname.startsWith('/api/design-assets')) return localProductionFilesUnavailable();
     if (request.method === 'GET' && url.pathname === '/api/design-assets/config') return publicConfig(env);
     if (request.method === 'POST' && url.pathname === '/api/design-assets') return uploadDesignAsset(request, env, url);
     if (request.method === 'GET' && /^\/api\/design-assets\/[\w-]+\/atlas\.png$/.test(url.pathname)) return getAtlas(url, env);
     return env.ASSETS.fetch(request);
   };
+}
+
+function isLocalProductionFilesMode(env) {
+  return env.LOCAL_PRODUCTION_FILES === true || env.LOCAL_PRODUCTION_FILES === 'true';
+}
+
+function localProductionFilesUnavailable() {
+  return json({ error: 'Design asset storage is unavailable in LOCAL_PRODUCTION_FILES mode.' }, 503);
 }
 
 async function uploadDesignAsset(request, env, url) {

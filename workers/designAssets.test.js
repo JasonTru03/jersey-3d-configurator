@@ -39,6 +39,19 @@ function acceptTurnstile() {
 }
 
 describe('design asset worker', () => {
+  it('returns a clear unavailable response for every design asset API route in local production files mode', async () => {
+    const handler = createDesignAssetsHandler(env({ LOCAL_PRODUCTION_FILES: 'true', DESIGN_ASSETS: undefined, DESIGN_UPLOAD_RATE_LIMIT: undefined }));
+    for (const apiRequest of [
+      new Request('https://example.workers.dev/api/design-assets/config'),
+      request(),
+      new Request('https://example.workers.dev/api/design-assets/dsg_123/atlas.png'),
+    ]) {
+      const response = await handler(apiRequest);
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({ error: 'Design asset storage is unavailable in LOCAL_PRODUCTION_FILES mode.' });
+    }
+  });
+
   it('publishes only the configured public Turnstile site key', async () => {
     const response = await createDesignAssetsHandler(env())(new Request('https://example.workers.dev/api/design-assets/config'));
     expect(await response.json()).toEqual({ turnstileSiteKey: 'public-site-key' });

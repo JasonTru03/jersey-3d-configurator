@@ -12,6 +12,7 @@ Allow an enabled continuous bottom pattern to stay entirely in the browser: Save
 - Cart properties for enabled bottom patterns are `Production Files: Local download`, `Design File`, and `UV Atlas SHA-256`. No PNG, JSON payload, URL, or credential is placed in Shopify line properties.
 - The design-review dialog explains that production uses the two files downloaded through Save design.
 - The existing Worker/R2 upload modules remain in the repository for their separate deployment path.
+- `wrangler.jsonc` now uses explicit `LOCAL_PRODUCTION_FILES=true` and declares no R2, KV, or Turnstile binding. All design-asset API routes return a clear `503` in this mode while static resources continue through the Worker asset binding.
 
 ## Verification
 
@@ -26,3 +27,4 @@ Allow an enabled continuous bottom pattern to stay entirely in the browser: Save
 - The cart only stores text references. Production staff must obtain the downloaded JSON and PNG from the shopper/order workflow; this mode does not persist binary files server-side.
 - Browser-level WebGL/manual download acceptance remains to be performed in a browser with WebGL. The automated suite verifies the local bake metadata, hash, JSON serialization, cart properties, and review messaging.
 - The existing Vite chunk-size warning above 500 kB remains non-blocking and unchanged.
+- Server-side asset storage remains a separate opt-in deployment profile that requires R2, KV, and Turnstile provisioning.

@@ -217,6 +217,8 @@ Stop before checkout and order creation.
 ### Task 7: Close the browser multi-download regression
 
 **Files:**
+- Create: `src/features/configurator/designs/browserDownload.js`
+- Create: `src/features/configurator/designs/browserDownload.test.js`
 - Create: `src/features/configurator/designs/productionBundle.js`
 - Create: `src/features/configurator/designs/productionBundle.test.js`
 - Modify: `src/features/configurator/ui/ConfiguratorPage.jsx`
@@ -231,4 +233,5 @@ Stop before checkout and order creation.
 - [x] **Step 5: Run focused and full tests**
 - [x] **Step 6: Run both production builds**
 - [x] **Step 7: Extract a generated bundle with Windows `Expand-Archive`**
-- [ ] **Step 8: Redeploy and repeat the real download/cart acceptance**
+- [x] **Step 8: Reproduce and fix the immediate object-URL revocation**
+- [ ] **Step 9: Redeploy and repeat the real download/cart acceptance**

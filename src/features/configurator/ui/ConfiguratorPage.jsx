@@ -29,6 +29,7 @@ import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import { hashAtlasBlob } from '../scene/bottomPatternBaker.js';
+import { triggerBrowserDownload } from '../designs/browserDownload.js';
 import {
   createLocalProductionReceipt,
   getCurrentLocalProductionFiles,
@@ -100,13 +101,13 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           design: download,
           atlas: { blob: productionFiles.atlas, filename: productionFiles.atlasFilename },
         });
-        triggerDownload(bundle);
+        triggerBrowserDownload(bundle);
         setLocalProductionReceipt(createLocalProductionReceipt({
           state,
           productionFiles: { ...productionFiles, bundleFilename: bundle.filename },
         }));
       } else {
-        triggerDownload(download);
+        triggerBrowserDownload(download);
         setLocalProductionReceipt(null);
       }
     } catch (error) {
@@ -225,15 +226,6 @@ export async function createLocalProductionFiles({ bake, productId }) {
 
 async function getLatestPatternBake(bakeProviderRef) {
   return bakeProviderRef.current?.();
-}
-
-function triggerDownload({ blob, filename }) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.download = filename;
-  link.href = url;
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 function defaultNavigateToCart(url) {

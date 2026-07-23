@@ -158,3 +158,12 @@ The existing standalone launcher remains live while a native Horizon block is st
 - Shopify build passed: 1,348.32 kB, gzip 381.14 kB.
 - `git diff --check` passed.
 - The existing large-chunk and `inlineDynamicImports` warnings remain non-blocking.
+
+Native-launcher staging checkpoint:
+
+```text
+b21c6dfa70220b0d99b8e3d75e7c35782808ec6e
+```
+
+The local branch, `origin/codex/continuous-bottom-pattern`, and
+`backup/codex/continuous-bottom-pattern` all read back this exact hash.

@@ -37,4 +37,4 @@
 
 - [x] Update the production closure log and current handoff.
 - [x] Run final tests/build/diff check.
-- [ ] Commit, push both remotes, and record exact remote hashes.
+- [x] Commit, push both remotes, and record exact remote hashes.

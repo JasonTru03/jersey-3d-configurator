@@ -138,7 +138,25 @@ describe('bottom pattern baker', () => {
     expect(context.fill).toHaveBeenCalledOnce();
     expect(context.lineWidth).toBe(8);
     expect(context.stroke).toHaveBeenCalledOnce();
-    expect(context.stroke.mock.invocationCallOrder[0]).toBeGreaterThan(context.restore.mock.invocationCallOrder[0]);
-    expect(context.moveTo).toHaveBeenCalledWith(0, 64);
+    expect(context.stroke.mock.invocationCallOrder[0]).toBeLessThan(context.restore.mock.invocationCallOrder[0]);
+    expect(context.moveTo).toHaveBeenCalledWith(0.25, 1);
+  });
+
+  it('uses the transformed source sampling coordinates for high-contrast UV padding', async () => {
+    const operations = [];
+    const context = {
+      clearRect: vi.fn(), drawImage: vi.fn(), createPattern: vi.fn(() => ({ setTransform: vi.fn() })),
+      save: vi.fn(() => operations.push('save')), restore: vi.fn(() => operations.push('restore')), transform: vi.fn(() => operations.push('transform')),
+      beginPath: vi.fn(() => operations.push('path')), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(), fill: vi.fn(() => operations.push('fill')), stroke: vi.fn(() => operations.push('stroke')),
+      set fillStyle(_) {}, set strokeStyle(_) {}, set lineWidth(_) {},
+    };
+    const canvas = { width: 0, height: 0, getContext: vi.fn(() => context), toBlob: (callback) => callback(new Blob(['png'], { type: 'image/png' })) };
+    vi.spyOn(document, 'createElement').mockReturnValue(canvas);
+    const geometry = { attributes: {
+      position: { count: 3, getX: (index) => [0, 1, 0][index], getY: (index) => [0, 0, 1][index], getZ: () => 0 },
+      uv: { getX: (index) => [0.2, 0.8, 0.2][index], getY: (index) => [0.2, 0.2, 0.8][index] },
+    } };
+    await bakeBottomPatternAtlas({ meshEntries: [{ geometry, localToWorld: (point) => point }], pattern: bakeInput, sourceTexture: { width: 2, height: 2 }, size: 64 });
+    expect(operations).toEqual(['save', 'transform', 'path', 'fill', 'path', 'stroke', 'restore']);
   });
 });

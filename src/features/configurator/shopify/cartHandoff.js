@@ -15,6 +15,7 @@ export function parseShopifyLaunch(search) {
   return {
     shop,
     productHandle: params.get('productHandle') ?? '',
+    designToken: params.get('designToken') ?? '',
     returnPath,
     variantId,
     variantMap,

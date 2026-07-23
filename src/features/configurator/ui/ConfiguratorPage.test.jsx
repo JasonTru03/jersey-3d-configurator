@@ -131,6 +131,19 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
   });
 
+  it('keeps the preview available but shows a cart error when a pattern launch has no upload token', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('current upload token');
+  });
+
   it('preserves the selected template when a sleeves color change is undone', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');

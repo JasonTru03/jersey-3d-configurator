@@ -100,22 +100,20 @@ function renderMeshTriangles(context, mesh, bounds, size, patternFill, projectio
     context.lineTo(sourcePoints[2].x, sourcePoints[2].y);
     context.closePath();
     context.fill();
+    drawUvIslandPadding(context, sourcePoints, patternFill);
     context.restore();
-    drawUvIslandPadding(context, targetPoints, patternFill);
   }
 }
 
-function drawUvIslandPadding(context, targetPoints, patternFill) {
-  context.save();
+function drawUvIslandPadding(context, sourcePoints, patternFill) {
   context.beginPath();
-  context.moveTo(targetPoints[0].x, targetPoints[0].y);
-  context.lineTo(targetPoints[1].x, targetPoints[1].y);
-  context.lineTo(targetPoints[2].x, targetPoints[2].y);
+  context.moveTo(sourcePoints[0].x, sourcePoints[0].y);
+  context.lineTo(sourcePoints[1].x, sourcePoints[1].y);
+  context.lineTo(sourcePoints[2].x, sourcePoints[2].y);
   context.closePath();
   context.lineWidth = 8;
   context.strokeStyle = patternFill;
   context.stroke();
-  context.restore();
 }
 
 function transformPoint(mesh, position, index) {

@@ -87,6 +87,14 @@ describe('cart handoff', () => {
       .toBeNull();
   });
 
+  it('keeps a launch-scoped design token without accepting an empty token', () => {
+    const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&designToken=short-lived-token`))
+      .toMatchObject({ designToken: 'short-lived-token' });
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&designToken=`))
+      .toMatchObject({ designToken: '' });
+  });
+
   it('rejects control-character return paths while preserving internal queries', () => {
     const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
 

@@ -11,6 +11,7 @@ export function createDesignAssetsHandler(env) {
 }
 
 async function uploadDesignAsset(request, env, url) {
+  if (!hasWriteAuthorization(request, env)) return json({ error: 'Unauthorized design asset write.' }, 401);
   if (!request.headers.get('content-type')?.includes('multipart/form-data')) return json({ error: 'Expected multipart form data.' }, 415);
   const form = await request.formData();
   const atlas = form.get('atlas');
@@ -33,6 +34,11 @@ async function uploadDesignAsset(request, env, url) {
   await env.DESIGN_ASSETS.put(`${prefix}/metadata.json`, JSON.stringify(parsedMetadata), { httpMetadata: { contentType: 'application/json' } });
   const atlasUrl = `${url.origin}/api/design-assets/${designId}/atlas.png`;
   return json({ designId, url: atlasUrl, sha256, size: atlas.size, version: parsedMetadata.projectionVersion }, 201);
+}
+
+function hasWriteAuthorization(request, env) {
+  const token = env.DESIGN_ASSET_WRITE_TOKEN;
+  return typeof token === 'string' && token.length > 0 && request.headers.get('authorization') === `Bearer ${token}`;
 }
 
 async function getAtlas(url, env) {

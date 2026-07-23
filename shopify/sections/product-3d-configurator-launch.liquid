@@ -14,6 +14,7 @@
     data-shop="{{ shop.permanent_domain | escape }}"
     data-product-handle="{{ product.handle | escape }}"
     data-return-path="{{ routes.cart_url | escape }}"
+    data-design-token="{{ section.settings.design_token | escape }}"
   >
     <button type="button" class="button" data-product-3d-configurator-launch-button>
       {{ section.settings.button_label | escape }}
@@ -43,6 +44,7 @@
         workerUrl.searchParams.set('variantId', variantId);
         workerUrl.searchParams.set('variantMap', JSON.stringify(variantMap));
         workerUrl.searchParams.set('returnPath', launcher.dataset.returnPath);
+        if (launcher.dataset.designToken) workerUrl.searchParams.set('designToken', launcher.dataset.designToken);
         window.location.assign(workerUrl.toString());
       });
     })();
@@ -66,6 +68,12 @@
       "id": "button_label",
       "label": "Button label",
       "default": "Start 3D customization"
+    },
+    {
+      "type": "text",
+      "id": "design_token",
+      "label": "Short-lived design upload token",
+      "info": "Set only a short-lived token issued for this launch. It is passed to the independent configurator and is never bundled into its JavaScript."
     }
   ],
   "presets": [

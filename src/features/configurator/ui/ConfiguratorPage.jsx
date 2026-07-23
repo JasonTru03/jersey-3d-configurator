@@ -103,10 +103,11 @@ export function ConfiguratorPage() {
       setCartError('');
       let designAsset;
       if (shouldPrepareBottomPatternAsset(state)) {
+        if (!shopifyContext?.designToken) throw new Error('This design needs a current upload token before it can be added to Shopify cart. Save the design file or reopen the configurator from the product page.');
         const bake = await bakeProviderRef.current?.();
         if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
         const design = createDesignDocument({ productId: product.id, variantId: shopifyContext?.variantId, state });
-        designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata });
+        designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata, token: shopifyContext.designToken });
       }
       const url = createCartUrl({ context: shopifyContext, state, designAsset });
       window.location.assign(url);

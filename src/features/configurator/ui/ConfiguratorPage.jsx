@@ -29,6 +29,10 @@ import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import { hashAtlasBlob } from '../scene/bottomPatternBaker.js';
+import {
+  createLocalProductionReceipt,
+  getCurrentLocalProductionFiles,
+} from '../designs/localProductionReceipt.js';
 import './configurator.css';
 
 const sectionDefaults = [
@@ -41,7 +45,7 @@ const sectionDefaults = [
   { id: 'extras', label: 'Extras', icon: Cable },
 ];
 
-export function ConfiguratorPage() {
+export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}) {
   const [shopifyContext] = useState(() => parseShopifyLaunch(window.location.search));
   const {
     canRedo,
@@ -66,6 +70,7 @@ export function ConfiguratorPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [fileError, setFileError] = useState('');
   const [cartError, setCartError] = useState('');
+  const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
   const bakeProviderRef = useRef(null);
 
   const handleLightingSelect = (lighting) => {
@@ -89,7 +94,12 @@ export function ConfiguratorPage() {
       const download = saveDesignFile(productionFiles?.bakeMetadata);
       if (!download) return;
       triggerDownload(download);
-      if (productionFiles) triggerDownload({ blob: productionFiles.atlas, filename: productionFiles.atlasFilename });
+      if (productionFiles) {
+        triggerDownload({ blob: productionFiles.atlas, filename: productionFiles.atlasFilename });
+        setLocalProductionReceipt(createLocalProductionReceipt({ state, productionFiles }));
+      } else {
+        setLocalProductionReceipt(null);
+      }
     } catch (error) {
       setFileError(error instanceof Error ? error.message : 'Design file preparation failed.');
     }
@@ -106,10 +116,10 @@ export function ConfiguratorPage() {
       setCartError('');
       let productionFiles;
       if (shouldPrepareBottomPatternAsset(state)) {
-        productionFiles = await createLocalProductionFiles({ bake: await getLatestPatternBake(bakeProviderRef), productId: product.id });
+        productionFiles = getCurrentLocalProductionFiles({ state, receipt: localProductionReceipt });
       }
       const url = createCartUrl({ context: shopifyContext, state, productionFiles });
-      window.location.assign(url);
+      navigateToCart(url);
     } catch (error) {
       setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
     }
@@ -215,6 +225,10 @@ function triggerDownload({ blob, filename }) {
   link.href = url;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function defaultNavigateToCart(url) {
+  window.location.assign(url);
 }
 
 function Sidebar({ activeSection, labels, onSelect }) {

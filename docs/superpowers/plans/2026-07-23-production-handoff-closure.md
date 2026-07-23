@@ -16,7 +16,7 @@
 - Modify: `shopify/sections/product-3d-configurator-launch.liquid`
 - Create: `project-logs/changes/2026-07-23-production-handoff-closure.md`
 
-- [ ] **Step 1: Verify the target**
+- [x] **Step 1: Verify the target**
 
 Run:
 
@@ -26,7 +26,7 @@ shopify theme list --store testcsj.myshopify.com --json
 
 Expected: theme `152029888663` is the single live Horizon theme.
 
-- [ ] **Step 2: Pull only the feature assets**
+- [x] **Step 2: Pull only the feature assets**
 
 Run:
 
@@ -38,15 +38,15 @@ shopify theme pull --store testcsj.myshopify.com --theme 152029888663 --path <TE
 
 Expected: both files are downloaded without changing the theme.
 
-- [ ] **Step 3: Record hashes and scope**
+- [x] **Step 3: Record hashes and scope**
 
 Record the two SHA-256 values, theme ID, section order, and the reason the complete Horizon template is not copied into this repository.
 
-- [ ] **Step 4: Copy the exact live launcher into the branch**
+- [x] **Step 4: Copy the exact live launcher into the branch**
 
 The tracked Liquid must contain the live width/margin rules and the current placement logic that inserts the launcher before the quantity/add controls row.
 
-- [ ] **Step 5: Validate the Liquid source**
+- [x] **Step 5: Validate the Liquid source**
 
 Run:
 
@@ -58,7 +58,7 @@ Select-String -Path shopify/sections/product-3d-configurator-launch.liquid `
 
 Expected: no whitespace errors and all launcher anchors are present.
 
-- [ ] **Step 6: Commit the convergence checkpoint**
+- [x] **Step 6: Commit the convergence checkpoint**
 
 ```powershell
 git add shopify/sections/product-3d-configurator-launch.liquid `
@@ -72,7 +72,7 @@ git commit -m "docs: converge live production handoff state"
 
 **Files:** No source changes.
 
-- [ ] **Step 1: Run the existing baseline**
+- [x] **Step 1: Run the existing baseline**
 
 ```powershell
 npm test
@@ -82,14 +82,14 @@ git status --short
 
 Expected: 31 test files and 207 tests pass; both builds exit zero; worktree is clean.
 
-- [ ] **Step 2: Push the isolated branch**
+- [x] **Step 2: Push the isolated branch**
 
 ```powershell
 git push -u origin codex/continuous-bottom-pattern
 git push -u backup codex/continuous-bottom-pattern
 ```
 
-- [ ] **Step 3: Read back remote tips**
+- [x] **Step 3: Read back remote tips**
 
 ```powershell
 git ls-remote --heads origin codex/continuous-bottom-pattern
@@ -104,7 +104,7 @@ Expected: both hashes match local `HEAD`.
 - Create: `src/features/configurator/designs/localProductionReceipt.js`
 - Create: `src/features/configurator/designs/localProductionReceipt.test.js`
 
-- [ ] **Step 1: Write failing receipt tests**
+- [x] **Step 1: Write failing receipt tests**
 
 Cover:
 
@@ -113,7 +113,7 @@ Cover:
 3. changed state throws the stale-design message;
 4. matching state returns cart-safe references without Blob/file content.
 
-- [ ] **Step 2: Run the focused test and confirm red**
+- [x] **Step 2: Run the focused test and confirm red**
 
 ```powershell
 npm test -- --run src/features/configurator/designs/localProductionReceipt.test.js
@@ -121,11 +121,11 @@ npm test -- --run src/features/configurator/designs/localProductionReceipt.test.
 
 Expected: failure because the module has not been implemented.
 
-- [ ] **Step 3: Implement the smallest pure module**
+- [x] **Step 3: Implement the smallest pure module**
 
 Use `JSON.stringify(state)` as the in-session fingerprint. Keep the receipt private to the page session and return only `designFilename`, `atlasFilename`, and `atlasSha256` to the cart handoff.
 
-- [ ] **Step 4: Run the focused test and confirm green**
+- [x] **Step 4: Run the focused test and confirm green**
 
 ```powershell
 npm test -- --run src/features/configurator/designs/localProductionReceipt.test.js
@@ -139,7 +139,7 @@ Expected: all receipt tests pass.
 - Modify: `src/features/configurator/ui/ConfiguratorPage.jsx`
 - Modify: `src/features/configurator/ui/ConfiguratorPage.test.jsx`
 
-- [ ] **Step 1: Replace the weak cart test with failing flow tests**
+- [x] **Step 1: Replace the weak cart test with failing flow tests**
 
 Cover:
 
@@ -147,21 +147,21 @@ Cover:
 2. Save design initiates `design.json` and `uv-atlas.png`, then cart is allowed;
 3. editing after save causes a stale-design alert and blocks navigation.
 
-- [ ] **Step 2: Run focused tests and confirm red**
+- [x] **Step 2: Run focused tests and confirm red**
 
 ```powershell
 npm test -- --run src/features/configurator/ui/ConfiguratorPage.test.jsx
 ```
 
-- [ ] **Step 3: Store a receipt after successful save**
+- [x] **Step 3: Store a receipt after successful save**
 
 Add component state for the last production receipt. Create it only after production files and the design download are successfully prepared and both download calls are initiated.
 
-- [ ] **Step 4: Require the receipt during cart navigation**
+- [x] **Step 4: Require the receipt during cart navigation**
 
 For bottom-pattern designs, validate the receipt against current state and pass its short references to `createCartUrl`. Remove the cart-time atlas rebake.
 
-- [ ] **Step 5: Run focused tests and confirm green**
+- [x] **Step 5: Run focused tests and confirm green**
 
 ```powershell
 npm test -- --run `
@@ -176,7 +176,7 @@ npm test -- --run `
 - Modify: `project-logs/changes/2026-07-23-production-handoff-closure.md`
 - Modify: `docs/superpowers/handoffs/2026-07-23-3d-customization-current-state.md` when it is intentionally brought into this branch.
 
-- [ ] **Step 1: Run full verification**
+- [x] **Step 1: Run full verification**
 
 ```powershell
 npm test

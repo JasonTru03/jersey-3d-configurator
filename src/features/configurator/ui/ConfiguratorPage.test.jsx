@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { ConfiguratorPage, createLocalProductionFiles, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
 
 const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
+let downloadClick;
 
 vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -40,15 +41,28 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
 
 beforeAll(() => {
   vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: vi.fn(() => 'blob:local-production-file'),
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: vi.fn(),
+  });
+  downloadClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 });
 
 afterAll(() => {
+  downloadClick.mockRestore();
   vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
+  downloadClick.mockClear();
+  URL.createObjectURL.mockClear();
+  URL.revokeObjectURL.mockClear();
   window.history.replaceState(null, '', '/');
 });
 
@@ -149,9 +163,10 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
   });
 
-  it('adds an enabled bottom pattern to cart through the local production-file path', async () => {
+  it('blocks a patterned cart handoff until the production files are saved', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    render(<ConfiguratorPage />);
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
@@ -159,9 +174,57 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
-    await waitFor(() => {
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Save the current design before adding it to the Shopify cart.',
+    );
+    expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
+  it('allows the saved patterned design to enter the cart with its production references', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(2));
+    expect(downloadClick.mock.instances.map((link) => link.download)).toEqual([
+      'fn8788-jersey-design.json',
+      'fn8788-jersey-uv-atlas.png',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
+    expect(readCartProperties(navigateToCart.mock.calls[0][0])).toMatchObject({
+      'Production Files': 'Local download',
+      'Design File': 'fn8788-jersey-design.json',
+      'UV Atlas SHA-256': 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
     });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('blocks the cart after the saved patterned design changes', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
+    fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The design changed after the production files were saved. Save the design again.',
+    );
+    expect(navigateToCart).not.toHaveBeenCalled();
   });
 
   it('preserves the selected template when a sleeves color change is undone', async () => {
@@ -216,3 +279,9 @@ describe('ConfiguratorPage', () => {
     expect(screen.queryByRole('button', { name: 'Edit print' })).not.toBeInTheDocument();
   });
 });
+
+function readCartProperties(url) {
+  const encoded = new URL(url).searchParams.get('properties');
+  const base64 = encoded.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(encoded.length / 4) * 4, '=');
+  return JSON.parse(atob(base64));
+}

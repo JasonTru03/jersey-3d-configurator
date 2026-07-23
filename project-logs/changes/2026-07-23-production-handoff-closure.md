@@ -39,29 +39,46 @@ The launcher section type is `product-3d-configurator-launch`. No Shopify write 
 
 ## Git convergence
 
-Pending in this checkpoint:
+Checkpoint commit:
 
-- commit the exact live launcher plus the production-handoff design and plan;
-- run the existing 31-file/207-test baseline and both builds;
-- push `codex/continuous-bottom-pattern` to `origin` and `backup`;
-- read back both remote branch hashes.
+```text
+171bb39 docs: converge live production handoff state
+```
+
+- The exact live launcher plus the production-handoff design and plan were committed.
+- Baseline verification passed: 31 test files, 207 tests, application build, and Shopify build.
+- `codex/continuous-bottom-pattern` was pushed to `origin` and `backup`.
+- Local, origin, and backup read back the same checkpoint hash:
+
+```text
+171bb39e320ccdfcf60f58c265624cfb0c0ea42b
+```
 
 ## Local production-file closure
 
-Pending implementation:
+Implemented:
 
-- record an in-memory receipt only after **Save design** prepares and initiates both downloads;
-- require the receipt to match the current design before a bottom-pattern cart handoff;
-- block stale or missing production-file references;
-- keep Blob content, full JSON, Data URLs, and credentials out of cart properties.
+- `localProductionReceipt.js` records an in-memory receipt only after **Save design** prepares and initiates both downloads.
+- A bottom-pattern cart handoff requires the receipt to match the complete current design state.
+- Missing production files show the save-first error and stop navigation.
+- Any design edit after saving shows the stale-files error and stops navigation.
+- Cart handoff receives only the design filename, atlas filename, and atlas SHA-256. Blob content, full JSON, Data URLs, upload URLs, and credentials remain excluded.
 
 ## Verification and remaining acceptance
 
-Pending:
+TDD evidence:
 
-- focused red/green tests for receipt behavior;
-- full tests and application/Shopify builds;
+- Receipt tests first failed because `localProductionReceipt.js` did not exist, then passed after the minimal implementation.
+- UI flow tests first proved the old behavior still navigated without a receipt, then passed after the save/cart gate was added.
+- Focused result: 3 files, 23 tests passed.
+- Full result: 32 files, 212 tests passed.
+- Application build passed: `index-Ctk6hu2Q.js`, 983.09 kB, gzip 273.97 kB.
+- Shopify build passed: 1,348.32 kB, gzip 381.14 kB.
+- Existing large-chunk and `inlineDynamicImports` warnings remain non-blocking.
+
+Remaining real acceptance:
+
 - desktop/mobile storefront verification;
 - S/M/L/XL launch parameter verification;
-- real two-file download, JSON reload, and cart property inspection.
-
+- browser confirmation of both download attempts and JSON reload;
+- Shopify cart variant and production-property inspection.

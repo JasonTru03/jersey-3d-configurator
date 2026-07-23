@@ -4,8 +4,8 @@
   "compatibility_date": "2026-07-14",
   "main": "workers/index.js",
   "r2_buckets": [{ "binding": "DESIGN_ASSETS", "bucket_name": "jersey-design-assets" }],
-  "kv_namespaces": [{ "binding": "DESIGN_UPLOAD_RATE_LIMIT", "id": "REPLACE_WITH_PRODUCTION_KV_NAMESPACE_ID" }],
-  "vars": { "TURNSTILE_SITE_KEY": "REPLACE_WITH_PUBLIC_TURNSTILE_SITE_KEY" },
+  "kv_namespaces": [{ "binding": "DESIGN_UPLOAD_RATE_LIMIT", "id": "6356904e8a774fc5a64532ffe33a78b5" }],
+  "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAD7qNmhHjIuRFg4B" },
   "assets": {
     "directory": "./dist"
   }

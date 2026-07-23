@@ -206,6 +206,29 @@ describe('ConfiguratorPage', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('adds the jersey and exact customization surcharge for a 107-dollar quote', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%7D&variantId=48039101923479',
+    );
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+    fireEvent.click(screen.getByRole('button', { name: /Name and number set/i }));
+    await waitFor(() => expect(screen.getAllByText('$107').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+
+    expect(screen.getByText('Shopify cart total: $107')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledWith(
+      expect.stringContaining('/cart/48039101923479:1,49000000000018:1'),
+    ));
+  });
+
   it('blocks the cart after the saved patterned design changes', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
     const navigateToCart = vi.fn();

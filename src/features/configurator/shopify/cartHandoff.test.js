@@ -8,9 +8,10 @@ function decodeProperties(url) {
 
 describe('cart handoff', () => {
   it('uses the selected size variant and concise order properties', () => {
-    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&productHandle=custom-3d-football-jersey&variantMap=%7B%22s%22%3A%2248039101890711%22%2C%22m%22%3A%2248039101923479%22%7D');
+    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&productHandle=custom-3d-football-jersey&variantMap=%7B%22s%22%3A%2248039101890711%22%2C%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2268%22%3A%2249000000000068%22%7D');
     const url = createCartUrl({
       context,
+      quote: { customizationTotal: 68, merchandisePrice: 89, total: 157 },
       state: {
         layout: 's',
         extras: {},
@@ -39,7 +40,7 @@ describe('cart handoff', () => {
       },
     });
 
-    expect(url).toContain('/cart/48039101890711:1');
+    expect(url).toContain('/cart/48039101890711:1,49000000000068:1');
     expect(url).toContain('storefront=true');
     expect(decodeProperties(url)).toEqual({
       Size: 's',
@@ -57,8 +58,13 @@ describe('cart handoff', () => {
 
   it('keeps the normal cart properties without requiring an asset when the bottom pattern is disabled', () => {
     const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D');
-    const url = createCartUrl({ context, state: { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: false } } } });
+    const url = createCartUrl({
+      context,
+      quote: { customizationTotal: 0, merchandisePrice: 89, total: 89 },
+      state: { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    });
 
+    expect(url).toContain('/cart/48039101890711:1?');
     expect(decodeProperties(url)).toMatchObject({ Size: 's', Template: '', Colors: '{}', Print: '', Extras: '', Artwork: '' });
     expect(decodeProperties(url)).not.toHaveProperty('Production Files');
   });
@@ -67,7 +73,17 @@ describe('cart handoff', () => {
     const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D');
     const state = { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: true } } };
 
-    expect(() => createCartUrl({ context, state })).toThrow('Local production files are not ready.');
+    expect(() => createCartUrl({ context, quote: { customizationTotal: 0, total: 89 }, state })).toThrow('Local production files are not ready.');
+  });
+
+  it('requires an exact surcharge variant for a positive customization total', () => {
+    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%7D');
+
+    expect(() => createCartUrl({
+      context,
+      quote: { customizationTotal: 26, merchandisePrice: 89, total: 115 },
+      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    })).toThrow('No Shopify surcharge variant exists for the $26 customization.');
   });
 
   it('rejects an invalid shop host, malformed maps, and missing selected-size variants', () => {
@@ -100,8 +116,15 @@ describe('cart handoff', () => {
 
   it('does not expose a design upload credential from launch parameters', () => {
     const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
-    expect(Object.keys(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}`)).sort())
-      .toEqual(['initialLayout', 'productHandle', 'returnPath', 'shop', 'variantId', 'variantMap']);
+    const surchargeVariantMap = '%7B%2218%22%3A%2249000000000018%22%7D';
+    expect(Object.keys(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&surchargeVariantMap=${surchargeVariantMap}`)).sort())
+      .toEqual(['initialLayout', 'productHandle', 'returnPath', 'shop', 'surchargeVariantMap', 'variantId', 'variantMap']);
+  });
+
+  it('rejects malformed surcharge variant maps without discarding the Shopify launch', () => {
+    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D&surchargeVariantMap=%7B%2218%22%3A%22bad%22%7D');
+
+    expect(context).toMatchObject({ shop: 'testcsj.myshopify.com', surchargeVariantMap: null });
   });
 
   it('rejects control-character return paths while preserving internal queries', () => {

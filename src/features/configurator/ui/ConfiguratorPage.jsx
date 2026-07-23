@@ -136,7 +136,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       if (shouldPrepareBottomPatternAsset(state)) {
         productionFiles = getCurrentLocalProductionFiles({ state, receipt: localProductionReceipt });
       }
-      const url = createCartUrl({ context: shopifyContext, state, productionFiles });
+      const url = createCartUrl({ context: shopifyContext, quote, state, productionFiles });
       navigateToCart(url);
     } catch (error) {
       setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
@@ -218,7 +218,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         quote={quote}
         selected={selected}
         shopifyContext={shopifyContext}
-        shopifyPrice="$49.99 fixed Shopify price"
         state={state}
       />
     </main>

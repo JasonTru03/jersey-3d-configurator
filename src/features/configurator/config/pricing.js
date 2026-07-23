@@ -3,6 +3,7 @@ import { selectedOptions } from './selectors.js';
 export function calculateQuote(product, state) {
   const selected = selectedOptions(product, state);
   const optionAdjustments = [];
+  const layoutAdjustment = selected.layout?.priceDelta ?? 0;
 
   appendAdjustment(optionAdjustments, selected.layout);
   appendAdjustment(optionAdjustments, selected.material);
@@ -13,9 +14,12 @@ export function calculateQuote(product, state) {
     (sum, adjustment) => sum + adjustment.amount,
     product.basePrice,
   );
+  const merchandisePrice = product.basePrice + layoutAdjustment;
 
   return {
     basePrice: product.basePrice,
+    merchandisePrice,
+    customizationTotal: total - merchandisePrice,
     optionAdjustments,
     total,
     currency: product.currency,

@@ -4,6 +4,7 @@ export function parseShopifyLaunch(search) {
   const params = new URLSearchParams(search);
   const shop = normalizeShop(params.get('shop'));
   const variantMap = parseVariantMap(params.get('variantMap'));
+  const surchargeVariantMap = parseVariantMap(params.get('surchargeVariantMap'));
   const variantId = params.get('variantId') ?? '';
   const returnPath = params.get('returnPath') ?? '';
 
@@ -16,13 +17,14 @@ export function parseShopifyLaunch(search) {
     shop,
     productHandle: params.get('productHandle') ?? '',
     returnPath,
+    surchargeVariantMap,
     variantId,
     variantMap,
     initialLayout: Object.entries(variantMap).find(([, mappedVariantId]) => mappedVariantId === variantId)?.[0],
   };
 }
 
-export function createCartUrl({ context, state, productionFiles }) {
+export function createCartUrl({ context, quote, state, productionFiles }) {
   const shop = normalizeShop(context?.shop);
   if (!shop) throw new Error('Invalid Shopify shop host.');
 
@@ -32,13 +34,27 @@ export function createCartUrl({ context, state, productionFiles }) {
     throw new Error('No Shopify variant exists for the selected size.');
   }
 
+  const customizationTotal = quote?.customizationTotal;
+  if (!Number.isSafeInteger(customizationTotal) || customizationTotal < 0) {
+    throw new Error('Invalid configurator quote.');
+  }
+
+  const cartItems = [`${variantId}:1`];
+  if (customizationTotal > 0) {
+    const surchargeVariantId = context?.surchargeVariantMap?.[String(customizationTotal)];
+    if (!isNumericId(surchargeVariantId)) {
+      throw new Error(`No Shopify surcharge variant exists for the $${customizationTotal} customization.`);
+    }
+    cartItems.push(`${surchargeVariantId}:1`);
+  }
+
   const properties = createProperties(state, productionFiles);
   const query = new URLSearchParams({
     properties: encodeBase64Url(JSON.stringify(properties)),
     storefront: 'true',
   });
 
-  return `https://${shop}/cart/${variantId}:1?${query}`;
+  return `https://${shop}/cart/${cartItems.join(',')}?${query}`;
 }
 
 function normalizeShop(value) {

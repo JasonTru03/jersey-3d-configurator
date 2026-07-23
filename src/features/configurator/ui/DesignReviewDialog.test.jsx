@@ -28,7 +28,7 @@ describe('DesignReviewDialog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('No Shopify variant exists for the selected size.');
   });
 
-  it('adds the design to a connected Shopify cart at the fixed price', () => {
+  it('adds the design to a connected Shopify cart at the displayed total', () => {
     const onAddToCart = vi.fn();
     render(
       <DesignReviewDialog
@@ -44,7 +44,7 @@ describe('DesignReviewDialog', () => {
       />,
     );
 
-    expect(screen.getByText('$49.99 fixed Shopify price')).toBeInTheDocument();
+    expect(screen.getByText('Shopify cart total: $107')).toBeInTheDocument();
     const addToCart = screen.getByRole('button', { name: 'Add to Shopify cart' });
     expect(addToCart).toBeEnabled();
     fireEvent.click(addToCart);

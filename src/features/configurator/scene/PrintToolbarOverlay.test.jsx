@@ -13,64 +13,22 @@ describe('PrintToolbarOverlay', () => {
     expect(screen.getByRole('button', { name: 'Resize print' })).toBeInTheDocument();
   });
 
-  it('uses the same clockwise rotation increment for equal tangent drags at different radii', () => {
-    const nearRotate = vi.fn();
-    const { unmount } = render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={nearRotate} />);
-
-    const nearHandle = screen.getByRole('button', { name: 'Rotate print' });
-    fireEvent.pointerDown(nearHandle, { pointerId: 9, clientX: 200, clientY: 130 });
-    fireEvent.pointerMove(nearHandle, { pointerId: 9, clientX: 200, clientY: 150 });
-
-    expect(nearRotate).toHaveBeenLastCalledWith('print-1', 350);
-
-    unmount();
-
-    const farRotate = vi.fn();
-    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={farRotate} />);
-
-    const farHandle = screen.getByRole('button', { name: 'Rotate print' });
-    fireEvent.pointerDown(farHandle, { pointerId: 10, clientX: 250, clientY: 130 });
-    fireEvent.pointerMove(farHandle, { pointerId: 10, clientX: 250, clientY: 150 });
-
-    expect(farRotate).toHaveBeenLastCalledWith('print-1', 350);
-  });
-
-  it('keeps clockwise rotation stable while the pointer crosses the print center', () => {
+  it('rotates the selected print clockwise by forty-five degrees per click', () => {
     const onRotate = vi.fn();
     render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
 
-    const handle = screen.getByRole('button', { name: 'Rotate print' });
-    handle.setPointerCapture = vi.fn();
-    fireEvent.pointerDown(handle, { pointerId: 11, clientX: 250, clientY: 130 });
-    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 250, clientY: 150 });
-    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 150, clientY: 130 });
-    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 140, clientY: 130 });
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate print 45 degrees' }));
 
-    expect(handle.setPointerCapture).toHaveBeenCalledWith(11);
-    expect(onRotate.mock.calls[1]).toEqual(['print-1', 350]);
-    expect(onRotate).toHaveBeenLastCalledWith('print-1', expect.closeTo(349, 0));
+    expect(onRotate).toHaveBeenCalledWith('print-1', 45);
   });
 
-  it('limits a large pointer event to twenty-four degrees', () => {
+  it('wraps a 315-degree print rotation back to zero', () => {
     const onRotate = vi.fn();
-    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 0 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
+    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 315 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
 
-    const handle = screen.getByRole('button', { name: 'Rotate print' });
-    fireEvent.pointerDown(handle, { pointerId: 12, clientX: 250, clientY: 130 });
-    fireEvent.pointerMove(handle, { pointerId: 12, clientX: 250, clientY: 1000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate print 45 degrees' }));
 
-    expect(onRotate).toHaveBeenLastCalledWith('print-1', 336);
-  });
-
-  it('does not change rotation for a click without pointer movement', () => {
-    const onRotate = vi.fn();
-    render(<PrintToolbarOverlay anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }} item={{ id: 'print-1', rotation: 120 }} onCopy={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()} onRotate={onRotate} />);
-
-    const handle = screen.getByRole('button', { name: 'Rotate print' });
-    fireEvent.pointerDown(handle, { pointerId: 10, clientX: 200, clientY: 130 });
-    fireEvent.pointerUp(handle, { pointerId: 10 });
-
-    expect(onRotate).not.toHaveBeenCalled();
+    expect(onRotate).toHaveBeenCalledWith('print-1', 0);
   });
 
   it('emits a scale change from the resize handle', () => {

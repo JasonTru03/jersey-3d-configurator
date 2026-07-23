@@ -28,7 +28,17 @@ describe('calculateQuote', () => {
       { label: 'League sleeve badge', amount: 10 },
       { label: 'Match day chest patch', amount: 12 },
     ]);
+    expect(quote.merchandisePrice).toBe(93);
+    expect(quote.customizationTotal).toBe(64);
     expect(quote.total).toBe(157);
+  });
+
+  it('keeps the default configuration entirely on the jersey line', () => {
+    const quote = calculateQuote(jerseyProduct, jerseyProduct.defaultState);
+
+    expect(quote.merchandisePrice).toBe(89);
+    expect(quote.customizationTotal).toBe(0);
+    expect(quote.total).toBe(89);
   });
 
   it('ignores unknown options instead of hiding the pricing error with a fake amount', () => {

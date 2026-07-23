@@ -7,7 +7,7 @@ const APPEARANCE_SUMMARY_ROWS = [
   ['number', 'Name and number'],
 ];
 
-export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload, onSave, open, preparedDownload, product, quote, selected, shopifyContext, shopifyPrice = '$49.99 fixed Shopify price', state }) {
+export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
   if (!open) return null;
 
   const artworkCount = state.overrides?.decorations?.length ?? 0;
@@ -38,7 +38,7 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload
           ))}
         </dl>
         <div className="review-total"><span>Total</span><strong>${quote.total}</strong></div>
-        <p className="review-note">{shopifyPrice}</p>
+        <p className="review-note">Shopify cart total: ${quote.total}</p>
         {state.overrides?.bottomPattern?.enabled && (
           <p className="review-note">Prepare the production ZIP, then use its download link before adding this design to the cart.</p>
         )}

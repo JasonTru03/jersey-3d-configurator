@@ -85,19 +85,16 @@ describe('ProductStage print toolbar', () => {
     expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
   });
 
-  it('stores clockwise visual rotation from a clockwise pointer drag', () => {
+  it('stores a clockwise forty-five-degree rotation from one button click', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    const handle = screen.getByRole('button', { name: 'Rotate print' });
-    handle.setPointerCapture = vi.fn();
-    fireEvent.pointerDown(handle, { pointerId: 11, clientX: 276, clientY: 247 });
-    fireEvent.pointerMove(handle, { pointerId: 11, clientX: 228, clientY: 295 });
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate print 45 degrees' }));
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({
-        printItems: [expect.objectContaining({ id: 'print-1', rotation: expect.closeTo(336, 0) })],
+        printItems: [expect.objectContaining({ id: 'print-1', rotation: 45 })],
       }),
     }));
   });

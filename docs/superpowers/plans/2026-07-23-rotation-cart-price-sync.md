@@ -24,16 +24,16 @@
 ### Task 3: Configure Shopify
 
 - [x] Capture the current four jersey variant prices.
-- [ ] Update `S/M/L` to `$89` and `XL` to `$93`.
+- [x] Update `S/M/L` to `$89` and `XL` to `$93`.
 - [x] Create the hidden surcharge product and all required positive-price variants.
 - [x] Publish it to the Online Store through the authenticated admin session.
 - [x] Read back product status, variants, prices, and storefront availability.
 
 ### Task 4: Deploy and accept
 
-- [ ] Back up the live launcher section.
-- [ ] Upload the updated launcher and read it back.
-- [ ] Run the complete test suite, build, diff check, and status check.
-- [ ] Commit and push the isolated branch to both remotes.
-- [ ] Deploy the tested commit to Cloudflare and read back the deployment.
-- [ ] Verify the real `$107` storefront cart path and record evidence.
+- [x] Back up the live launcher section.
+- [x] Upload the updated launcher and read it back.
+- [x] Run the complete test suite, build, diff check, and status check.
+- [x] Commit and push the isolated branch to both remotes.
+- [x] Deploy the tested commit to Cloudflare and read back the deployment.
+- [x] Verify the real `$107` storefront cart path and record evidence.

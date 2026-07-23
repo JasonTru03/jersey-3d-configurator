@@ -1,0 +1,101 @@
+{% if product and section.settings.enabled %}
+  {% capture variant_map %}
+    {
+      {% for variant in product.variants %}
+        {{ variant.option1 | downcase | json }}: {{ variant.id | json }}{% unless forloop.last %},{% endunless %}
+      {% endfor %}
+    }
+  {% endcapture %}
+
+  <style>
+    .product-3d-configurator-launch {
+      width: 100%;
+      margin: 20px 0 16px;
+    }
+
+    .product-3d-configurator-launch .button {
+      width: 100%;
+      justify-content: center;
+    }
+  </style>
+  <div
+    class="product-3d-configurator-launch"
+    data-product-3d-configurator-launch
+    data-variant-map="{{ variant_map | strip | escape }}"
+    data-shop="{{ shop.permanent_domain | escape }}"
+    data-product-handle="{{ product.handle | escape }}"
+    data-return-path="{{ routes.cart_url | escape }}"
+  >
+    <button type="button" class="button" data-product-3d-configurator-launch-button>
+      {{ section.settings.button_label | escape }}
+    </button>
+  </div>
+
+  <script>
+    (() => {
+      const launcher = document.querySelector('[data-product-3d-configurator-launch]');
+      if (!launcher) return;
+
+      const button = launcher.querySelector('[data-product-3d-configurator-launch-button]');
+      const variantMap = JSON.parse(launcher.dataset.variantMap);
+      const productForm = document.querySelector('form[action*="/cart/add"]');
+      const quantityInput = productForm?.querySelector('[name="quantity"]');
+      const addButton = productForm?.querySelector('button[name="add"], button[type="submit"]');
+
+      if (productForm && quantityInput && addButton) {
+        let controlsRow = quantityInput;
+        while (controlsRow.parentElement && !controlsRow.contains(addButton) && controlsRow.parentElement !== productForm) {
+          controlsRow = controlsRow.parentElement;
+        }
+        (controlsRow.contains(addButton) ? controlsRow : quantityInput).before(launcher);
+      } else if (addButton) {
+        addButton.before(launcher);
+      }
+
+      button.addEventListener('click', () => {
+        const productForm = document.querySelector('form[action*="/cart/add"]');
+        const selectVariantField = productForm?.querySelector('select[name="id"]');
+        const checkedVariantField = productForm?.querySelector('input[name="id"]:checked');
+        const hiddenVariantField = productForm?.querySelector('input[type="hidden"][name="id"]');
+        const variantId = selectVariantField?.value || checkedVariantField?.value || hiddenVariantField?.value;
+
+        if (!variantId) return;
+
+        const workerUrl = new URL('https://jersey-3d-configurator.jason1064969838.workers.dev/');
+        workerUrl.searchParams.set('shop', launcher.dataset.shop);
+        workerUrl.searchParams.set('productHandle', launcher.dataset.productHandle);
+        workerUrl.searchParams.set('variantId', variantId);
+        workerUrl.searchParams.set('variantMap', JSON.stringify(variantMap));
+        workerUrl.searchParams.set('returnPath', launcher.dataset.returnPath);
+        window.location.assign(workerUrl.toString());
+      });
+    })();
+  </script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "3D configurator launcher",
+  "tag": "section",
+  "class": "section-product-3d-configurator-launch",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "enabled",
+      "label": "Enable 3D configurator launcher",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Button label",
+      "default": "Start 3D customization"
+    }
+  ],
+  "presets": [
+    {
+      "name": "3D configurator launcher"
+    }
+  ]
+}
+{% endschema %}

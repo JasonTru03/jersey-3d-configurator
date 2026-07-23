@@ -12,7 +12,10 @@
   --side-muted: #8a8c96;
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
 }
@@ -91,7 +94,9 @@
 .workspace {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .topbar {
@@ -183,13 +188,14 @@
   grid-template-columns: minmax(0, 1fr) 372px;
   gap: 16px;
   min-height: 0;
+  overflow: hidden;
   padding: 0 24px 24px;
 }
 
 .stage-wrap {
   position: relative;
   min-width: 0;
-  min-height: 560px;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -335,7 +341,8 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -945,6 +952,8 @@
 @media (max-width: 1040px) {
   .configurator-shell {
     grid-template-columns: 72px minmax(0, 1fr);
+    height: auto;
+    overflow: visible;
   }
 
   .brand span,
@@ -953,12 +962,22 @@
     display: none;
   }
 
+  .workspace {
+    overflow: visible;
+  }
+
   .workspace-grid {
     grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .stage-wrap {
+    min-height: 560px;
   }
 
   .config-panel {
     min-height: 520px;
+    overflow: visible;
   }
 }
 

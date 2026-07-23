@@ -198,7 +198,7 @@ Expected:
 - only the existing large-chunk and `inlineDynamicImports` warnings remain;
 - no whitespace errors.
 
-- [ ] **Step 2: Commit the verified fix**
+- [x] **Step 2: Commit the verified fix**
 
 ```powershell
 git add src/features/configurator/ui/configurator.css `
@@ -208,7 +208,7 @@ git add src/features/configurator/ui/configurator.css `
 git commit -m "fix: keep 3d stage within desktop viewport"
 ```
 
-- [ ] **Step 3: Push both Git remotes and read back**
+- [x] **Step 3: Push both Git remotes and read back**
 
 ```powershell
 git push origin codex/continuous-bottom-pattern
@@ -224,22 +224,22 @@ Expected: local, origin, and backup hashes match.
 **Files:**
 - Modify: `project-logs/changes/2026-07-23-fixed-viewport-stage-layout.md`
 
-- [ ] **Step 1: Deploy the verified build**
+- [x] **Step 1: Deploy the verified build**
 
 Run the repository's existing Cloudflare Worker deployment command.
 
 Expected: Wrangler reports a new deployment version for `jersey-3d-configurator`.
 
-- [ ] **Step 2: Read back the deployed entry assets**
+- [x] **Step 2: Read back the deployed entry assets**
 
 Open the Worker with a cache-busting query and record its JavaScript and CSS asset names.
 
-- [ ] **Step 3: Repeat the browser acceptance**
+- [x] **Step 3: Repeat the browser acceptance**
 
 At `1908 × 942`, repeat the Size-to-Template measurements on the deployed Worker.
 
 Expected: document and stage dimensions remain stable, the full jersey stays centered, and Template owns the vertical scroll.
 
-- [ ] **Step 4: Update the log and create the deployment checkpoint**
+- [x] **Step 4: Update the log and create the deployment checkpoint**
 
 Record the Worker version, asset names, live metrics, and verification result. Commit and push the log update to both remotes.

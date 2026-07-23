@@ -88,3 +88,45 @@ At `1000 × 900`, the existing single-column breakpoint restored normal page flo
 - Shopify build: 1,348.32 kB, gzip 381.14 kB;
 - `git diff --check`: passed;
 - existing large-chunk and `inlineDynamicImports` warnings remain non-blocking.
+
+## Git checkpoint
+
+Implementation commit:
+
+```text
+161613d2bec9db4ea76eb77834df86557c57f9eb
+```
+
+Local, `origin/codex/continuous-bottom-pattern`, and
+`backup/codex/continuous-bottom-pattern` read back this exact hash before
+deployment.
+
+## Cloudflare deployment
+
+- Worker: `jersey-3d-configurator`
+- URL: `https://jersey-3d-configurator.jason1064969838.workers.dev`
+- Version: `60e5fdd0-03cf-4b67-b32f-924e3944bfcc`
+- JavaScript: `/assets/index-DIllFYjy.js`
+- CSS: `/assets/index-DQwU5ICW.css`
+- deployment time: `2026-07-23T08:41:04.955Z`
+
+The versioned entry returned HTTP 200 and referenced the new JavaScript and CSS assets.
+
+### Deployed browser acceptance
+
+At `1908 × 942`:
+
+| State | Document height | Stage size | Panel client/scroll height |
+| --- | ---: | ---: | ---: |
+| Size | 942px | 1224 × 834px | 832 / 832px |
+| Template | 942px | 1224 × 834px | 832 / 1223px |
+
+- document delta: `0px`;
+- stage width/height delta: `0px / 0px`;
+- the full jersey remained centered;
+- Template panel `scrollTop` reached `391px`;
+- document `scrollY` remained `0`;
+- deployed stylesheet readback was `/assets/index-DQwU5ICW.css`.
+
+The first browser request reused the previous cached entry asset. Loading the
+versioned `/index.html` entry confirmed the new CSS asset and the fixed behavior.

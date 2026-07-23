@@ -32,7 +32,11 @@ describe('cart handoff', () => {
           bottomPattern: { enabled: true },
         },
       },
-      productionFiles: { designFilename: 'fn8788-jersey-design.json', atlasSha256: 'sha256:abc123' },
+      productionFiles: {
+        bundleFilename: 'fn8788-jersey-production.zip',
+        designFilename: 'fn8788-jersey-design.json',
+        atlasSha256: 'sha256:abc123',
+      },
     });
 
     expect(url).toContain('/cart/48039101890711:1');
@@ -44,7 +48,8 @@ describe('cart handoff', () => {
       Print: 'PLAYER #10',
       Extras: '',
       Artwork: '',
-      'Production Files': 'Local download',
+      'Production Files': 'Local ZIP download',
+      'Bundle File': 'fn8788-jersey-production.zip',
       'Design File': 'fn8788-jersey-design.json',
       'UV Atlas SHA-256': 'sha256:abc123',
     });

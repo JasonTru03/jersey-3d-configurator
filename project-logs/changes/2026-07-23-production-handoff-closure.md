@@ -58,11 +58,12 @@ Checkpoint commit:
 
 Implemented:
 
-- `localProductionReceipt.js` records an in-memory receipt only after **Save design** prepares and initiates both downloads.
+- `localProductionReceipt.js` records an in-memory receipt only after **Save design** prepares the production bundle.
 - A bottom-pattern cart handoff requires the receipt to match the complete current design state.
 - Missing production files show the save-first error and stop navigation.
 - Any design edit after saving shows the stale-files error and stops navigation.
-- Cart handoff receives only the design filename, atlas filename, and atlas SHA-256. Blob content, full JSON, Data URLs, upload URLs, and credentials remain excluded.
+- `productionBundle.js` packages the design JSON and UV Atlas PNG in one store-only ZIP download. This avoids Chrome's automatic multi-download gate, which accepted the first file but suppressed the second file during live acceptance.
+- Cart handoff receives only the bundle filename, design filename, atlas filename, and atlas SHA-256. Blob content, full JSON, Data URLs, upload URLs, and credentials remain excluded.
 
 ## Verification and remaining acceptance
 
@@ -76,9 +77,39 @@ TDD evidence:
 - Shopify build passed: 1,348.32 kB, gzip 381.14 kB.
 - Existing large-chunk and `inlineDynamicImports` warnings remain non-blocking.
 
-Remaining real acceptance:
+### First deployed browser acceptance
 
-- desktop/mobile storefront verification;
-- S/M/L/XL launch parameter verification;
-- browser confirmation of both download attempts and JSON reload;
-- Shopify cart variant and production-property inspection.
+Cloudflare Worker version:
+
+```text
+fde079fc-5869-4455-a46f-271f0b7b9d5d
+```
+
+Desktop live-theme evidence:
+
+- the launcher appeared once between the size picker and the quantity/add controls;
+- the launcher width was `456px`, matching the product information column;
+- S/M/L/XL each launched the Worker with the corresponding live Shopify variant ID;
+- the bottom-pattern cart gate stopped navigation before **Save design**;
+- after saving, the XL design entered the Shopify cart as variant `48039101989015`;
+- the cart total was `$49.99 USD`;
+- cart properties contained `Production Files`, `Design File`, and the exact UV Atlas SHA-256;
+- checkout and order creation were not entered.
+
+The same acceptance exposed the browser delivery defect: `fn8788-jersey-design.json` reached the Downloads folder, while the second automatic `fn8788-jersey-uv-atlas.png` download was suppressed. The ZIP-bundle change is the direct fix.
+
+### ZIP regression verification
+
+- Red evidence: the new bundle test failed because `productionBundle.js` did not exist, and both UI flow tests failed because the old implementation still initiated two downloads.
+- Focused result: 4 files, 24 tests passed.
+- Full result: 33 files, 213 tests passed.
+- Application build passed: `index-DD39jI1W.js`, 985.20 kB, gzip 274.73 kB.
+- Shopify build passed: 1,348.32 kB, gzip 381.14 kB.
+- Windows `Expand-Archive` successfully extracted both `fn8788-jersey-design.json` and `fn8788-jersey-uv-atlas.png` from a generated bundle.
+
+Remaining real acceptance after redeploy:
+
+- one real ZIP download and extracted-file inspection;
+- Shopify cart readback of the new `Local ZIP download` and `Bundle File` properties;
+- JSON reload;
+- mobile storefront verification through a stable mobile session.

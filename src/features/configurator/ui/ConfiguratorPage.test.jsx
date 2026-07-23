@@ -189,17 +189,17 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
-    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(1));
     expect(downloadClick.mock.instances.map((link) => link.download)).toEqual([
-      'fn8788-jersey-design.json',
-      'fn8788-jersey-uv-atlas.png',
+      'fn8788-jersey-production.zip',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
     await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
     expect(readCartProperties(navigateToCart.mock.calls[0][0])).toMatchObject({
-      'Production Files': 'Local download',
+        'Production Files': 'Local ZIP download',
+        'Bundle File': 'fn8788-jersey-production.zip',
       'Design File': 'fn8788-jersey-design.json',
       'UV Atlas SHA-256': 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
     });
@@ -215,7 +215,7 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
-    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(downloadClick).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
     fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));

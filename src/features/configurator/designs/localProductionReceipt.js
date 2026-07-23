@@ -24,6 +24,7 @@ function pickProductionFileReferences(productionFiles) {
   const references = {
     atlasFilename: productionFiles?.atlasFilename,
     atlasSha256: productionFiles?.atlasSha256,
+    bundleFilename: productionFiles?.bundleFilename,
     designFilename: productionFiles?.designFilename,
   };
   if (Object.values(references).some((value) => typeof value !== 'string' || value.length === 0)) {

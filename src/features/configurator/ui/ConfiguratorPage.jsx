@@ -33,6 +33,7 @@ import {
   createLocalProductionReceipt,
   getCurrentLocalProductionFiles,
 } from '../designs/localProductionReceipt.js';
+import { createProductionBundle } from '../designs/productionBundle.js';
 import './configurator.css';
 
 const sectionDefaults = [
@@ -93,11 +94,19 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         : null;
       const download = saveDesignFile(productionFiles?.bakeMetadata);
       if (!download) return;
-      triggerDownload(download);
       if (productionFiles) {
-        triggerDownload({ blob: productionFiles.atlas, filename: productionFiles.atlasFilename });
-        setLocalProductionReceipt(createLocalProductionReceipt({ state, productionFiles }));
+        const bundle = await createProductionBundle({
+          productId: product.id,
+          design: download,
+          atlas: { blob: productionFiles.atlas, filename: productionFiles.atlasFilename },
+        });
+        triggerDownload(bundle);
+        setLocalProductionReceipt(createLocalProductionReceipt({
+          state,
+          productionFiles: { ...productionFiles, bundleFilename: bundle.filename },
+        }));
       } else {
+        triggerDownload(download);
         setLocalProductionReceipt(null);
       }
     } catch (error) {

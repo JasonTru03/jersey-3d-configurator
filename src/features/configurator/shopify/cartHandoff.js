@@ -85,10 +85,11 @@ function createProperties(state, productionFiles) {
     Artwork: (state?.overrides?.decorations ?? []).map((item) => item.name ?? item.id).join(', '),
   };
   if (!state?.overrides?.bottomPattern?.enabled) return properties;
-  if (!productionFiles?.designFilename || !productionFiles?.atlasSha256) throw new Error('Local production files are not ready.');
+  if (!productionFiles?.bundleFilename || !productionFiles?.designFilename || !productionFiles?.atlasSha256) throw new Error('Local production files are not ready.');
   return {
     ...properties,
-    'Production Files': 'Local download',
+    'Production Files': 'Local ZIP download',
+    'Bundle File': productionFiles.bundleFilename,
     'Design File': productionFiles.designFilename,
     'UV Atlas SHA-256': productionFiles.atlasSha256,
   };

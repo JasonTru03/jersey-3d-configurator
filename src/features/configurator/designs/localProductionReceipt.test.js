@@ -18,6 +18,7 @@ const productionFiles = {
   atlas: new Blob(['atlas'], { type: 'image/png' }),
   atlasFilename: 'chelsea-uv-atlas.png',
   atlasSha256: 'sha256:test',
+  bundleFilename: 'chelsea-production.zip',
   designFilename: 'chelsea-design.json',
   uploadUrl: 'https://example.invalid/private',
 };
@@ -29,6 +30,7 @@ describe('local production receipt', () => {
     expect(getCurrentLocalProductionFiles({ state, receipt })).toEqual({
       atlasFilename: 'chelsea-uv-atlas.png',
       atlasSha256: 'sha256:test',
+      bundleFilename: 'chelsea-production.zip',
       designFilename: 'chelsea-design.json',
     });
     expect(receipt.productionFiles).not.toHaveProperty('atlas');

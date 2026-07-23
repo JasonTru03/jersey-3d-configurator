@@ -144,7 +144,7 @@ Expected: all receipt tests pass.
 Cover:
 
 1. bottom-pattern cart attempt before save shows the save-first alert;
-2. Save design initiates `design.json` and `uv-atlas.png`, then cart is allowed;
+2. Save design initiates one production ZIP containing `design.json` and `uv-atlas.png`, then cart is allowed;
 3. editing after save causes a stale-design alert and blocks navigation.
 
 - [x] **Step 2: Run focused tests and confirm red**
@@ -155,7 +155,7 @@ npm test -- --run src/features/configurator/ui/ConfiguratorPage.test.jsx
 
 - [x] **Step 3: Store a receipt after successful save**
 
-Add component state for the last production receipt. Create it only after production files and the design download are successfully prepared and both download calls are initiated.
+Add component state for the last production receipt. Create it only after production files and the single production-bundle download are successfully prepared.
 
 - [x] **Step 4: Require the receipt during cart navigation**
 
@@ -185,7 +185,7 @@ git diff --check
 git status --short
 ```
 
-- [ ] **Step 2: Commit the behavior fix**
+- [x] **Step 2: Commit the behavior fix**
 
 ```powershell
 git add src/features/configurator/designs/localProductionReceipt.js `
@@ -196,7 +196,7 @@ git add src/features/configurator/designs/localProductionReceipt.js `
 git commit -m "fix: require current local production files for cart"
 ```
 
-- [ ] **Step 3: Push both remotes and read back**
+- [x] **Step 3: Push both remotes and read back**
 
 Push only `codex/continuous-bottom-pattern`. Do not merge or deploy from `showcase` during this task.
 
@@ -205,11 +205,30 @@ Push only `codex/continuous-bottom-pattern`. Do not merge or deploy from `showca
 **Files:**
 - Modify: `project-logs/changes/2026-07-23-production-handoff-closure.md`
 
-- [ ] **Step 1: Verify launcher position on desktop**
+- [x] **Step 1: Verify launcher position on desktop**
 - [ ] **Step 2: Verify launcher position on mobile**
-- [ ] **Step 3: Verify Worker launch parameters for S/M/L/XL**
-- [ ] **Step 4: Verify both production downloads and JSON reload**
-- [ ] **Step 5: Verify Shopify cart variant and production properties**
-- [ ] **Step 6: Record screenshots, browser state, and any password/session boundary**
+- [x] **Step 3: Verify Worker launch parameters for S/M/L/XL**
+- [ ] **Step 4: Verify the production ZIP and JSON reload**
+- [x] **Step 5: Verify Shopify cart variant and production properties**
+- [x] **Step 6: Record screenshots, browser state, and any password/session boundary**
 
 Stop before checkout and order creation.
+
+### Task 7: Close the browser multi-download regression
+
+**Files:**
+- Create: `src/features/configurator/designs/productionBundle.js`
+- Create: `src/features/configurator/designs/productionBundle.test.js`
+- Modify: `src/features/configurator/ui/ConfiguratorPage.jsx`
+- Modify: `src/features/configurator/ui/ConfiguratorPage.test.jsx`
+- Modify: `src/features/configurator/designs/localProductionReceipt.js`
+- Modify: `src/features/configurator/shopify/cartHandoff.js`
+
+- [x] **Step 1: Reproduce the missing second download in authenticated Chrome**
+- [x] **Step 2: Add failing ZIP and one-download flow tests**
+- [x] **Step 3: Generate a standards-compatible store-only ZIP without a new dependency**
+- [x] **Step 4: Include the bundle filename in the receipt and Shopify cart properties**
+- [x] **Step 5: Run focused and full tests**
+- [x] **Step 6: Run both production builds**
+- [x] **Step 7: Extract a generated bundle with Windows `Expand-Archive`**
+- [ ] **Step 8: Redeploy and repeat the real download/cart acceptance**

@@ -22,7 +22,7 @@ export function parseShopifyLaunch(search) {
   };
 }
 
-export function createCartUrl({ context, state, designAsset }) {
+export function createCartUrl({ context, state, productionFiles }) {
   const shop = normalizeShop(context?.shop);
   if (!shop) throw new Error('Invalid Shopify shop host.');
 
@@ -32,7 +32,7 @@ export function createCartUrl({ context, state, designAsset }) {
     throw new Error('No Shopify variant exists for the selected size.');
   }
 
-  const properties = createProperties(state, designAsset);
+  const properties = createProperties(state, productionFiles);
   const query = new URLSearchParams({
     properties: encodeBase64Url(JSON.stringify(properties)),
     storefront: 'true',
@@ -71,7 +71,7 @@ function parseVariantMap(rawVariantMap) {
   }
 }
 
-function createProperties(state, designAsset) {
+function createProperties(state, productionFiles) {
   const appearance = state?.overrides?.appearance ?? {};
   const print = state?.overrides?.printName || state?.overrides?.printNumber
     ? `${state.overrides.printName ?? ''}${state.overrides.printNumber ? ` #${state.overrides.printNumber}` : ''}`.trim()
@@ -85,8 +85,13 @@ function createProperties(state, designAsset) {
     Artwork: (state?.overrides?.decorations ?? []).map((item) => item.name ?? item.id).join(', '),
   };
   if (!state?.overrides?.bottomPattern?.enabled) return properties;
-  if (!designAsset?.designId || !designAsset?.url || !designAsset?.sha256 || !designAsset?.version) throw new Error('Design asset upload did not return a complete reference.');
-  return { ...properties, 'Design ID': designAsset.designId, 'UV Atlas URL': designAsset.url, 'UV Atlas SHA-256': designAsset.sha256, 'Projection Version': String(designAsset.version) };
+  if (!productionFiles?.designFilename || !productionFiles?.atlasSha256) throw new Error('Local production files are not ready.');
+  return {
+    ...properties,
+    'Production Files': 'Local download',
+    'Design File': productionFiles.designFilename,
+    'UV Atlas SHA-256': productionFiles.atlasSha256,
+  };
 }
 
 function isNumericId(value) {

@@ -203,6 +203,30 @@ describe('design document', () => {
     expect(loaded.overrides.bottomPattern).toMatchObject({ enabled: true, transform: bottomPattern.transform, bakeMetadata: { bakeKey: 'bottom-pattern-atlas:abc' } });
   });
 
+  it('retains local atlas file metadata without embedding binary atlas data', () => {
+    const document = createDesignDocument({
+      productId: 'fn8788-jersey',
+      state: {
+        ...defaultState,
+        overrides: {
+          bottomPattern: {
+            enabled: true,
+            bakeMetadata: {
+              atlasFilename: 'fn8788-uv-atlas.png',
+              atlasSha256: 'sha256:abc123',
+            },
+          },
+        },
+      },
+    });
+
+    expect(document.state.overrides.bottomPattern.bakeMetadata).toMatchObject({
+      atlasFilename: 'fn8788-uv-atlas.png',
+      atlasSha256: 'sha256:abc123',
+    });
+    expect(JSON.stringify(document)).not.toContain('data:image');
+  });
+
   it('does not embed a bottom-pattern Data URL in a v2 document', () => {
     const document = createDesignDocument({
       productId: 'fn8788-jersey',

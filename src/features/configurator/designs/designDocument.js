@@ -103,7 +103,7 @@ function normalizeDocumentBottomPattern(pattern, version) {
 
 function sanitizeBakeMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
-  const safeKeys = ['bakeKey', 'mimeType', 'atlasSize', 'size', 'width', 'height', 'meshCount', 'sourceHash', 'projectionVersion', 'projectionId'];
+  const safeKeys = ['bakeKey', 'mimeType', 'atlasSize', 'size', 'width', 'height', 'meshCount', 'sourceHash', 'projectionVersion', 'projectionId', 'atlasFilename', 'atlasSha256'];
   const safeMetadata = safeKeys.reduce((result, key) => {
     const value = metadata[key];
     if (typeof value === 'string' && !value.startsWith('data:')) result[key] = value;

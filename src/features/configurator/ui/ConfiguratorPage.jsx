@@ -28,9 +28,7 @@ import { ZoneColorPanel } from './ZoneColorPanel.jsx';
 import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
-import { uploadDesignAsset } from '../api/designAssetApi.js';
-import { getDesignUploadTurnstileToken } from '../api/turnstile.js';
-import { createDesignDocument } from '../designs/designDocument.js';
+import { hashAtlasBlob } from '../scene/bottomPatternBaker.js';
 import './configurator.css';
 
 const sectionDefaults = [
@@ -82,15 +80,19 @@ export function ConfiguratorPage() {
     });
   };
 
-  const handleSaveDesign = () => {
-    const download = saveDesignFile();
-    if (!download) return;
-    const url = URL.createObjectURL(download.blob);
-    const link = document.createElement('a');
-    link.download = download.filename;
-    link.href = url;
-    link.click();
-    URL.revokeObjectURL(url);
+  const handleSaveDesign = async () => {
+    try {
+      setFileError('');
+      const productionFiles = shouldPrepareBottomPatternAsset(state)
+        ? await createLocalProductionFiles({ bake: await getLatestPatternBake(bakeProviderRef), productId: product.id })
+        : null;
+      const download = saveDesignFile(productionFiles?.bakeMetadata);
+      if (!download) return;
+      triggerDownload(download);
+      if (productionFiles) triggerDownload({ blob: productionFiles.atlas, filename: productionFiles.atlasFilename });
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'Design file preparation failed.');
+    }
   };
 
   const handleLoadDesign = async (event) => {
@@ -102,16 +104,11 @@ export function ConfiguratorPage() {
   const handleAddToCart = async () => {
     try {
       setCartError('');
-      let designAsset;
+      let productionFiles;
       if (shouldPrepareBottomPatternAsset(state)) {
-        const bake = await bakeProviderRef.current?.();
-        if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
-        const design = createDesignDocument({ productId: product.id, variantId: shopifyContext?.variantId, state });
-        design.state.overrides.bottomPattern.bakeMetadata = structuredClone(bake.metadata);
-        const turnstileToken = await getDesignUploadTurnstileToken();
-        designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata, turnstileToken });
+        productionFiles = await createLocalProductionFiles({ bake: await getLatestPatternBake(bakeProviderRef), productId: product.id });
       }
-      const url = createCartUrl({ context: shopifyContext, state, designAsset });
+      const url = createCartUrl({ context: shopifyContext, state, productionFiles });
       window.location.assign(url);
     } catch (error) {
       setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
@@ -192,6 +189,32 @@ export function ConfiguratorPage() {
 
 export function shouldPrepareBottomPatternAsset(state) {
   return state?.overrides?.bottomPattern?.enabled === true;
+}
+
+export async function createLocalProductionFiles({ bake, productId }) {
+  if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
+  const atlasFilename = `${productId}-uv-atlas.png`;
+  const atlasSha256 = await hashAtlasBlob(bake.blob);
+  return {
+    atlas: bake.blob,
+    atlasFilename,
+    atlasSha256,
+    designFilename: `${productId}-design.json`,
+    bakeMetadata: { ...structuredClone(bake.metadata), atlasFilename, atlasSha256 },
+  };
+}
+
+async function getLatestPatternBake(bakeProviderRef) {
+  return bakeProviderRef.current?.();
+}
+
+function triggerDownload({ blob, filename }) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = url;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function Sidebar({ activeSection, labels, onSelect }) {

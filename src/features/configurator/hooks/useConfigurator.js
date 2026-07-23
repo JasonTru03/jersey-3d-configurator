@@ -71,13 +71,26 @@ export function useConfigurator(initialStateOverride) {
     setQuote(await productApi.quoteConfiguration(product.id, nextState));
   }, [history, product]);
 
-  const saveDesignFile = useCallback(() => {
+  const saveDesignFile = useCallback((bakeMetadata) => {
     const currentState = getCurrentDesignState(history);
     if (!product || !currentState) return null;
 
+    const stateForExport = bakeMetadata && currentState.overrides?.bottomPattern?.enabled
+      ? {
+        ...currentState,
+        overrides: {
+          ...currentState.overrides,
+          bottomPattern: {
+            ...currentState.overrides.bottomPattern,
+            bakeMetadata: structuredClone(bakeMetadata),
+          },
+        },
+      }
+      : currentState;
+
     return createDesignDownload(createDesignDocument({
       productId: product.id,
-      state: currentState,
+      state: stateForExport,
     }));
   }, [history, product]);
 

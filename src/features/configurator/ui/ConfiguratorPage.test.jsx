@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConfiguratorPage, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
+import { ConfiguratorPage, createLocalProductionFiles, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
 
 const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
 
@@ -21,6 +21,13 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       setActivePrintId() {}
 
       setView() {}
+
+      ensureLatestBottomPatternBake() {
+        return {
+          blob: new Blob(['atlas'], { type: 'image/png' }),
+          metadata: { bakeKey: 'bottom-pattern-atlas:test', atlasSize: 2048 },
+        };
+      }
 
       focusDecoration(id) {
         rendererHarness.focusedDecorationId = id;
@@ -49,6 +56,17 @@ describe('ConfiguratorPage', () => {
   it('only requires a baked asset when the bottom pattern is enabled', () => {
     expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: false } } })).toBe(false);
     expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: true } } })).toBe(true);
+  });
+
+  it('prepares local production references without an upload URL or credential', async () => {
+    await expect(createLocalProductionFiles({
+      productId: 'fn8788-jersey',
+      bake: { blob: new Blob(['atlas'], { type: 'image/png' }), metadata: { atlasSize: 2048 } },
+    })).resolves.toMatchObject({
+      atlasFilename: 'fn8788-jersey-uv-atlas.png',
+      designFilename: 'fn8788-jersey-design.json',
+      atlasSha256: 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
+    });
   });
 
   it('initializes the layout from the Shopify-selected XL variant', async () => {
@@ -131,7 +149,7 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
   });
 
-  it('keeps the preview available without a launch upload credential', async () => {
+  it('adds an enabled bottom pattern to cart through the local production-file path', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
@@ -141,7 +159,9 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('latest UV atlas is not ready');
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
   });
 
   it('preserves the selected template when a sleeves color change is undone', async () => {

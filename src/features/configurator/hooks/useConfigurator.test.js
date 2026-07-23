@@ -57,4 +57,24 @@ describe('useConfigurator design files', () => {
 
     expect(result.current.state.colorway).toBe('away');
   });
+
+  it('includes local production atlas metadata in a saved bottom-pattern design file', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.updateState({ overrides: { bottomPattern: { enabled: true } } });
+    });
+
+    const download = result.current.saveDesignFile({
+      atlasFilename: 'fn8788-uv-atlas.png',
+      atlasSha256: 'sha256:abc123',
+    });
+    const document = JSON.parse(await download.blob.text());
+
+    expect(document.state.overrides.bottomPattern.bakeMetadata).toMatchObject({
+      atlasFilename: 'fn8788-uv-atlas.png',
+      atlasSha256: 'sha256:abc123',
+    });
+  });
 });

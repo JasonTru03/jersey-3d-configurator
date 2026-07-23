@@ -51,6 +51,24 @@ describe('DesignReviewDialog', () => {
     expect(onAddToCart).toHaveBeenCalledWith();
   });
 
+  it('explains that bottom-pattern production uses the downloaded local files', () => {
+    render(
+      <DesignReviewDialog
+        onAddToCart={() => {}}
+        onClose={() => {}}
+        onSave={() => {}}
+        open
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ total: 107 }}
+        selected={{}}
+        shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+        state={{ overrides: { bottomPattern: { enabled: true } } }}
+      />,
+    );
+
+    expect(screen.getByText('Production uses the design JSON and UV Atlas PNG downloaded from Save design.')).toBeInTheDocument();
+  });
+
   it('explains when the configurator was not launched from Shopify', () => {
     render(
       <DesignReviewDialog

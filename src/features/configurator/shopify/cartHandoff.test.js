@@ -32,7 +32,7 @@ describe('cart handoff', () => {
           bottomPattern: { enabled: true },
         },
       },
-      designAsset: { designId: 'dsg_123', url: 'https://TARGET/api/design-assets/dsg_123/atlas.png', sha256: 'abc123', version: 2 },
+      productionFiles: { designFilename: 'fn8788-jersey-design.json', atlasSha256: 'sha256:abc123' },
     });
 
     expect(url).toContain('/cart/48039101890711:1');
@@ -44,10 +44,9 @@ describe('cart handoff', () => {
       Print: 'PLAYER #10',
       Extras: '',
       Artwork: '',
-      'Design ID': 'dsg_123',
-      'UV Atlas URL': 'https://TARGET/api/design-assets/dsg_123/atlas.png',
-      'UV Atlas SHA-256': 'abc123',
-      'Projection Version': '2',
+      'Production Files': 'Local download',
+      'Design File': 'fn8788-jersey-design.json',
+      'UV Atlas SHA-256': 'sha256:abc123',
     });
   });
 
@@ -56,7 +55,14 @@ describe('cart handoff', () => {
     const url = createCartUrl({ context, state: { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: false } } } });
 
     expect(decodeProperties(url)).toMatchObject({ Size: 's', Template: '', Colors: '{}', Print: '', Extras: '', Artwork: '' });
-    expect(decodeProperties(url)).not.toHaveProperty('Design ID');
+    expect(decodeProperties(url)).not.toHaveProperty('Production Files');
+  });
+
+  it('requires a local design filename and atlas hash for an enabled bottom pattern without uploading assets', () => {
+    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D');
+    const state = { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: true } } };
+
+    expect(() => createCartUrl({ context, state })).toThrow('Local production files are not ready.');
   });
 
   it('rejects an invalid shop host, malformed maps, and missing selected-size variants', () => {

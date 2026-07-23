@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bakeBottomPatternAtlas, createPatternBakeKey } from './bottomPatternBaker.js';
+import { bakeBottomPatternAtlas, createPatternBakeKey, hashAtlasBlob } from './bottomPatternBaker.js';
 
 const bakeInput = {
   sourceHash: 'sha256:pattern-a',
@@ -17,6 +17,11 @@ const bakeInput = {
 afterEach(() => vi.restoreAllMocks());
 
 describe('bottom pattern baker', () => {
+  it('creates a stable SHA-256 reference for the locally exported atlas', async () => {
+    await expect(hashAtlasBlob(new Blob(['atlas'], { type: 'image/png' })))
+      .resolves.toBe('sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9');
+  });
+
   it('creates the same key for the same bake inputs', () => {
     expect(createPatternBakeKey(bakeInput)).toBe(createPatternBakeKey(structuredClone(bakeInput)));
   });

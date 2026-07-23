@@ -39,6 +39,9 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onSave, op
         </dl>
         <div className="review-total"><span>Total</span><strong>${quote.total}</strong></div>
         <p className="review-note">{shopifyPrice}</p>
+        {state.overrides?.bottomPattern?.enabled && (
+          <p className="review-note">Production uses the design JSON and UV Atlas PNG downloaded from Save design.</p>
+        )}
         {!shopifyContext && (
           <p className="review-note">Open the configurator from a connected Shopify product page to add this design to your cart.</p>
         )}

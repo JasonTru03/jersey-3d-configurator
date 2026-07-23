@@ -4,6 +4,15 @@ import { Vector3 } from 'three';
 const PNG_MIME_TYPE = 'image/png';
 const DEFAULT_ATLAS_SIZE = 2048;
 
+export async function hashAtlasBlob(blob) {
+  if (!(blob instanceof Blob)) throw new Error('A UV atlas PNG Blob is required.');
+  if (!globalThis.crypto?.subtle) throw new Error('SHA-256 hashing is not supported in this browser.');
+
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `sha256:${hash}`;
+}
+
 export function createPatternBakeKey({ sourceHash, transform, projectionVersion, projectionId, size }) {
   const keyInput = normalizeBakeKeyInput({ sourceHash, transform, projectionVersion, projectionId, size });
   return `bottom-pattern-atlas:${JSON.stringify(keyInput)}`;

@@ -138,5 +138,7 @@ describe('bottom pattern baker', () => {
     expect(context.fill).toHaveBeenCalledOnce();
     expect(context.lineWidth).toBe(8);
     expect(context.stroke).toHaveBeenCalledOnce();
+    expect(context.stroke.mock.invocationCallOrder[0]).toBeGreaterThan(context.restore.mock.invocationCallOrder[0]);
+    expect(context.moveTo).toHaveBeenCalledWith(0, 64);
   });
 });

@@ -87,12 +87,10 @@ describe('cart handoff', () => {
       .toBeNull();
   });
 
-  it('keeps a launch-scoped design token without accepting an empty token', () => {
+  it('does not expose a design upload credential from launch parameters', () => {
     const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&designToken=short-lived-token`))
-      .toMatchObject({ designToken: 'short-lived-token' });
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&designToken=`))
-      .toMatchObject({ designToken: '' });
+    expect(Object.keys(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}`)).sort())
+      .toEqual(['initialLayout', 'productHandle', 'returnPath', 'shop', 'variantId', 'variantMap']);
   });
 
   it('rejects control-character return paths while preserving internal queries', () => {

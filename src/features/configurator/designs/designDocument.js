@@ -103,13 +103,14 @@ function normalizeDocumentBottomPattern(pattern, version) {
 
 function sanitizeBakeMetadata(metadata) {
   if (!metadata || typeof metadata !== 'object') return null;
-  const safeKeys = ['key', 'mimeType', 'size', 'width', 'height', 'meshCount', 'sourceHash', 'projectionVersion', 'projectionId'];
+  const safeKeys = ['bakeKey', 'mimeType', 'atlasSize', 'size', 'width', 'height', 'meshCount', 'sourceHash', 'projectionVersion', 'projectionId'];
   const safeMetadata = safeKeys.reduce((result, key) => {
     const value = metadata[key];
     if (typeof value === 'string' && !value.startsWith('data:')) result[key] = value;
     if (Number.isFinite(value)) result[key] = value;
     return result;
   }, {});
+  if (metadata.transform && typeof metadata.transform === 'object') safeMetadata.transform = structuredClone(metadata.transform);
   return Object.keys(safeMetadata).length ? safeMetadata : null;
 }
 

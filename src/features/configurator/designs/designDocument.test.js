@@ -192,15 +192,15 @@ describe('design document', () => {
       transform: { offset: { u: 0, v: 0 }, scale: 1.5, rotationDeg: 45, repeat: { u: 5, v: 6 } },
       projectionVersion: 1,
       modelProjectionId: 'chelsea-jersey-cylindrical-v1',
-      bakeMetadata: { key: 'bottom-pattern-atlas:abc', mimeType: 'image/png', width: 2048, dataUrl: 'data:image/png;base64,abc' },
+      bakeMetadata: { bakeKey: 'bottom-pattern-atlas:abc', mimeType: 'image/png', width: 2048, dataUrl: 'data:image/png;base64,abc' },
     };
     const document = createDesignDocument({ productId: 'fn8788-jersey', state: { ...defaultState, overrides: { bottomPattern } } });
     const loaded = parseDesignDocument(JSON.stringify(document), { defaultState, expectedProductId: 'fn8788-jersey' });
 
     expect(document.version).toBe(2);
-    expect(document.state.overrides.bottomPattern.bakeMetadata).toEqual({ key: 'bottom-pattern-atlas:abc', mimeType: 'image/png', width: 2048 });
+    expect(document.state.overrides.bottomPattern.bakeMetadata).toEqual({ bakeKey: 'bottom-pattern-atlas:abc', mimeType: 'image/png', width: 2048 });
     expect(JSON.stringify(document)).not.toContain('data:image/png');
-    expect(loaded.overrides.bottomPattern).toMatchObject({ enabled: true, transform: bottomPattern.transform, bakeMetadata: { key: 'bottom-pattern-atlas:abc' } });
+    expect(loaded.overrides.bottomPattern).toMatchObject({ enabled: true, transform: bottomPattern.transform, bakeMetadata: { bakeKey: 'bottom-pattern-atlas:abc' } });
   });
 
   it('does not embed a bottom-pattern Data URL in a v2 document', () => {

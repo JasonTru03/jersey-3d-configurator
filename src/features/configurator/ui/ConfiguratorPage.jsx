@@ -29,6 +29,7 @@ import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import { uploadDesignAsset } from '../api/designAssetApi.js';
+import { getDesignUploadTurnstileToken } from '../api/turnstile.js';
 import { createDesignDocument } from '../designs/designDocument.js';
 import './configurator.css';
 
@@ -103,11 +104,12 @@ export function ConfiguratorPage() {
       setCartError('');
       let designAsset;
       if (shouldPrepareBottomPatternAsset(state)) {
-        if (!shopifyContext?.designToken) throw new Error('This design needs a current upload token before it can be added to Shopify cart. Save the design file or reopen the configurator from the product page.');
         const bake = await bakeProviderRef.current?.();
         if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
         const design = createDesignDocument({ productId: product.id, variantId: shopifyContext?.variantId, state });
-        designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata, token: shopifyContext.designToken });
+        design.state.overrides.bottomPattern.bakeMetadata = structuredClone(bake.metadata);
+        const turnstileToken = await getDesignUploadTurnstileToken();
+        designAsset = await uploadDesignAsset({ atlas: bake.blob, design, metadata: bake.metadata, turnstileToken });
       }
       const url = createCartUrl({ context: shopifyContext, state, designAsset });
       window.location.assign(url);

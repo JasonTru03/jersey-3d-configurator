@@ -34,7 +34,7 @@ export async function bakeBottomPatternAtlas({ meshEntries, pattern, sourceTextu
     blob,
     canvas,
     metadata: {
-      key,
+      bakeKey: key,
       mimeType: PNG_MIME_TYPE,
       atlasSize: size,
       size,

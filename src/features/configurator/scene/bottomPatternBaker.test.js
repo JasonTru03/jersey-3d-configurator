@@ -93,7 +93,7 @@ describe('bottom pattern baker', () => {
 
     expect(result.blob).toBe(png);
     expect(result.metadata).toEqual({
-      key: createPatternBakeKey(bakeInput),
+      bakeKey: createPatternBakeKey(bakeInput),
       mimeType: 'image/png',
       atlasSize: 2048,
       size: 2048,

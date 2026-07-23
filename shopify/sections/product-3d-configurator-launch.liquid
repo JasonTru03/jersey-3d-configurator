@@ -7,6 +7,17 @@
     }
   {% endcapture %}
 
+  <style>
+    .product-3d-configurator-launch {
+      width: 100%;
+      margin: 20px 0 16px;
+    }
+
+    .product-3d-configurator-launch .button {
+      width: 100%;
+      justify-content: center;
+    }
+  </style>
   <div
     class="product-3d-configurator-launch"
     data-product-3d-configurator-launch
@@ -27,6 +38,19 @@
 
       const button = launcher.querySelector('[data-product-3d-configurator-launch-button]');
       const variantMap = JSON.parse(launcher.dataset.variantMap);
+      const productForm = document.querySelector('form[action*="/cart/add"]');
+      const quantityInput = productForm?.querySelector('[name="quantity"]');
+      const addButton = productForm?.querySelector('button[name="add"], button[type="submit"]');
+
+      if (productForm && quantityInput && addButton) {
+        let controlsRow = quantityInput;
+        while (controlsRow.parentElement && !controlsRow.contains(addButton) && controlsRow.parentElement !== productForm) {
+          controlsRow = controlsRow.parentElement;
+        }
+        (controlsRow.contains(addButton) ? controlsRow : quantityInput).before(launcher);
+      } else if (addButton) {
+        addButton.before(launcher);
+      }
 
       button.addEventListener('click', () => {
         const productForm = document.querySelector('form[action*="/cart/add"]');

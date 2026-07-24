@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfiguratorPage, createLocalProductionFiles, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
+import { productApi } from '../api/productApi.js';
 
 const rendererHarness = vi.hoisted(() => ({
   configurationError: '',
@@ -8,6 +9,7 @@ const rendererHarness = vi.hoisted(() => ({
   options: null,
   updateStates: [],
   finalRotationItem: null,
+  normalizationForUpdate: null,
 }));
 let downloadClick;
 
@@ -30,10 +32,13 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       constructor(host, options) {
         rendererHarness.options = options;
         this.onPrintAnchorChange = options.onPrintAnchorChange;
+        this.onStateNormalize = options.onStateNormalize;
       }
 
       update(product, state) {
         rendererHarness.updateStates.push(structuredClone(state));
+        const normalization = rendererHarness.normalizationForUpdate?.(state);
+        if (normalization) this.onStateNormalize?.(normalization);
         this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
       }
 
@@ -88,6 +93,7 @@ beforeEach(() => {
   rendererHarness.options = null;
   rendererHarness.updateStates = [];
   rendererHarness.finalRotationItem = null;
+  rendererHarness.normalizationForUpdate = null;
   rendererHarness.configurationError = '';
   downloadClick.mockClear();
   URL.createObjectURL.mockClear();
@@ -351,6 +357,71 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
 
     expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
+  });
+
+  it('loads and normalizes a legacy design without reverting its current options or quoting twice', async () => {
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration');
+    rendererHarness.normalizationForUpdate = (state) => {
+      const legacy = state.overrides.customTextItems?.find((item) => item.id === 'legacy');
+      if (!legacy || legacy.scale !== 1.8) return null;
+      return {
+        overrides: {
+          customTextItems: state.overrides.customTextItems.map((item) => (
+            item.id === 'legacy'
+              ? { ...item, placement: { x: 0, y: 0.36, z: 0.5 }, scale: 1.0271 }
+              : item
+          )),
+        },
+      };
+    };
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    quoteSpy.mockClear();
+    const file = new File([JSON.stringify({
+      format: 'jersey-design',
+      productId: 'fn8788-jersey',
+      savedAt: '2026-07-24T00:00:00.000Z',
+      version: 3,
+      state: {
+        colorway: 'third',
+        layout: 'xl',
+        lighting: 'name-number',
+        overrides: {
+          printItems: [{
+            id: 'player',
+            name: 'KEEP',
+            number: '77',
+            placement: { x: 0.25, y: 0.36, z: 0.5 },
+          }],
+          customTextItems: [{
+            id: 'legacy',
+            text: 'MASON',
+            placement: { x: 99, y: 99, z: 99 },
+            scale: 1.8,
+          }],
+        },
+      },
+    })], 'legacy-design.json', { type: 'application/json' });
+
+    fireEvent.change(document.querySelector('input[type="file"]'), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => {
+      const latest = rendererHarness.updateStates.at(-1);
+      expect(latest.layout).toBe('xl');
+      expect(latest.colorway).toBe('third');
+      expect(latest.overrides.printItems[0]).toEqual(
+        expect.objectContaining({ id: 'player', name: 'KEEP', number: '77' }),
+      );
+      expect(latest.overrides.customTextItems[0]).toEqual(
+        expect.objectContaining({ id: 'legacy', scale: 1.0271 }),
+      );
+    });
+    expect(quoteSpy).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    quoteSpy.mockRestore();
   });
 
   it('blocks a patterned cart handoff until the production files are saved', async () => {

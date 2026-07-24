@@ -10,7 +10,9 @@ export function createDesignAssetsHandler(env) {
     if (request.method === 'GET' && url.pathname === '/api/design-assets/config') return publicConfig(env);
     if (request.method === 'POST' && url.pathname === '/api/design-assets') return uploadDesignAsset(request, env, url);
     if (request.method === 'GET' && /^\/api\/design-assets\/[\w-]+\/atlas\.png$/.test(url.pathname)) return getAtlas(url, env);
-    return env.ASSETS.fetch(request);
+    return env.ASSETS?.fetch
+      ? env.ASSETS.fetch(request)
+      : new Response('Not found', { status: 404 });
   };
 }
 

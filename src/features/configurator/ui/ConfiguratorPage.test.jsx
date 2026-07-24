@@ -92,6 +92,14 @@ describe('ConfiguratorPage', () => {
       'Artwork',
       'Extras',
     ]);
+    expect(within(navigation).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Size',
+      'Design',
+      'Fabric',
+      'Personalize',
+      'Artwork',
+      'Extras',
+    ]);
     expect(within(navigation).queryByRole('button', { name: 'Colorway' })).not.toBeInTheDocument();
     expect(within(navigation).queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
   });

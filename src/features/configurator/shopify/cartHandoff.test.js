@@ -18,6 +18,7 @@ describe('cart handoff', () => {
       context,
       quote: { customizationTotal: 68, merchandisePrice: 89, total: 157 },
       state: {
+        lighting: 'name-number',
         layout: 's',
         extras: {},
         overrides: {
@@ -78,6 +79,34 @@ describe('cart handoff', () => {
     expect(url).toContain('/cart/48039101890711:1?');
     expect(decodeProperties(url)).toMatchObject({ Size: 's', Template: '', Colors: '{}', Print: '', Extras: '', Artwork: '' });
     expect(decodeProperties(url)).not.toHaveProperty('Production Files');
+  });
+
+  it('omits legacy player defaults when the player set is disabled', () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com'
+      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
+      + '&surchargeVariantMap=%7B%228%22%3A%2249000000000008%22%7D',
+    );
+    const url = createCartUrl({
+      context,
+      quote: { customizationTotal: 8, merchandisePrice: 89, total: 97 },
+      state: {
+        lighting: 'none',
+        layout: 'm',
+        extras: {},
+        overrides: {
+          printName: 'PLAYER',
+          printNumber: '16',
+          customTextItems: [{ id: 'text-1', text: 'CHELSEA FC' }],
+          bottomPattern: { enabled: false },
+        },
+      },
+    });
+
+    expect(decodeProperties(url)).toMatchObject({
+      Print: '',
+      'Custom Text': 'CHELSEA FC',
+    });
   });
 
   it('requires a local design filename and atlas hash for an enabled bottom pattern without uploading assets', () => {

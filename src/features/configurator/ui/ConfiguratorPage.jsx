@@ -260,6 +260,7 @@ function Sidebar({ activeSection, labels, onSelect }) {
           const Icon = item.icon;
           return (
             <button
+              aria-label={item.label}
               className={activeSection === item.id ? 'active' : ''}
               key={item.id}
               onClick={() => onSelect(item.id)}

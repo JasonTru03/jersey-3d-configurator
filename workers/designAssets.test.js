@@ -53,6 +53,14 @@ describe('design asset worker', () => {
     }
   });
 
+  it('returns a normal not-found response when a missing static asset reaches a worker without an asset binding', async () => {
+    const handler = createDesignAssetsHandler(env({ ASSETS: undefined }));
+    const response = await handler(new Request('https://example.workers.dev/favicon.ico'));
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not found');
+  });
+
   it('publishes only the configured public Turnstile site key', async () => {
     const response = await createDesignAssetsHandler(env())(new Request('https://example.workers.dev/api/design-assets/config'));
     expect(await response.json()).toEqual({ turnstileSiteKey: 'public-site-key' });

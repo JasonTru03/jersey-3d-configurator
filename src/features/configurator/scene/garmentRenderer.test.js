@@ -998,6 +998,99 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('rebuilds from the cloned final garment hit when the dragged proxy center misses the mesh', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    const jersey = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'A WIDE NAME',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.018,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+        }],
+      },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:text-1');
+    const layer = renderer.printLayers.get('text:text-1');
+    layer.plane.updateMatrixWorld(true);
+    const grabPoint = layer.plane.localToWorld(new THREE.Vector3(-0.5, 0, 0));
+    const finalHit = {
+      object: jersey,
+      face: { normal: new THREE.Vector3(0, 0, 1) },
+      point: new THREE.Vector3(0.2, 0, 0),
+    };
+    renderer.pickPrint = vi.fn(() => ({ object: layer.plane, point: grabPoint }));
+    renderer.pickJersey = vi.fn(() => finalHit);
+
+    renderer.handlePointerDown(pointerEvent(100, 100));
+    renderer.handlePointerMove(pointerEvent(110, 100));
+
+    expect(layer.plane.position.x).toBeCloseTo(0.7, 6);
+    expect(renderer.activePrintDrag.latestSurface.point).not.toBe(finalHit.point);
+    expect(renderer.activePrintDrag.latestSurface.normal).not.toBe(finalHit.face.normal);
+    finalHit.point.set(99, 99, 99);
+    finalHit.face.normal.set(1, 0, 0);
+    expect(renderer.activePrintDrag.latestSurface.point.toArray()).toEqual([0.2, 0, 0]);
+    expect(renderer.activePrintDrag.latestSurface.normal.toArray()).toEqual([0, 0, 1]);
+
+    renderer.handlePointerUp();
+
+    const positions = layer.decal.geometry.getAttribute('position');
+    expect(layer.decal.visible).toBe(true);
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(positions.count).toBeGreaterThan(0);
+    expect([...positions.array].every(Number.isFinite)).toBe(true);
+    expect(onStatePatch).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
+  it('clears the latest garment hit as soon as a model switch starts', async () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'text-1', text: 'MASON' }] },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:text-1');
+    renderer.isDraggingPrint = true;
+    renderer.activePrintDrag = {
+      latestSurface: {
+        mesh: new THREE.Mesh(),
+        normal: new THREE.Vector3(0, 0, 1),
+        point: new THREE.Vector3(),
+      },
+    };
+    const pending = deferred();
+    renderer.loader = { loadAsync: vi.fn(() => pending.promise) };
+
+    const load = renderer.loadModel('next.glb');
+
+    expect(renderer.activePrintDrag).toBeNull();
+    expect(renderer.isDraggingPrint).toBe(false);
+    renderer.dispose();
+    pending.resolve({ scene: new THREE.Group() });
+    await load;
+  });
+
   it('disposes proxy and decal resources without disposing the shared texture twice', () => {
     installTextCanvasContext();
     const host = document.createElement('div');

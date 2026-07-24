@@ -23,16 +23,36 @@ export function resolvePersonalizationSurface(meshes = [], placement) {
   const origin = position.clone().addScaledVector(normal, SURFACE_RAY_OFFSET);
   const raycaster = new THREE.Raycaster(origin, normal.clone().negate());
   const hit = raycaster.intersectObjects(meshes.filter((mesh) => mesh?.isMesh), false)[0];
-  if (!hit?.face || !hit.object?.isMesh) return null;
+  return getPersonalizationSurfaceFromIntersection(hit);
+}
 
+export function getPersonalizationSurfaceFromIntersection(hit) {
+  if (!hit?.object?.isMesh || !hit.face || !hit.point) return null;
+  const point = finiteVector(hit.point);
+  const faceNormal = finiteVector(hit.face.normal);
+  if (!point || !faceNormal || faceNormal.lengthSq() === 0) return null;
   const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
-  const surfaceNormal = hit.face.normal.clone().applyMatrix3(normalMatrix);
-  if (!surfaceNormal.toArray().every(Number.isFinite) || surfaceNormal.lengthSq() === 0) return null;
-
+  const normal = faceNormal.applyMatrix3(normalMatrix);
+  if (!normal.toArray().every(Number.isFinite) || normal.lengthSq() === 0) return null;
   return {
     mesh: hit.object,
-    point: hit.point.clone(),
-    normal: surfaceNormal.normalize(),
+    point,
+    normal: normal.normalize(),
+  };
+}
+
+export function projectPersonalizationCenterOntoSurface(surface, centerValue) {
+  const center = finiteVector(centerValue);
+  const point = finiteVector(surface?.point);
+  const normal = finiteVector(surface?.normal);
+  if (!surface?.mesh?.isMesh || !center || !point || !normal || normal.lengthSq() === 0) {
+    return null;
+  }
+  normal.normalize();
+  return {
+    mesh: surface.mesh,
+    normal,
+    point: center.addScaledVector(normal, -center.clone().sub(point).dot(normal)),
   };
 }
 

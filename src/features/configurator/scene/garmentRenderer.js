@@ -16,6 +16,8 @@ import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTex
 import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
   createPersonalizationDecalGeometry,
+  getPersonalizationSurfaceFromIntersection,
+  projectPersonalizationCenterOntoSurface,
   resolvePersonalizationSurface,
 } from './personalizationDecal.js';
 
@@ -284,6 +286,13 @@ export class GarmentRenderer {
   }
 
   async loadModel(modelUrl) {
+    if (this.isDraggingPrint) {
+      this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
+    }
+    this.pendingPrintDrag = null;
+    this.activePrintDrag = null;
+    this.isDraggingPrint = false;
+    this.controls.enabled = true;
     const loadToken = Symbol(modelUrl);
     this.loadToken = loadToken;
     this.bottomPatternRequest = Symbol('model-loading-bottom-pattern');
@@ -704,9 +713,15 @@ export class GarmentRenderer {
     plane.userData.rotation = item.rotation ?? 0;
   }
 
-  syncPersonalizationDecal(layer, item, placement = item.placement ?? DEFAULT_PRINT_POSITION) {
+  syncPersonalizationDecal(
+    layer,
+    item,
+    placement = item.placement ?? DEFAULT_PRINT_POSITION,
+    preferredSurface = null,
+  ) {
     if (!layer || !item) return false;
-    const surface = resolvePersonalizationSurface(this.decorationMeshes, placement);
+    const surface = preferredSurface
+      ?? resolvePersonalizationSurface(this.decorationMeshes, placement);
     if (!surface) {
       layer.plane.material.opacity = 1;
       layer.decal.visible = false;
@@ -748,7 +763,7 @@ export class GarmentRenderer {
     return true;
   }
 
-  setPrintLayerDragging(layer, dragging) {
+  setPrintLayerDragging(layer, dragging, preferredSurface = null) {
     if (!layer) return;
     if (dragging) {
       layer.plane.material.opacity = 1;
@@ -760,7 +775,12 @@ export class GarmentRenderer {
       layer.plane.userData.personalizationKey,
     );
     if (!item) return;
-    this.syncPersonalizationDecal(layer, item, this.getPrintPlanePlacement(layer.plane));
+    this.syncPersonalizationDecal(
+      layer,
+      item,
+      this.getPrintPlanePlacement(layer.plane),
+      preferredSurface,
+    );
   }
 
   getPrintPlanePlacement(plane) {
@@ -853,6 +873,10 @@ export class GarmentRenderer {
     const hit = this.pickJersey(event);
     if (!hit) return;
     event.preventDefault();
+    const latestSurface = getPersonalizationSurfaceFromIntersection(hit);
+    if (latestSurface) {
+      this.activePrintDrag = { ...this.activePrintDrag, latestSurface };
+    }
     this.placePrintAtIntersection(hit, false);
   };
 
@@ -872,7 +896,12 @@ export class GarmentRenderer {
     if (!this.isDraggingPrint) return;
     this.isDraggingPrint = false;
     this.controls.enabled = true;
-    this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
+    const activeLayer = this.printLayers.get(this.activePrintId);
+    const finalSurface = projectPersonalizationCenterOntoSurface(
+      this.activePrintDrag?.latestSurface,
+      activeLayer?.plane.position,
+    );
+    this.setPrintLayerDragging(activeLayer, false, finalSurface);
     this.emitPrintPlacement();
     this.activePrintDrag = null;
   };

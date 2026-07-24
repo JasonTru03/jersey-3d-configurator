@@ -149,6 +149,26 @@ describe('custom text texture', () => {
     });
   });
 
+  it('iteratively fits non-linear glyph measurements without crossing the padded bounds', () => {
+    const context = createRecordingContext({
+      measureText: (text, font) => {
+        const size = Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 112);
+        const nonLinearMultiplier = size < 50 ? 1.5 : 1;
+        return Array.from(text).length * 60 * size / 112 * nonLinearMultiplier;
+      },
+    });
+    makeCustomTextCanvas({ text: 'W'.repeat(24), letterSpacing: 20, outlineEnabled: true }, createCanvas(context));
+
+    const finalFont = context.calls.filter(([name]) => name === 'font').at(-1)[1];
+    const finalSize = Number(/(\d+(?:\.\d+)?)px/.exec(finalFont)[1]);
+    const finalGlyphHalfWidth = 60 * finalSize / 112 * 1.5 / 2;
+    const fillCalls = context.calls.filter(([name]) => name === 'fillText');
+    expect(fillCalls).toHaveLength(24);
+    fillCalls.forEach(([, , x]) => {
+      expect(x - finalGlyphHalfWidth - 6).toBeGreaterThanOrEqual(CUSTOM_TEXT_HORIZONTAL_PADDING);
+      expect(x + finalGlyphHalfWidth + 6).toBeLessThanOrEqual(CUSTOM_TEXT_CANVAS_WIDTH - CUSTOM_TEXT_HORIZONTAL_PADDING);
+    });
+  });
   it('rejects non-finite glyph measurements instead of drawing an invalid texture', () => {
     const context = createRecordingContext({ measureText: () => Number.NaN });
     expect(() => drawSpacedText(context, 'A', 100, 40, 5, false))

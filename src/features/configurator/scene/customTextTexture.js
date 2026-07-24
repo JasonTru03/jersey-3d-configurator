@@ -68,21 +68,35 @@ export function splitTextElements(text) {
 }
 
 function fitTextToCanvas(context, text, spacing, family) {
-  const layout = measureTextLayout(context, text, spacing);
   const outlineInset = OUTLINE_WIDTH / 2;
   const maxWidth = CUSTOM_TEXT_CANVAS_WIDTH - 2 * (CUSTOM_TEXT_HORIZONTAL_PADDING + outlineInset);
-  if (layout.totalWidth <= maxWidth) return;
+  const epsilon = 0.01;
+  let fontSize = FONT_SIZE;
+  let layout = measureTextLayout(context, text, spacing);
 
+  for (let iteration = 0; iteration < 3 && layout.totalWidth > maxWidth + epsilon; iteration += 1) {
+    fontSize = nextFittedFontSize(fontSize, layout, maxWidth);
+    context.font = fontFor(family, fontSize);
+    layout = measureTextLayout(context, text, spacing);
+  }
+
+  for (let iteration = 0; iteration < 3 && layout.totalWidth > maxWidth + epsilon; iteration += 1) {
+    fontSize = nextFittedFontSize(fontSize, layout, maxWidth) * 0.99;
+    context.font = fontFor(family, fontSize);
+    layout = measureTextLayout(context, text, spacing);
+  }
+
+  if (layout.totalWidth > maxWidth + epsilon) {
+    throw new Error('Unable to fit custom text within the canvas width.');
+  }
+}
+
+function nextFittedFontSize(fontSize, layout, maxWidth) {
   const availableGlyphWidth = maxWidth - layout.spacingWidth;
   if (!(availableGlyphWidth > 0) || !(layout.glyphWidth > 0)) {
     throw new Error('Custom text spacing exceeds the available canvas width.');
   }
-
-  context.font = fontFor(family, FONT_SIZE * Math.min(1, availableGlyphWidth / layout.glyphWidth));
-  const fittedLayout = measureTextLayout(context, text, spacing);
-  if (fittedLayout.totalWidth > maxWidth) {
-    context.font = fontFor(family, Number(/(\d+(?:\.\d+)?)px/.exec(context.font)?.[1] ?? FONT_SIZE) * maxWidth / fittedLayout.totalWidth);
-  }
+  return fontSize * Math.min(1, availableGlyphWidth / layout.glyphWidth);
 }
 
 function measureTextLayout(context, text, spacing) {

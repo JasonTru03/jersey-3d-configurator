@@ -555,7 +555,13 @@ export class GarmentRenderer {
   updatePrintLayer() {
     const printItems = this.getRenderablePrintItems();
     const keys = new Set(printItems.map((item) => item.key));
+    const selectableKeys = new Set(
+      getSelectablePersonalizationItems(this.state).map((item) => item.key),
+    );
     const activeLayerWasRemoved = this.activePrintId !== null && !keys.has(this.activePrintId);
+    const activeLayerWillBeRestored = this.activePrintId !== null
+      && keys.has(this.activePrintId)
+      && !this.printLayers.has(this.activePrintId);
     this.printLayers.forEach((layer, key) => {
       if (keys.has(key)) return;
       this.disposePrintLayerEntry(layer);
@@ -568,8 +574,11 @@ export class GarmentRenderer {
       this.activePrintDrag = null;
       this.controls.enabled = true;
       this.syncPrintAnchor();
-      if (activeLayerWasRemoved) this.activePrintId = null;
+      if (activeLayerWasRemoved && !selectableKeys.has(this.activePrintId)) {
+        this.activePrintId = null;
+      }
     }
+    if (activeLayerWillBeRestored) this.syncPrintAnchor();
   }
 
   updatePrintLayerEntry(item) {

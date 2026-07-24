@@ -975,6 +975,7 @@ describe('garment decoration mesh selection', () => {
         lighting: 'none',
         overrides: { customTextItems: [{ id: 'active', text: '   ' }] },
       },
+      expectedActiveKey: 'text:active',
       remainingKeys: [],
     },
     {
@@ -994,6 +995,7 @@ describe('garment decoration mesh selection', () => {
           customTextItems: [{ id: 'other', text: 'OTHER' }],
         },
       },
+      expectedActiveKey: null,
       remainingKeys: ['text:other'],
     },
     {
@@ -1012,10 +1014,12 @@ describe('garment decoration mesh selection', () => {
         lighting: 'none',
         overrides: { customTextItems: [{ id: 'other', text: 'OTHER' }] },
       },
+      expectedActiveKey: null,
       remainingKeys: ['text:other'],
     },
   ])('cancels an active drag without writing when $name', ({
     activeKey,
+    expectedActiveKey,
     initialState,
     nextState,
     remainingKeys,
@@ -1040,13 +1044,77 @@ describe('garment decoration mesh selection', () => {
     renderer.handlePointerUp();
 
     expect([...renderer.printLayers.keys()]).toEqual(remainingKeys);
-    expect(renderer.activePrintId).toBeNull();
+    expect(renderer.activePrintId).toBe(expectedActiveKey);
     expect(renderer.pendingPrintDrag).toBeNull();
     expect(renderer.activePrintDrag).toBeNull();
     expect(renderer.isDraggingPrint).toBe(false);
     expect(renderer.controls.enabled).toBe(true);
     expect(onPrintAnchorChange).toHaveBeenLastCalledWith({ visible: false });
     expect(onStatePatch).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it('restores a blanked active text layer without switching to another rendered item', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({
+      bottom: 600,
+      height: 600,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    });
+    document.body.append(host);
+    const onPrintAnchorChange = vi.fn();
+    const renderer = new GarmentRenderer(host, { onPrintAnchorChange });
+    const makeState = (text) => ({
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{
+          id: 'player',
+          name: 'PLAYER',
+          number: '16',
+          placement: { x: -0.45, y: 0.36, z: 0.5 },
+        }],
+        customTextItems: [{
+          id: 'active',
+          text,
+          placement: { x: 0.45, y: 0.36, z: 0.5 },
+        }],
+      },
+    });
+    renderer.state = makeState('MASON');
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:active');
+    const originalTextPlane = renderer.printPlane;
+
+    renderer.pendingPrintDrag = { x: 1, y: 1 };
+    renderer.isDraggingPrint = true;
+    renderer.controls.enabled = false;
+    renderer.state = makeState('   ');
+    renderer.updatePrintLayer();
+
+    expect([...renderer.printLayers.keys()]).toEqual(['player:player']);
+    expect(renderer.activePrintId).toBe('text:active');
+    expect(renderer.printPlane).toBeNull();
+    expect(renderer.isDraggingPrint).toBe(false);
+    expect(renderer.controls.enabled).toBe(true);
+    expect(onPrintAnchorChange).toHaveBeenLastCalledWith({ visible: false });
+
+    renderer.state = makeState('MASON AGAIN');
+    renderer.updatePrintLayer();
+
+    const restoredTextPlane = renderer.printLayers.get('text:active').plane;
+    expect(restoredTextPlane).not.toBe(originalTextPlane);
+    expect(renderer.activePrintId).toBe('text:active');
+    expect(renderer.printPlane).toBe(restoredTextPlane);
+    expect(renderer.printPlane).not.toBe(renderer.printLayers.get('player:player').plane);
+    expect(renderer.lastPrintAnchor).toMatchObject({ visible: true });
+    expect(onPrintAnchorChange).toHaveBeenLastCalledWith(renderer.lastPrintAnchor);
     renderer.dispose();
   });
 

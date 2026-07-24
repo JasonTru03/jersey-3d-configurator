@@ -178,7 +178,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         <div className="workspace-grid">
           <ProductStage
             artworkFocusId={artworkFocusId}
-            deletePending={personalizationDeletion.deletePending}
             onBakeProvider={(provider) => { bakeProviderRef.current = provider; }}
             onEditPersonalization={(id) => {
               setSelectedPersonalizationKey(id);
@@ -188,6 +187,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             onPersonalizationSelect={setSelectedPersonalizationKey}
             onStatePatch={updateState}
             personalizationFocusId={selectedPersonalizationKey}
+            personalizationMutationDisabled={personalizationDeletion.deletePending}
             product={product}
             state={state}
             selected={selected}

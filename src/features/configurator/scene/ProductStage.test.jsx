@@ -3,7 +3,13 @@ import { StrictMode, useState } from 'react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductStage } from './ProductStage.jsx';
 
-const rendererHarness = vi.hoisted(() => ({ activePrintId: null, focusedDecorationId: null, options: null, updateArgs: null }));
+const rendererHarness = vi.hoisted(() => ({
+  activePrintId: null,
+  focusedDecorationId: null,
+  options: null,
+  personalizationMutationDisabled: null,
+  updateArgs: null,
+}));
 
 vi.mock('./garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -24,6 +30,10 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
 
       setActivePrintId(id) {
         rendererHarness.activePrintId = id;
+      }
+
+      setPersonalizationMutationDisabled(disabled) {
+        rendererHarness.personalizationMutationDisabled = disabled;
       }
 
       focusDecoration(id) {
@@ -50,6 +60,7 @@ beforeEach(() => {
   rendererHarness.activePrintId = null;
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
+  rendererHarness.personalizationMutationDisabled = null;
   rendererHarness.updateArgs = null;
 });
 
@@ -171,10 +182,10 @@ describe('ProductStage print toolbar', () => {
   it('uses the shared deletion executor and disables the overlay while it is pending', () => {
     const onDeletePersonalization = vi.fn();
     const props = {
-      deletePending: true,
       onDeletePersonalization,
       onStatePatch: vi.fn(),
       product,
+      personalizationMutationDisabled: true,
       selected,
       state: {
         lighting: 'name-number',
@@ -184,9 +195,15 @@ describe('ProductStage print toolbar', () => {
     const { rerender } = render(<ProductStage {...props} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
-    expect(screen.getByRole('button', { name: 'Delete personalization' })).toBeDisabled();
+    expect(rendererHarness.personalizationMutationDisabled).toBe(true);
+    expect(screen.getByTitle('Orbit view')).toBeEnabled();
+    expect(screen.getAllByRole('button', { name: /personalization/i })).not.toEqual([]);
+    screen.getAllByRole('button', { name: /personalization/i }).forEach((button) => {
+      expect(button).toBeDisabled();
+    });
 
-    rerender(<ProductStage {...props} deletePending={false} />);
+    rerender(<ProductStage {...props} personalizationMutationDisabled={false} />);
+    expect(rendererHarness.personalizationMutationDisabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
 
     expect(onDeletePersonalization).toHaveBeenCalledWith(

@@ -25,13 +25,13 @@ const rendererRegistry = {
 
 export function ProductStage({
   artworkFocusId,
-  deletePending = false,
   onBakeProvider,
   onDeletePersonalization,
   onEditPersonalization,
   onPersonalizationSelect,
   onStatePatch,
   personalizationFocusId,
+  personalizationMutationDisabled = false,
   product,
   state,
   selected,
@@ -122,6 +122,7 @@ export function ProductStage({
   ]);
 
   const patchPrint = (id, patch) => {
+    if (personalizationMutationDisabled) return;
     const item = findPersonalizationItem(selectablePersonalizationItems, id);
     if (!item) return;
     if (item.itemKind === 'text') {
@@ -165,6 +166,10 @@ export function ProductStage({
   useEffect(() => {
     rendererRef.current?.setActivePrintId(activePrintId);
   }, [activePrintId]);
+
+  useEffect(() => {
+    rendererRef.current?.setPersonalizationMutationDisabled?.(personalizationMutationDisabled);
+  }, [personalizationMutationDisabled]);
 
   useEffect(() => {
     if (rendererRef.current) {
@@ -217,9 +222,10 @@ export function ProductStage({
         </div>
         <PersonalizationToolbarOverlay
           anchor={selectedPrintId === activePrintId ? printAnchor : { visible: false }}
-          deleteDisabled={deletePending}
+          personalizationMutationDisabled={personalizationMutationDisabled}
           item={findPersonalizationItem(renderablePersonalizationItems, selectedPrintId)}
           onCopy={(id) => {
+            if (personalizationMutationDisabled) return;
             const item = findPersonalizationItem(selectablePersonalizationItems, id);
             if (!item) return;
             const placement = getNextPrintPlacement(

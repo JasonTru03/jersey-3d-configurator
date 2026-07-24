@@ -730,6 +730,48 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('cancels personalization gestures and blocks placement writes while mutations are disabled', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'text-1', text: 'MASON' }] },
+    };
+    renderer.decorationMeshes = [new THREE.Mesh()];
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:text-1');
+    renderer.pendingPrintDrag = { x: 1, y: 1 };
+    renderer.activePrintDrag = { x: 1, y: 1 };
+    renderer.isDraggingPrint = true;
+    renderer.controls.enabled = false;
+
+    renderer.setPersonalizationMutationDisabled(true);
+    renderer.emitPrintPlacement();
+
+    expect(renderer.pendingPrintDrag).toBeNull();
+    expect(renderer.activePrintDrag).toBeNull();
+    expect(renderer.isDraggingPrint).toBe(false);
+    expect(renderer.controls.enabled).toBe(true);
+    expect(renderer.isPrintEditable()).toBe(false);
+    expect(onStatePatch).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it('keeps orbit interaction available instead of picking prints while mutations are disabled', () => {
+    const renderer = createPointerRenderer({
+      printHit: { object: { userData: { printId: 'text:text-1' } } },
+    });
+    renderer.setPersonalizationMutationDisabled(true);
+
+    renderer.handlePointerDown(pointerEvent(100, 100));
+
+    expect(renderer.pickPrint).not.toHaveBeenCalled();
+    expect(renderer.controls.enabled).toBe(true);
+  });
+
   it('disposes a custom text layer after its text becomes blank', () => {
     installTextCanvasContext();
     const host = document.createElement('div');

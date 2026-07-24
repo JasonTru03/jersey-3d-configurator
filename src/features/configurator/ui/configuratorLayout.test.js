@@ -77,7 +77,7 @@ describe('wide configurator viewport layout', () => {
     expect(ruleBody(css, '.print-control--rotate')).toContain('cursor: grab');
     expect(ruleBody(css, '.print-control--rotate.is-dragging')).toContain('cursor: grabbing');
     expect(ruleBody(css, '.print-control--resize')).toContain('top: calc(var(--print-top) + var(--print-height) - 22px)');
-    expect(ruleBody(css, '.print-control--delete:disabled')).toContain('cursor: not-allowed');
+    expect(ruleBody(css, '.print-control:disabled')).toContain('cursor: not-allowed');
   });
 
   it('keeps each personalization row selectable with a separate touch-sized delete action', () => {

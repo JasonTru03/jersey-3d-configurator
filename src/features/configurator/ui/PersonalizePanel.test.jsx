@@ -273,7 +273,7 @@ describe('PersonalizePanel', () => {
     const deleteBack = screen.getByRole('button', { name: 'Delete text BACK (text-2)' });
     deleteBack.focus();
     fireEvent.click(deleteBack);
-    screen.getByRole('button', { name: 'Add text' }).focus();
+    screen.getByRole('button', { name: 'Clear selection' }).focus();
 
     await act(async () => {
       updateDeferred.resolve({ ok: true });
@@ -283,7 +283,7 @@ describe('PersonalizePanel', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'BACK' })).not.toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Add text' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Clear selection' })).toHaveFocus();
   });
 
   it('serializes rapid row deletions and re-enables the remaining action after success', async () => {

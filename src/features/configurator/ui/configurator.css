@@ -299,7 +299,7 @@
   inset: auto;
 }
 
-.print-control--delete:disabled {
+.print-control:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }

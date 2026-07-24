@@ -1,15 +1,21 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ShopifyConfiguratorSection } from './ShopifyConfiguratorSection.jsx';
 
-const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null }));
+const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
 
 vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
     GarmentRenderer: class {
-      update() {}
+      constructor(host, options) {
+        rendererHarness.options = options;
+        this.onPrintAnchorChange = options.onPrintAnchorChange;
+      }
+      update() {
+        this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
+      }
       setActivePrintId() {}
       setView() {}
       focusDecoration(id) { rendererHarness.focusedDecorationId = id; }
@@ -28,6 +34,7 @@ afterAll(() => {
 
 beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
+  rendererHarness.options = null;
 });
 
 describe('ShopifyConfiguratorSection', () => {
@@ -111,6 +118,27 @@ describe('ShopifyConfiguratorSection', () => {
 
     await waitFor(() => {
       expect(rendererHarness.focusedDecorationId).toMatch(/^preset-crest-badge-/);
+    });
+  });
+
+  it('deletes the selected personalization through the Shopify 3D toolbar', async () => {
+    document.body.innerHTML = '<form action="/cart/add" method="post"><input name="id" value="47824466051223"></form><div id="mount"></div>';
+    render(
+      <ShopifyConfiguratorSection settings={{ defaultLighting: 'name-number' }} />,
+      { container: document.getElementById('mount') },
+    );
+    await screen.findByText('Customize your match jersey');
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'DELETE ME' } });
+    await waitFor(() => {
+      expect(document.querySelector('input[name="properties[Print Name]"]').value).toBe('DELETE ME');
+    });
+    act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete personalization' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Delete personalization' })).not.toBeInTheDocument();
+      expect(document.querySelector('input[name="properties[Print Name]"]').value).toBe('');
     });
   });
 });

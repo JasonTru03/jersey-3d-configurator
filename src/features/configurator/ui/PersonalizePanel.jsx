@@ -129,13 +129,13 @@ export function PersonalizePanel({
   return (
     <section aria-label="Personalize jersey" className="personalize-panel">
       <div className="personalize-actions">
-        <button aria-label="Add player set" className="soft-button" onClick={addPlayerSet} type="button">
+        <button aria-label="Add player set" className="soft-button" disabled={deletePending} onClick={addPlayerSet} type="button">
           + Player set
         </button>
         <button
           aria-label="Add text"
           className="soft-button"
-          disabled={customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS}
+          disabled={deletePending || customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS}
           onClick={addText}
           type="button"
         >
@@ -174,12 +174,14 @@ export function PersonalizePanel({
         <div className="personalize-editor">
           {selectedItem.itemKind === 'player' ? (
             <PlayerEditor
+              disabled={deletePending}
               item={selectedItem}
               overrides={state.overrides}
               updateState={updateState}
             />
           ) : (
             <TextEditor
+              disabled={deletePending}
               item={selectedItem}
               overrides={state.overrides}
               updateState={updateState}
@@ -191,7 +193,7 @@ export function PersonalizePanel({
   );
 }
 
-function PlayerEditor({ item, overrides, updateState }) {
+function PlayerEditor({ disabled, item, overrides, updateState }) {
   const printItems = getPrintItems(overrides);
   const patchPlayer = (patch) => {
     const nextItems = patchPrintItem(printItems, item.sourceId, patch);
@@ -209,6 +211,7 @@ function PlayerEditor({ item, overrides, updateState }) {
         <span>Name</span>
         <input
           aria-label="Name"
+          disabled={disabled}
           maxLength={14}
           onChange={(event) => patchPlayer({ name: event.target.value })}
           placeholder="PLAYER"
@@ -220,6 +223,7 @@ function PlayerEditor({ item, overrides, updateState }) {
         <span>Number</span>
         <input
           aria-label="Number"
+          disabled={disabled}
           inputMode="numeric"
           maxLength={2}
           onChange={(event) => patchPlayer({ number: event.target.value })}
@@ -233,7 +237,7 @@ function PlayerEditor({ item, overrides, updateState }) {
   );
 }
 
-function TextEditor({ item, overrides, updateState }) {
+function TextEditor({ disabled, item, overrides, updateState }) {
   const customTextItems = getCustomTextItems(overrides);
   const patchText = (patch) => updateState({
     overrides: {
@@ -247,6 +251,7 @@ function TextEditor({ item, overrides, updateState }) {
         <span>Text</span>
         <input
           aria-label="Text content"
+          disabled={disabled}
           maxLength={24}
           onChange={(event) => patchText({ text: event.target.value })}
           type="text"
@@ -259,6 +264,7 @@ function TextEditor({ item, overrides, updateState }) {
           {CUSTOM_TEXT_FONT_PRESETS.map((font) => (
             <button
               aria-pressed={font.id === item.fontPreset}
+              disabled={disabled}
               key={font.id}
               onClick={() => patchText({ fontPreset: font.id })}
               style={{ fontFamily: font.family }}
@@ -273,6 +279,7 @@ function TextEditor({ item, overrides, updateState }) {
         <span>Fill color</span>
         <input
           aria-label="Fill color"
+          disabled={disabled}
           onChange={(event) => patchText({ fillColor: event.target.value })}
           type="color"
           value={item.fillColor}
@@ -282,6 +289,7 @@ function TextEditor({ item, overrides, updateState }) {
         <input
           aria-label="Outline"
           checked={item.outlineEnabled}
+          disabled={disabled}
           onChange={(event) => patchText({ outlineEnabled: event.target.checked })}
           type="checkbox"
         />
@@ -291,6 +299,7 @@ function TextEditor({ item, overrides, updateState }) {
         <span>Outline color</span>
         <input
           aria-label="Outline color"
+          disabled={disabled}
           onChange={(event) => patchText({ outlineColor: event.target.value })}
           type="color"
           value={item.outlineColor}
@@ -300,6 +309,7 @@ function TextEditor({ item, overrides, updateState }) {
         <span>Letter spacing</span>
         <input
           aria-label="Letter spacing"
+          disabled={disabled}
           max="20"
           min="0"
           onChange={(event) => patchText({ letterSpacing: Number(event.target.value) })}

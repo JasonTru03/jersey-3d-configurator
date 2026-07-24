@@ -63,12 +63,19 @@ function CoordinatedDeletionHarness({ deferred, onError = vi.fn(), onUpdate = vi
           updateState={updateState}
         />
       )}
-      <PersonalizationToolbarOverlay
-        anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }}
-        deleteDisabled={deletion.deletePending}
-        item={{ id: 'text-1', key: 'text:text-1', rotation: 0, scale: 1 }}
-        onDelete={deletion.deletePersonalization}
-      />
+      <section className="stage-wrap">
+        <div className="stage-toolbar"><button type="button">Orbit view</button></div>
+        <div className="stage">
+          <PersonalizationToolbarOverlay
+            anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }}
+            item={state.overrides.customTextItems.some((item) => item.id === 'text-1')
+              ? { id: 'text-1', key: 'text:text-1', rotation: 0, scale: 1 }
+              : null}
+            onDelete={deletion.deletePersonalization}
+            personalizationMutationDisabled={deletion.deletePending}
+          />
+        </div>
+      </section>
       <output data-testid="selected-key">{selectedKey ?? ''}</output>
     </>
   );
@@ -82,6 +89,12 @@ describe('usePersonalizationDeletion coordination', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete text FRONT (text-1)' }));
 
     expect(screen.getByRole('button', { name: 'Delete personalization' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add player set' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add text' })).toBeDisabled();
+    expect(screen.getByLabelText('Text content')).toBeDisabled();
+    screen.getAllByRole('button', { name: /personalization/i })
+      .filter((button) => button.textContent !== 'Toggle panel')
+      .forEach((button) => expect(button).toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'Toggle panel' }));
     expect(screen.queryByRole('region', { name: 'Personalize jersey' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Toggle panel' }));
@@ -163,6 +176,21 @@ describe('usePersonalizationDeletion coordination', () => {
 
     await waitFor(() => expect(overlayDelete).toBeEnabled());
     expect(overlayDelete).toHaveFocus();
+  });
+
+  it('moves focus from a successfully deleted overlay item to the stable stage toolbar', async () => {
+    const deferred = createDeferred();
+    render(<CoordinatedDeletionHarness deferred={deferred} />);
+    const overlayDelete = screen.getByRole('button', { name: 'Delete personalization' });
+    overlayDelete.focus();
+    fireEvent.click(overlayDelete);
+
+    await settle(deferred, { ok: true });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Delete personalization' })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Orbit view' })).toHaveFocus();
   });
 
   it('does not publish stale state after the shared owner unmounts mid-request', async () => {

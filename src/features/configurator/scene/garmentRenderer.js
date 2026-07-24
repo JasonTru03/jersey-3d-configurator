@@ -136,6 +136,7 @@ export class GarmentRenderer {
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
+    this.personalizationMutationDisabled = false;
     this.pendingDecorationDeselect = null;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
@@ -406,6 +407,15 @@ export class GarmentRenderer {
     replacedBaseColorMaps.forEach((map) => map.dispose());
     this.printColor = appearance.colors.number;
     this.redrawPrintTexture();
+  }
+
+  setPersonalizationMutationDisabled(disabled) {
+    this.personalizationMutationDisabled = Boolean(disabled);
+    if (!this.personalizationMutationDisabled) return;
+    this.pendingPrintDrag = null;
+    this.activePrintDrag = null;
+    this.isDraggingPrint = false;
+    this.controls.enabled = true;
   }
 
   async updateBottomPattern() {
@@ -680,7 +690,7 @@ export class GarmentRenderer {
   }
 
   handlePointerDown = (event) => {
-    const printHit = this.pickPrint(event);
+    const printHit = this.personalizationMutationDisabled ? null : this.pickPrint(event);
     const handledDecoration = !printHit && this.decorationEditor?.handlePointerDown(event);
     const action = getPrintPointerDownAction({ hasPrintHit: Boolean(printHit), handledDecoration: Boolean(handledDecoration) });
     if (action === 'select-print') {
@@ -773,7 +783,9 @@ export class GarmentRenderer {
   };
 
   isPrintEditable() {
-    return this.getRenderablePrintItems().length > 0 && this.decorationMeshes.length > 0;
+    return !this.personalizationMutationDisabled
+      && this.getRenderablePrintItems().length > 0
+      && this.decorationMeshes.length > 0;
   }
 
   pickJersey(event) {
@@ -823,6 +835,7 @@ export class GarmentRenderer {
   }
 
   emitPrintPlacement() {
+    if (this.personalizationMutationDisabled) return;
     const printPlane = this.printPlane;
     if (!printPlane || !this.onStatePatch) return;
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(printPlane.quaternion).normalize();

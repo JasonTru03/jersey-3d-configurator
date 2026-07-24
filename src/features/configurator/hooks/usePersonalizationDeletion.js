@@ -37,7 +37,7 @@ export function usePersonalizationDeletion({
     setDeletePending(true);
     options.onStart?.();
     try {
-      const result = await current.updateState(patch);
+      const result = await current.updateState(patch, { transactional: true });
       if (result?.ok === false) {
         options.onFailure?.();
         return result;
@@ -45,6 +45,7 @@ export function usePersonalizationDeletion({
       if (mountedRef.current && latestRef.current.selectedKey === key) {
         latestRef.current.onSelectionChange?.(null);
       }
+      options.onSuccess?.();
       return result ?? { ok: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Personalization deletion failed.';

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { productApi } from '../api/productApi.js';
 import { mergeConfiguratorState } from '../config/state.js';
+import { usePersonalizationDeletion } from '../hooks/usePersonalizationDeletion.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from '../ui/DecorationPanel.jsx';
 
@@ -19,8 +20,24 @@ const defaults = {
 
 export function ShopifyConfiguratorSection({ settings = defaults }) {
   const mergedSettings = { ...defaults, ...settings };
-  const { product, quote, selected, state, updateState } = useShopifyConfigurator(mergedSettings);
+  const {
+    configurationError,
+    product,
+    quote,
+    selected,
+    state,
+    updateState,
+  } = useShopifyConfigurator(mergedSettings);
   const [artworkFocusId, setArtworkFocusId] = useState(null);
+  const [deletionError, setDeletionError] = useState('');
+  const [selectedPersonalizationKey, setSelectedPersonalizationKey] = useState(null);
+  const personalizationDeletion = usePersonalizationDeletion({
+    onError: setDeletionError,
+    onSelectionChange: setSelectedPersonalizationKey,
+    selectedKey: selectedPersonalizationKey,
+    state,
+    updateState,
+  });
 
   useEffect(() => {
     if (!product || !selected || !state) return;
@@ -42,11 +59,18 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
         <h2>{mergedSettings.heading}</h2>
         <p>{mergedSettings.subheading}</p>
       </div>
+      {(deletionError || configurationError) && (
+        <p className="pc3d-error" role="alert">{deletionError || configurationError}</p>
+      )}
 
       <div className="pc3d-layout">
         <ProductStage
           artworkFocusId={artworkFocusId}
+          onDeletePersonalization={personalizationDeletion.deletePersonalization}
+          onPersonalizationSelect={setSelectedPersonalizationKey}
           onStatePatch={updateState}
+          personalizationFocusId={selectedPersonalizationKey}
+          personalizationMutationDisabled={personalizationDeletion.deletePending}
           product={product}
           state={state}
           selected={selected}
@@ -70,13 +94,18 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
             onSelect={(material) => updateState({ material })}
           />
           <OptionGroup
+            disabled={personalizationDeletion.deletePending}
             label={product.optionLabels?.lighting ?? 'Print'}
             options={product.options.lighting}
             selectedId={state.lighting}
             onSelect={(lighting) => updateState({ lighting })}
           />
           {state.lighting !== 'none' && (
-            <PrintFields overrides={state.overrides} updateState={updateState} />
+            <PrintFields
+              disabled={personalizationDeletion.deletePending}
+              overrides={state.overrides}
+              updateState={updateState}
+            />
           )}
           <section className="pc3d-group">
             <h3>Artwork</h3>
@@ -94,6 +123,7 @@ function useShopifyConfigurator(settings) {
   const [product, setProduct] = useState(null);
   const [state, setState] = useState(null);
   const [quote, setQuote] = useState(null);
+  const [configurationError, setConfigurationError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -130,11 +160,21 @@ function useShopifyConfigurator(settings) {
     settings.modelUrl,
   ]);
 
-  const updateState = async (patch) => {
-    if (!product || !state) return;
+  const updateState = async (patch, { transactional = false } = {}) => {
+    if (!product || !state) return { message: 'The configurator is still loading.', ok: false };
     const nextState = mergeConfiguratorState(state, patch);
-    setState(nextState);
-    setQuote(await productApi.quoteConfiguration(product.id, nextState));
+    try {
+      if (!transactional) setState(nextState);
+      const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
+      if (transactional) setState(nextState);
+      setQuote(nextQuote);
+      setConfigurationError('');
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Configuration update failed.';
+      setConfigurationError(message);
+      return { message, ok: false };
+    }
   };
 
   const selected = useMemo(() => {
@@ -148,10 +188,10 @@ function useShopifyConfigurator(settings) {
     };
   }, [product, state]);
 
-  return { product, quote, selected, state, updateState };
+  return { configurationError, product, quote, selected, state, updateState };
 }
 
-function OptionGroup({ label, options, selectedId, onSelect }) {
+function OptionGroup({ disabled = false, label, options, selectedId, onSelect }) {
   return (
     <section className="pc3d-group">
       <h3>{label}</h3>
@@ -160,6 +200,7 @@ function OptionGroup({ label, options, selectedId, onSelect }) {
           <button
             aria-pressed={selectedId === option.id}
             className={selectedId === option.id ? 'pc3d-option active' : 'pc3d-option'}
+            disabled={disabled}
             key={option.id}
             onClick={() => onSelect(option.id)}
             type="button"
@@ -233,7 +274,7 @@ function ExtrasGroup({ extras, state, updateState }) {
   );
 }
 
-function PrintFields({ overrides, updateState }) {
+function PrintFields({ disabled, overrides, updateState }) {
   return (
     <section className="pc3d-group pc3d-print-fields">
       <h3>Personalization</h3>
@@ -242,6 +283,7 @@ function PrintFields({ overrides, updateState }) {
           <span>Name</span>
           <input
             maxLength={14}
+            disabled={disabled}
             onChange={(event) => updateState({ overrides: { printName: event.target.value } })}
             placeholder="PLAYER"
             type="text"
@@ -252,6 +294,7 @@ function PrintFields({ overrides, updateState }) {
           <span>Number</span>
           <input
             inputMode="numeric"
+            disabled={disabled}
             maxLength={2}
             onChange={(event) => updateState({ overrides: { printNumber: event.target.value } })}
             placeholder="16"

@@ -56,7 +56,9 @@ export function PersonalizationToolbarOverlay({
   onEdit,
   onRotate,
   onScale,
+  personalizationMutationDisabled,
 }) {
+  const mutationDisabled = personalizationMutationDisabled ?? deleteDisabled;
   const overlayRef = useRef(null);
   const deleteFocusRef = useRef(null);
   const resizeStart = useRef(null);
@@ -76,11 +78,11 @@ export function PersonalizationToolbarOverlay({
     releaseGesturePointer(resizeGesture);
     setFrozenDockLayout(null);
     setIsRotating(false);
-  }, [anchorVisible, itemKey]);
+  }, [anchorVisible, itemKey, mutationDisabled]);
 
   useEffect(() => {
     const pending = deleteFocusRef.current;
-    if (deleteDisabled || !pending?.failed || typeof document === 'undefined') return;
+    if (mutationDisabled || !pending?.failed || typeof document === 'undefined') return;
     deleteFocusRef.current = null;
     const activeElement = document.activeElement;
     if (
@@ -90,7 +92,7 @@ export function PersonalizationToolbarOverlay({
     ) {
       pending.trigger.focus();
     }
-  }, [deleteDisabled]);
+  }, [mutationDisabled]);
 
   useLayoutEffect(() => {
     const overlay = overlayRef.current;
@@ -131,7 +133,7 @@ export function PersonalizationToolbarOverlay({
   };
 
   const startResize = (event) => {
-    if (!onScale || resizeStart.current || rotationStart.current) return;
+    if (mutationDisabled || !onScale || resizeStart.current || rotationStart.current) return;
     const { centerX, centerY } = getAnchorCenter(anchor);
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -148,7 +150,7 @@ export function PersonalizationToolbarOverlay({
 
   const resize = (event) => {
     const start = resizeStart.current;
-    if (!start || start.pointerId !== event.pointerId || start.itemKey !== itemKey || !onScale) return;
+    if (mutationDisabled || !start || start.pointerId !== event.pointerId || start.itemKey !== itemKey || !onScale) return;
     event.preventDefault();
     onScale(start.itemKey, getResizeScale(start, event.clientX, event.clientY));
   };
@@ -156,7 +158,8 @@ export function PersonalizationToolbarOverlay({
   const applyRotationPoint = (event) => {
     const start = rotationStart.current;
     if (
-      !start
+      mutationDisabled
+      || !start
       || start.pointerId !== event.pointerId
       || start.itemKey !== itemKey
       || (start.lastClientX === event.clientX && start.lastClientY === event.clientY)
@@ -198,7 +201,7 @@ export function PersonalizationToolbarOverlay({
   };
 
   const startRotation = (event) => {
-    if (rotationStart.current || resizeStart.current) return;
+    if (mutationDisabled || rotationStart.current || resizeStart.current) return;
     const { centerX, centerY } = getAnchorCenter(anchor);
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -228,7 +231,7 @@ export function PersonalizationToolbarOverlay({
   };
 
   const rotateWithKeyboard = (event) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (mutationDisabled || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
     event.preventDefault();
     const direction = event.key === 'ArrowRight' ? -1 : 1;
     onRotate?.(itemKey, normalizeRotation((item.rotation ?? 0) + direction * KEYBOARD_ROTATION_STEP));
@@ -239,6 +242,9 @@ export function PersonalizationToolbarOverlay({
     const pendingFocus = {
       failed: false,
       hadFocus: typeof document !== 'undefined' && document.activeElement === trigger,
+      stableTarget: overlayRef.current
+        ?.closest('.stage-wrap')
+        ?.querySelector('.stage-toolbar button'),
       trigger,
     };
     onDelete?.(itemKey, {
@@ -247,6 +253,23 @@ export function PersonalizationToolbarOverlay({
       },
       onStart: () => {
         deleteFocusRef.current = pendingFocus;
+      },
+      onSuccess: () => {
+        setTimeout(() => {
+          if (typeof document === 'undefined') return;
+          const activeElement = document.activeElement;
+          if (
+            pendingFocus.hadFocus
+            && pendingFocus.stableTarget?.isConnected
+            && (
+              activeElement === pendingFocus.trigger
+              || activeElement === document.body
+              || !pendingFocus.trigger.isConnected
+            )
+          ) {
+            pendingFocus.stableTarget.focus();
+          }
+        }, 0);
       },
     });
   };
@@ -274,10 +297,11 @@ export function PersonalizationToolbarOverlay({
           '--print-dock-position-top': `${dockLayout.top}px`,
         }}
       >
-        <button aria-label="Edit personalization" className="print-control print-control--edit" onClick={() => onEdit?.(itemKey)} type="button"><Pencil size={15} /></button>
+        <button aria-label="Edit personalization" className="print-control print-control--edit" disabled={mutationDisabled} onClick={() => onEdit?.(itemKey)} type="button"><Pencil size={15} /></button>
         <button
           aria-label="Drag to rotate personalization"
           className={`print-control print-control--rotate${isRotating ? ' is-dragging' : ''}`}
+          disabled={mutationDisabled}
           onKeyDown={rotateWithKeyboard}
           onLostPointerCapture={(event) => finishRotation(event, false)}
           onPointerCancel={(event) => finishRotation(event, false)}
@@ -286,12 +310,13 @@ export function PersonalizationToolbarOverlay({
           onPointerUp={(event) => finishRotation(event, true)}
           type="button"
         ><RotateCw size={15} /></button>
-        <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" onClick={() => onCopy?.(itemKey)} type="button">×2</button>
-        <button aria-label="Delete personalization" className="print-control print-control--delete" disabled={deleteDisabled} onClick={deleteItem} type="button"><Trash2 size={15} /></button>
+        <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" disabled={mutationDisabled} onClick={() => onCopy?.(itemKey)} type="button">×2</button>
+        <button aria-label="Delete personalization" className="print-control print-control--delete" disabled={mutationDisabled} onClick={deleteItem} type="button"><Trash2 size={15} /></button>
       </div>
       <button
         aria-label="Resize personalization"
         className="print-control print-control--resize"
+        disabled={mutationDisabled}
         onLostPointerCapture={clearResize}
         onPointerCancel={clearResize}
         onPointerDown={startResize}

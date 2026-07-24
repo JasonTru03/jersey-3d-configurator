@@ -34,6 +34,8 @@ function CoordinatedDeletionHarness({ deferred, onError = vi.fn(), onUpdate = vi
     state,
     updateState,
   });
+  const selectedTextId = selectedKey?.startsWith('text:') ? selectedKey.slice('text:'.length) : null;
+  const selectedTextItem = state.overrides.customTextItems.find((item) => item.id === selectedTextId);
 
   return (
     <>
@@ -68,8 +70,8 @@ function CoordinatedDeletionHarness({ deferred, onError = vi.fn(), onUpdate = vi
         <div className="stage">
           <PersonalizationToolbarOverlay
             anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }}
-            item={state.overrides.customTextItems.some((item) => item.id === 'text-1')
-              ? { id: 'text-1', key: 'text:text-1', rotation: 0, scale: 1 }
+            item={selectedTextItem
+              ? { id: selectedTextItem.id, key: selectedKey, rotation: 0, scale: 1 }
               : null}
             onDelete={deletion.deletePersonalization}
             personalizationMutationDisabled={deletion.deletePending}
@@ -209,6 +211,25 @@ describe('usePersonalizationDeletion coordination', () => {
       expect(screen.queryByRole('button', { name: 'Delete personalization' })).not.toBeInTheDocument();
     });
     expect(userTarget).toHaveFocus();
+  });
+
+  it('clears list deletion focus context before a later 3D deletion', async () => {
+    const deferred = createDeferred();
+    render(<CoordinatedDeletionHarness deferred={deferred} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete text FRONT (text-1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'BACK' }));
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('text:text-2');
+    await settle(deferred, { ok: true });
+
+    const overlayDelete = await screen.findByRole('button', { name: 'Delete personalization' });
+    overlayDelete.focus();
+    fireEvent.click(overlayDelete);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Delete personalization' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Orbit view' })).toHaveFocus();
+    });
   });
 
   it('does not publish stale state after the shared owner unmounts mid-request', async () => {

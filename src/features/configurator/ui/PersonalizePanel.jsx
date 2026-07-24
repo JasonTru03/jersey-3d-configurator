@@ -53,7 +53,10 @@ export function PersonalizePanel({
   useEffect(() => {
     const pending = pendingDeleteFocusRef.current;
     if (!pending || items.some((item) => item.key === pending.itemKey)) return;
-    if (pending.wasSelected && selectedKey) return;
+    if (pending.wasSelected && selectedKey) {
+      if (selectedKey !== pending.itemKey) pendingDeleteFocusRef.current = null;
+      return;
+    }
     pendingDeleteFocusRef.current = null;
     if (!pending.hadFocus || typeof document === 'undefined') return;
 

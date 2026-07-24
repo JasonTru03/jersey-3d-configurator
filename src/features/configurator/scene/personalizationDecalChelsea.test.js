@@ -5,7 +5,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   createPersonalizationDecalGeometry,
+  getPersonalizationAlphaMask,
+  getPersonalizationUvCoverage,
   resolvePersonalizationSurface,
+  shouldUsePersonalizationDecal,
 } from './personalizationDecal.js';
 
 const DEFAULT_PLACEMENT = {
@@ -18,6 +21,7 @@ const TEXT_WIDTH = 1.05;
 const TEXT_HEIGHT = TEXT_WIDTH / 4;
 
 let garmentMeshes;
+const textAlphaMask = makeTextAlphaMask();
 
 beforeAll(async () => {
   vi.stubGlobal('createImageBitmap', async () => ({ close() {}, height: 1, width: 1 }));
@@ -46,11 +50,12 @@ afterAll(() => {
 
 describe('Chelsea personalization decal coverage', () => {
   it.each([
-    { rotation: 0, scale: 0.55 },
-    { rotation: 0, scale: 1 },
-    { rotation: 0, scale: 1.8 },
-    { rotation: 45, scale: 1 },
-  ])('covers the visible center text UVs at scale $scale and rotation $rotation', ({
+    { expectedUseDecal: true, rotation: 0, scale: 0.55 },
+    { expectedUseDecal: true, rotation: 0, scale: 1 },
+    { expectedUseDecal: false, rotation: 0, scale: 1.8 },
+    { expectedUseDecal: true, rotation: 45, scale: 1 },
+  ])('selects a complete decal or full proxy at scale $scale and rotation $rotation', ({
+    expectedUseDecal,
     rotation,
     scale,
   }) => {
@@ -71,60 +76,34 @@ describe('Chelsea personalization decal coverage', () => {
       mesh: surface.mesh,
       normal: surface.normal,
       position: surface.point,
+      surfaces: surface.surfaces,
     });
     const positions = geometry.getAttribute('position');
+    const alphaCoverage = getPersonalizationUvCoverage(geometry, textAlphaMask);
 
     expect(surface.mesh.name).toBe('Cloth_mesh_7');
     expect(surface.sampleCount).toBeGreaterThanOrEqual(3);
     expect(positions.count).toBeGreaterThan(300);
     expect([...positions.array].every(Number.isFinite)).toBe(true);
-    expect(getUvRasterCoverage(geometry, {
-      minU: 0.34,
-      maxU: 0.66,
-      minV: 0.28,
-      maxV: 0.72,
-    })).toBeGreaterThan(0.82);
+    expect(shouldUsePersonalizationDecal(geometry, textAlphaMask)).toBe(expectedUseDecal);
+    if (expectedUseDecal) expect(alphaCoverage).toBeGreaterThanOrEqual(0.985);
+    else expect(alphaCoverage).toBeLessThan(0.985);
     geometry.dispose();
   });
 });
 
-function getUvRasterCoverage(geometry, region) {
-  const uv = geometry.getAttribute('uv');
-  const columns = 24;
-  const rows = 10;
-  let covered = 0;
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const point = {
-        x: THREE.MathUtils.lerp(region.minU, region.maxU, (column + 0.5) / columns),
-        y: THREE.MathUtils.lerp(region.minV, region.maxV, (row + 0.5) / rows),
-      };
-      if (uvContainsPoint(uv, point)) covered += 1;
-    }
+function makeTextAlphaMask() {
+  const width = 128;
+  const height = 32;
+  const alpha = new Uint8ClampedArray(width * height * 4);
+  for (let y = 6; y < 26; y += 1) {
+    for (let x = 8; x < 120; x += 1) alpha[(y * width + x) * 4 + 3] = 255;
   }
-  return covered / (columns * rows);
-}
-
-function uvContainsPoint(uv, point) {
-  const a = new THREE.Vector2();
-  const b = new THREE.Vector2();
-  const c = new THREE.Vector2();
-  for (let index = 0; index + 2 < uv.count; index += 3) {
-    a.fromBufferAttribute(uv, index);
-    b.fromBufferAttribute(uv, index + 1);
-    c.fromBufferAttribute(uv, index + 2);
-    if (pointInTriangle(point, a, b, c)) return true;
-  }
-  return false;
-}
-
-function pointInTriangle(point, a, b, c) {
-  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
-  if (Math.abs(denominator) < 0.0000001) return false;
-  const alpha = ((b.y - c.y) * (point.x - c.x) + (c.x - b.x) * (point.y - c.y))
-    / denominator;
-  const beta = ((c.y - a.y) * (point.x - c.x) + (a.x - c.x) * (point.y - c.y))
-    / denominator;
-  const gamma = 1 - alpha - beta;
-  return alpha >= -0.000001 && beta >= -0.000001 && gamma >= -0.000001;
+  return getPersonalizationAlphaMask({
+    height,
+    width,
+    getContext: () => ({
+      getImageData: () => ({ data: alpha }),
+    }),
+  }, 2);
 }

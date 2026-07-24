@@ -900,6 +900,92 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('combines adjacent garment pieces into one owned decal geometry', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const left = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.8, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    const right = left.clone();
+    left.position.x = -0.4;
+    right.position.x = 0.4;
+    left.updateMatrixWorld(true);
+    right.updateMatrixWorld(true);
+    renderer.decorationMeshes = [left, right];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.2,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+        }],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    const layer = renderer.printLayers.get('text:text-1');
+    expect(layer.decal.geometry.userData.surfaceCount).toBe(2);
+    expect(layer.decal.visible).toBe(true);
+    expect(layer.plane.material.opacity).toBe(0);
+    renderer.dispose();
+  });
+
+  it('keeps the complete textured proxy when actual alpha UV coverage is clipped', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    jersey.updateMatrixWorld(true);
+    const item = {
+      id: 'text-1',
+      text: 'A WIDE NAME',
+      placement: {
+        x: 0,
+        y: 0,
+        z: 0.2,
+        normal: { x: 0, y: 0, z: 1 },
+      },
+      rotation: 0,
+    };
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [item] },
+    };
+    renderer.updatePrintLayer();
+    const layer = renderer.printLayers.get('text:text-1');
+    const oldGeometry = layer.decal.geometry;
+    const dispose = vi.spyOn(oldGeometry, 'dispose');
+    layer.alphaMask = { samples: [new THREE.Vector2(0.05, 0.5)] };
+    renderer.state = {
+      ...renderer.state,
+      overrides: { customTextItems: [{ ...item, rotation: 1 }] },
+    };
+
+    renderer.updatePrintLayer();
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(layer.decal.geometry.getAttribute('position')).toBeUndefined();
+    expect(layer.decal.visible).toBe(false);
+    expect(layer.plane.material.opacity).toBe(1);
+    expect(layer.plane.material.map).toBe(layer.texture);
+    renderer.dispose();
+  });
+
   it('rebuilds only the decal whose rotation changes and disposes its old geometry', () => {
     installTextCanvasContext();
     const host = document.createElement('div');
@@ -999,6 +1085,51 @@ describe('garment decoration mesh selection', () => {
     renderer.state = makeState(70);
     renderer.updatePrintLayer();
     expect(layer.decal.geometry).toBe(finalGeometry);
+    renderer.dispose();
+  });
+
+  it('restores the last published rotation and clears preview state when mutations lock', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    const makeState = (rotation) => ({
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.218,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+          rotation,
+          scale: 1,
+        }],
+      },
+    });
+    renderer.decorationMeshes = [jersey];
+    renderer.state = makeState(0);
+    renderer.updatePrintLayer();
+    const layer = renderer.printLayers.get('text:text-1');
+    renderer.beginPersonalizationRotation('text:text-1');
+    renderer.state = makeState(45);
+    renderer.updatePrintLayer();
+    expect(layer.decal.visible).toBe(false);
+
+    renderer.setPersonalizationMutationDisabled(true);
+
+    expect(renderer.rotationPreviewKey).toBeNull();
+    expect(layer.plane.userData.rotation).toBe(45);
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(layer.decal.visible).toBe(true);
     renderer.dispose();
   });
 

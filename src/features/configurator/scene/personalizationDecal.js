@@ -73,24 +73,36 @@ export function resolvePersonalizationSurface(meshes = [], placement, footprint 
   });
   if (!samples.length) return null;
 
-  const meshCounts = new Map();
-  samples.forEach(({ surface }) => {
-    meshCounts.set(surface.mesh, (meshCounts.get(surface.mesh) ?? 0) + 1);
+  const samplesByMesh = new Map();
+  samples.forEach((sample) => {
+    const meshSamples = samplesByMesh.get(sample.surface.mesh) ?? [];
+    meshSamples.push(sample);
+    samplesByMesh.set(sample.surface.mesh, meshSamples);
   });
-  const selectedMesh = [...meshCounts.entries()]
-    .sort((a, b) => b[1] - a[1])[0][0];
-  const selectedSamples = samples
-    .filter(({ surface }) => surface.mesh === selectedMesh)
-    .sort((a, b) => a.distance - b.distance);
-  const primary = selectedSamples[0].surface;
-  const projected = projectPersonalizationCenterOntoSurface(primary, position);
-  const deviations = selectedSamples.map(({ surface }) => (
-    Math.abs(surface.point.clone().sub(projected.point).dot(projected.normal))
+  const surfaces = [...samplesByMesh.values()].map((meshSamples) => {
+    const sortedSamples = meshSamples.sort((a, b) => a.distance - b.distance);
+    const projected = projectPersonalizationCenterOntoSurface(
+      sortedSamples[0].surface,
+      position,
+    );
+    const deviations = sortedSamples.map(({ surface }) => (
+      Math.abs(surface.point.clone().sub(projected.point).dot(projected.normal))
+    ));
+    return {
+      ...projected,
+      depth: getAdaptiveDecalDepth(dimensions, Math.max(0, ...deviations)),
+      minimumSampleDistance: sortedSamples[0].distance,
+      sampleCount: sortedSamples.length,
+    };
+  }).sort((a, b) => (
+    a.minimumSampleDistance - b.minimumSampleDistance
+    || b.sampleCount - a.sampleCount
   ));
+  const primary = surfaces[0];
   return {
-    ...projected,
-    depth: getAdaptiveDecalDepth(dimensions, Math.max(0, ...deviations)),
-    sampleCount: selectedSamples.length,
+    ...primary,
+    sampleCount: samples.length,
+    surfaces,
   };
 }
 
@@ -148,13 +160,20 @@ export function createPersonalizationDecalGeometry({
   position,
   rotation = 0,
   scale = 1,
+  surfaces,
   width,
 }) {
-  const decalPosition = finiteVector(position);
   const numericWidth = Number(width);
   const numericHeight = Number(height);
   const numericScale = Number(scale);
-  if (!mesh?.isMesh || !decalPosition) {
+  const projectionSurfaces = Array.isArray(surfaces) && surfaces.length
+    ? surfaces
+    : [{ depth, mesh, normal, point: position }];
+  if (!projectionSurfaces.every((surface) => (
+    surface?.mesh?.isMesh
+    && finiteVector(surface.point)
+    && finiteVector(surface.normal)?.lengthSq() > 0
+  ))) {
     throw new TypeError('Personalization decal requires a mesh and finite position.');
   }
   if (![numericWidth, numericHeight, numericScale].every(Number.isFinite)
@@ -162,26 +181,40 @@ export function createPersonalizationDecalGeometry({
     throw new RangeError('Personalization decal dimensions and scale must be positive.');
   }
 
-  const orientation = getPersonalizationDecalOrientation(normal, rotation);
-  const projectionDepth = Number.isFinite(Number(depth)) && Number(depth) > 0
-    ? Math.min(MAX_DECAL_DEPTH, Math.max(MIN_DECAL_DEPTH, Number(depth)))
-    : getAdaptiveDecalDepth({
-        height: numericHeight * numericScale,
-        width: numericWidth * numericScale,
-      }, 0);
-  const rawGeometry = new DecalGeometry(
-    mesh,
-    decalPosition,
-    new THREE.Euler().setFromQuaternion(orientation),
-    new THREE.Vector3(
-      numericWidth * numericScale,
-      numericHeight * numericScale,
-      projectionDepth,
-    ),
+  const geometries = projectionSurfaces.map((surface) => {
+    const surfaceNormal = finiteVector(surface.normal).normalize();
+    const orientation = getPersonalizationDecalOrientation(surfaceNormal, rotation);
+    const projectionDepth = Number.isFinite(Number(surface.depth)) && Number(surface.depth) > 0
+      ? Math.min(MAX_DECAL_DEPTH, Math.max(MIN_DECAL_DEPTH, Number(surface.depth)))
+      : getAdaptiveDecalDepth({
+          height: numericHeight * numericScale,
+          width: numericWidth * numericScale,
+        }, 0);
+    const rawGeometry = new DecalGeometry(
+      surface.mesh,
+      finiteVector(surface.point),
+      new THREE.Euler().setFromQuaternion(orientation),
+      new THREE.Vector3(
+        numericWidth * numericScale,
+        numericHeight * numericScale,
+        projectionDepth,
+      ),
+    );
+    const geometry = filterFacingDecalTriangles(
+      rawGeometry,
+      surfaceNormal,
+      Math.sign(surface.mesh.matrixWorld.determinant()) || 1,
+    );
+    rawGeometry.dispose();
+    geometry.userData.projectionDepth = projectionDepth;
+    return geometry;
+  });
+  const geometry = mergePersonalizationDecalGeometries(geometries);
+  geometry.userData.projectionDepth = Math.max(
+    ...geometries.map((item) => item.userData.projectionDepth),
   );
-  const geometry = filterFacingDecalTriangles(rawGeometry, finiteVector(normal).normalize());
-  rawGeometry.dispose();
-  geometry.userData.projectionDepth = projectionDepth;
+  geometry.userData.surfaceCount = projectionSurfaces.length;
+  geometries.forEach((item) => item.dispose());
   return geometry;
 }
 
@@ -202,7 +235,7 @@ function getAdaptiveDecalDepth(dimensions, surfaceDeviation) {
   );
 }
 
-function filterFacingDecalTriangles(source, targetNormal) {
+function filterFacingDecalTriangles(source, targetNormal, windingSign) {
   const position = source.getAttribute('position');
   const uv = source.getAttribute('uv');
   const normal = source.getAttribute('normal');
@@ -221,7 +254,8 @@ function filterFacingDecalTriangles(source, targetNormal) {
     c.fromBufferAttribute(position, index + 2);
     faceNormal.subVectors(b, a).cross(edge.subVectors(c, a));
     if (faceNormal.lengthSq() === 0
-      || faceNormal.normalize().dot(targetNormal) < FACING_NORMAL_THRESHOLD) continue;
+      || faceNormal.normalize().multiplyScalar(windingSign).dot(targetNormal)
+        < FACING_NORMAL_THRESHOLD) continue;
     for (let vertex = index; vertex < index + 3; vertex += 1) {
       positions.push(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
       if (uv) uvs.push(uv.getX(vertex), uv.getY(vertex));
@@ -234,4 +268,113 @@ function filterFacingDecalTriangles(source, targetNormal) {
   if (uv) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   if (normal) geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   return geometry;
+}
+
+function mergePersonalizationDecalGeometries(geometries) {
+  const positions = [];
+  const uvs = [];
+  const normals = [];
+  geometries.forEach((geometry) => {
+    const position = geometry.getAttribute('position');
+    const uv = geometry.getAttribute('uv');
+    const normal = geometry.getAttribute('normal');
+    for (let index = 0; index < (position?.count ?? 0); index += 1) {
+      positions.push(position.getX(index), position.getY(index), position.getZ(index));
+      if (uv) uvs.push(uv.getX(index), uv.getY(index));
+      if (normal) normals.push(normal.getX(index), normal.getY(index), normal.getZ(index));
+    }
+  });
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  if (uvs.length) merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  if (normals.length) merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  return merged;
+}
+
+export function getPersonalizationAlphaMask(canvas, sampleStep = 4) {
+  if (!canvas?.width || !canvas?.height || typeof canvas.getContext !== 'function') return null;
+  const context = canvas.getContext('2d');
+  if (typeof context?.getImageData !== 'function') return null;
+  let imageData;
+  try {
+    imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  } catch {
+    return null;
+  }
+  const samples = [];
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = -1;
+  let maxY = -1;
+  const step = Math.max(1, Math.floor(sampleStep));
+  const sampledBlocks = new Set();
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      if (imageData.data[(y * canvas.width + x) * 4 + 3] === 0) continue;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      const block = `${Math.floor(x / step)}:${Math.floor(y / step)}`;
+      if (sampledBlocks.has(block)) continue;
+      sampledBlocks.add(block);
+      samples.push(new THREE.Vector2(
+        (x + 0.5) / canvas.width,
+        1 - (y + 0.5) / canvas.height,
+      ));
+    }
+  }
+  if (!samples.length) return null;
+  return {
+    bounds: {
+      minU: (minX + 0.5) / canvas.width,
+      maxU: (maxX + 0.5) / canvas.width,
+      minV: 1 - (maxY + 0.5) / canvas.height,
+      maxV: 1 - (minY + 0.5) / canvas.height,
+    },
+    samples,
+  };
+}
+
+export function getPersonalizationUvCoverage(geometry, alphaMask) {
+  if (!alphaMask?.samples?.length) return null;
+  const uv = geometry?.getAttribute?.('uv');
+  if (!uv?.count) return 0;
+  let covered = 0;
+  alphaMask.samples.forEach((sample) => {
+    if (uvContainsPoint(uv, sample)) covered += 1;
+  });
+  return covered / alphaMask.samples.length;
+}
+
+export function shouldUsePersonalizationDecal(
+  geometry,
+  alphaMask,
+  minimumCoverage = 0.985,
+) {
+  const position = geometry?.getAttribute?.('position');
+  if (!position?.count) return false;
+  const coverage = getPersonalizationUvCoverage(geometry, alphaMask);
+  return coverage === null || coverage >= minimumCoverage;
+}
+
+function uvContainsPoint(uv, point) {
+  const a = new THREE.Vector2();
+  const b = new THREE.Vector2();
+  const c = new THREE.Vector2();
+  for (let index = 0; index + 2 < uv.count; index += 3) {
+    a.fromBufferAttribute(uv, index);
+    b.fromBufferAttribute(uv, index + 1);
+    c.fromBufferAttribute(uv, index + 2);
+    const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+    if (Math.abs(denominator) < 0.0000001) continue;
+    const alpha = ((b.y - c.y) * (point.x - c.x) + (c.x - b.x) * (point.y - c.y))
+      / denominator;
+    const beta = ((c.y - a.y) * (point.x - c.x) + (a.x - c.x) * (point.y - c.y))
+      / denominator;
+    if (alpha >= -0.000001 && beta >= -0.000001 && 1 - alpha - beta >= -0.000001) {
+      return true;
+    }
+  }
+  return false;
 }

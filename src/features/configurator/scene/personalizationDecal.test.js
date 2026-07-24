@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   createPersonalizationDecalGeometry,
   getPersonalizationDecalOrientation,
+  getPersonalizationAlphaMask,
   getPersonalizationSurfaceFromIntersection,
+  getPersonalizationUvCoverage,
   projectPersonalizationCenterOntoSurface,
   resolvePersonalizationSurface,
+  shouldUsePersonalizationDecal,
 } from './personalizationDecal.js';
 
 describe('personalization decal surface resolution', () => {
@@ -102,6 +105,131 @@ describe('personalization decal surface resolution', () => {
     expect(surface.mesh).toBe(garment);
     expect(surface.sampleCount).toBeGreaterThan(0);
     expect(surface.point.x).toBeCloseTo(0.7, 6);
+  });
+
+  it('keeps adjacent nearest garment meshes for a footprint that crosses a seam', () => {
+    const left = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    left.position.x = -0.25;
+    left.updateMatrixWorld(true);
+    const right = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    right.position.x = 0.25;
+    right.updateMatrixWorld(true);
+
+    const surface = resolvePersonalizationSurface([left, right], {
+      x: 0,
+      y: 0,
+      z: 0.018,
+      normal: { x: 0, y: 0, z: 1 },
+    }, {
+      height: 0.4,
+      rotation: 0,
+      scale: 1,
+      width: 0.8,
+    });
+    const geometry = createPersonalizationDecalGeometry({
+      height: 0.4,
+      rotation: 0,
+      scale: 1,
+      surfaces: surface.surfaces,
+      width: 0.8,
+    });
+    const positions = geometry.getAttribute('position');
+    const xValues = Array.from({ length: positions.count }, (_, index) => positions.getX(index));
+
+    expect(surface.surfaces.map(({ mesh }) => mesh)).toEqual(expect.arrayContaining([left, right]));
+    expect(geometry.userData.surfaceCount).toBe(2);
+    expect(Math.min(...xValues)).toBeLessThan(-0.3);
+    expect(Math.max(...xValues)).toBeGreaterThan(0.3);
+    geometry.dispose();
+  });
+
+  it('keeps only the nearest positive-facing mesh for overlapping front and back layers', () => {
+    const front = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    front.position.z = 0.1;
+    front.updateMatrixWorld(true);
+    const behind = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    behind.position.z = 0;
+    behind.updateMatrixWorld(true);
+
+    const surface = resolvePersonalizationSurface([behind, front], {
+      x: 0,
+      y: 0,
+      z: 0.3,
+      normal: { x: 0, y: 0, z: 1 },
+    }, {
+      height: 1,
+      scale: 1,
+      width: 1,
+    });
+
+    expect(surface.surfaces).toHaveLength(1);
+    expect(surface.surfaces[0].mesh).toBe(front);
+  });
+
+  it('keeps center and edge meshes when footprint samples are evenly split', () => {
+    const center = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    center.updateMatrixWorld(true);
+    const edge = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.4, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    edge.position.x = 0.3;
+    edge.updateMatrixWorld(true);
+
+    const surface = resolvePersonalizationSurface([edge, center], {
+      x: 0,
+      y: 0,
+      z: 0.018,
+      normal: { x: 0, y: 0, z: 1 },
+    }, {
+      height: 0.4,
+      scale: 1,
+      width: 0.8,
+    });
+
+    expect(surface.mesh).toBe(center);
+    expect(surface.surfaces.map(({ mesh }) => mesh)).toEqual(expect.arrayContaining([center, edge]));
+  });
+
+  it('does not reduce estimated projection depth when scale grows and edge samples miss', () => {
+    const garment = new THREE.Mesh(
+      new THREE.CylinderGeometry(1, 1, 3, 64),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    garment.updateMatrixWorld(true);
+    const placement = {
+      x: 1.2,
+      y: 0,
+      z: 0,
+      normal: { x: 1, y: 0, z: 0 },
+    };
+    const small = resolvePersonalizationSurface([garment], placement, {
+      height: 0.3,
+      scale: 0.8,
+      width: 0.8,
+    });
+    const large = resolvePersonalizationSurface([garment], placement, {
+      height: 0.3,
+      scale: 1.8,
+      width: 0.8,
+    });
+
+    expect(large.depth).toBeGreaterThanOrEqual(small.depth);
   });
 
   it.each([
@@ -291,6 +419,96 @@ describe('personalization decal geometry', () => {
     expect(Math.max(...zValues)).toBeCloseTo(0.2, 5);
     expect(geometry.userData.projectionDepth).toBe(1);
     geometry.dispose();
+  });
+
+  it.each([
+    [-1, 1, 1, { x: 0, y: 0, z: 1 }],
+    [1, -1, 1, { x: 0, y: 0, z: 1 }],
+    [1, 1, -1, { x: 0, y: 0, z: -1 }],
+    [-1, -1, 1, { x: 0, y: 0, z: 1 }],
+  ])('keeps facing triangles under scale [%s, %s, %s]', (x, y, z, normal) => {
+    const garment = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    garment.scale.set(x, y, z);
+    garment.updateMatrixWorld(true);
+    const geometry = createPersonalizationDecalGeometry({
+      height: 1,
+      mesh: garment,
+      normal: new THREE.Vector3(normal.x, normal.y, normal.z),
+      position: new THREE.Vector3(),
+      rotation: 0,
+      scale: 1,
+      width: 1,
+    });
+
+    expect(geometry.getAttribute('position').count).toBeGreaterThan(0);
+    geometry.dispose();
+  });
+
+  it('extracts actual alpha samples and measures their UV coverage', () => {
+    const alpha = new Uint8ClampedArray(8 * 4 * 4);
+    for (let y = 1; y <= 2; y += 1) {
+      for (let x = 2; x <= 5; x += 1) alpha[(y * 8 + x) * 4 + 3] = 255;
+    }
+    const canvas = {
+      height: 4,
+      width: 8,
+      getContext: () => ({
+        getImageData: () => ({ data: alpha }),
+      }),
+    };
+    const mask = getPersonalizationAlphaMask(canvas, 1);
+    const full = new THREE.PlaneGeometry(1, 1).toNonIndexed();
+    const partial = new THREE.BufferGeometry();
+    partial.setAttribute('position', new THREE.Float32BufferAttribute([
+      -0.5, -0.5, 0,
+      0, -0.5, 0,
+      -0.5, 0.5, 0,
+      0, -0.5, 0,
+      0, 0.5, 0,
+      -0.5, 0.5, 0,
+    ], 3));
+    partial.setAttribute('uv', new THREE.Float32BufferAttribute([
+      0, 0, 0.5, 0, 0, 1,
+      0.5, 0, 0.5, 1, 0, 1,
+    ], 2));
+
+    expect(mask.bounds).toEqual({
+      maxU: 0.6875,
+      maxV: 0.625,
+      minU: 0.3125,
+      minV: 0.375,
+    });
+    expect(getPersonalizationUvCoverage(full, mask)).toBe(1);
+    expect(getPersonalizationUvCoverage(partial, mask)).toBe(0.5);
+    expect(shouldUsePersonalizationDecal(full, mask)).toBe(true);
+    expect(shouldUsePersonalizationDecal(partial, mask)).toBe(false);
+    expect(shouldUsePersonalizationDecal(new THREE.BufferGeometry(), mask)).toBe(false);
+    full.dispose();
+    partial.dispose();
+  });
+
+  it('keeps exact alpha bounds and samples thin pixels between the sampling grid', () => {
+    const alpha = new Uint8ClampedArray(8 * 4 * 4);
+    alpha[(1 * 8 + 3) * 4 + 3] = 255;
+    alpha[(2 * 8 + 6) * 4 + 3] = 255;
+    const mask = getPersonalizationAlphaMask({
+      height: 4,
+      width: 8,
+      getContext: () => ({
+        getImageData: () => ({ data: alpha }),
+      }),
+    }, 4);
+
+    expect(mask.samples).toHaveLength(2);
+    expect(mask.bounds).toEqual({
+      maxU: 0.8125,
+      maxV: 0.625,
+      minU: 0.4375,
+      minV: 0.375,
+    });
   });
 
   it.each([

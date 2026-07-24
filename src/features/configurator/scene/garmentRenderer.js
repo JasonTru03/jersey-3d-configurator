@@ -16,9 +16,11 @@ import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTex
 import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
   createPersonalizationDecalGeometry,
+  getPersonalizationAlphaMask,
   getPersonalizationSurfaceFromIntersection,
   projectPersonalizationCenterOntoSurface,
   resolvePersonalizationSurface,
+  shouldUsePersonalizationDecal,
   supportsPersonalizationDecalMesh,
 } from './personalizationDecal.js';
 
@@ -26,6 +28,7 @@ const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
 const MIN_PRINT_COPY_DISTANCE = 0.24;
 const PRINT_DRAG_THRESHOLD = 4;
+const MIN_PERSONALIZATION_UV_COVERAGE = 0.985;
 
 export function getPrintPointerDownAction({ hasPrintHit, handledDecoration }) {
   if (hasPrintHit) return 'select-print';
@@ -646,10 +649,12 @@ export class GarmentRenderer {
       this.scene.add(decal);
       layer = {
         decal,
+        decalFallback: false,
         decalKey: null,
         decalMaterial,
         height: planeHeight,
         itemKind: item.itemKind,
+        alphaMask: getPersonalizationAlphaMask(canvas),
         material,
         plane,
         renderKey,
@@ -665,6 +670,7 @@ export class GarmentRenderer {
       }
       layer.renderKey = renderKey;
       layer.texture.needsUpdate = true;
+      layer.alphaMask = getPersonalizationAlphaMask(layer.texture.image);
     }
     this.applyStoredPrintPlacement(layer.plane, item);
     if (this.rotationPreviewKey === item.key) {
@@ -745,23 +751,28 @@ export class GarmentRenderer {
       layer.plane.material.opacity = 1;
       layer.decal.visible = false;
       layer.decalKey = null;
+      layer.decalFallback = true;
       return false;
     }
 
     const decalKey = JSON.stringify([
-      surface.mesh.uuid,
-      surface.point.x,
-      surface.point.y,
-      surface.point.z,
-      surface.normal.x,
-      surface.normal.y,
-      surface.normal.z,
+      (surface.surfaces ?? [surface]).map((entry) => [
+        entry.mesh.uuid,
+        entry.point.x,
+        entry.point.y,
+        entry.point.z,
+        entry.normal.x,
+        entry.normal.y,
+        entry.normal.z,
+        entry.depth ?? null,
+      ]),
       rotation,
       scale,
       layer.width,
       layer.height,
-      surface.depth ?? null,
+      layer.renderKey,
     ]);
+    if (layer.decalKey === decalKey && layer.decalFallback) return false;
     if (layer.decalKey !== decalKey) {
       const geometry = createPersonalizationDecalGeometry({
         depth: surface.depth,
@@ -771,11 +782,27 @@ export class GarmentRenderer {
         position: surface.point,
         rotation,
         scale,
+        surfaces: surface.surfaces,
         width: layer.width,
       });
+      if (!shouldUsePersonalizationDecal(
+        geometry,
+        layer.alphaMask,
+        MIN_PERSONALIZATION_UV_COVERAGE,
+      )) {
+        geometry.dispose();
+        layer.decal.geometry.dispose();
+        layer.decal.geometry = new THREE.BufferGeometry();
+        layer.decalKey = decalKey;
+        layer.decalFallback = true;
+        layer.plane.material.opacity = 1;
+        layer.decal.visible = false;
+        return false;
+      }
       layer.decal.geometry.dispose();
       layer.decal.geometry = geometry;
       layer.decalKey = decalKey;
+      layer.decalFallback = false;
     }
     layer.plane.material.opacity = 0;
     layer.decal.visible = true;

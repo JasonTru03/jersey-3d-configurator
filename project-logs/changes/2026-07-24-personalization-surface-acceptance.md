@@ -265,6 +265,7 @@ Chelsea 真实 GLB、同一文字 alpha mask、默认 front placement 的临界�
 - Stateful ProductStage 集成测试模拟同一 render 加载 legacy state 并立即触发 renderer normalization，确认新 `layout: xl`、`colorway: third` 与既存文字均保留。
 - App 的无 quote、无历史 normalization 改为在 `setHistory(currentHistory => ...)` 内，从 current cursor snapshot 计算 merge 结果；即使 renderer 持有较早创建的 callback，也不会用旧闭包 state 覆盖新打开的设计。
 - legacy JSON 测试刻意保留 load 之前取得的 normalization callback，并在 `loadDesignFile` 后调用；最终 XL、Third、player item 和 custom text 全部保留，quote 增量为 0，history 无新增 Undo 节点。
+- ConfiguratorPage 另以真实文件 input 执行 legacy JSON 加载：renderer 在该次 update 内立即 normalization，最终 XL、Third、player item 和 custom text 均保留；整个 load 只有一次 quote，Normalization 未追加 quote，Undo 保持禁用。
 - Shopify 使用同步 `stateRef` 作为 update baseline；每次 merge 后先更新 ref 再同步 React state，因此原生 form 对应同一个 merged result。
 
 ### 同一 render pass 批量 normalization
@@ -285,7 +286,7 @@ Chelsea 真实 GLB、同一文字 alpha mask、默认 front placement 的临界�
 - async normalization callback 使用 `await act(async () => ...)`。
 - 每轮测试仍由真实进程独立运行，没有配置 retry 或隐藏失败。
 
-修复后从第 1 轮重新执行以下目标文件压力命令，连续 10 轮全部为 `2 files / 31 tests`：
+加入真实 ConfiguratorPage 文件加载集成测试后，再从第 1 轮重新执行以下目标文件压力命令，连续 10 轮全部为 `2 files / 32 tests`：
 
 ```powershell
 for ($i = 1; $i -le 10; $i++) {
@@ -303,18 +304,18 @@ for ($i = 1; $i -le 3; $i++) {
 }
 ```
 
-三轮结果均为 `46 files / 459 tests`，全部通过。
+三轮结果均为 `46 files / 460 tests`，全部通过。
 
 ### 最终验证
 
 | 检查 | 结果 |
 | --- | --- |
 | normalization focused | 5 个文件，`128/128` 通过 |
-| App/Shopify suite-order 压力 | 连续 10 轮，每轮 `31/31` 通过 |
-| 全量测试压力 | 连续 3 轮，每轮 `459/459` 通过 |
+| App/Shopify suite-order 压力 | 连续 10 轮，每轮 `32/32` 通过 |
+| 全量测试压力 | 连续 3 轮，每轮 `460/460` 通过 |
 | App build | 通过；CSS `18.44 kB`（gzip `4.02 kB`），JS `1,024.43 kB`（gzip `286.32 kB`） |
 | Shopify bundle | 通过；`1,380.34 kB`（gzip `390.58 kB`） |
 | Wrangler dry-run | 通过；14 files，Worker upload `8.98 KiB`（gzip `2.87 KiB`），`LOCAL_PRODUCTION_FILES=true` |
-| `git diff HEAD~2..HEAD --check` | 通过 |
+| `git diff HEAD~4..HEAD --check` | 通过 |
 
 仍只有既存的大 chunk、Shopify `inlineDynamicImports` ignored 与 Wrangler proxy 提示。本轮未执行部署或推送。

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findPersonalizationItem,
+  getPersonalizationRemovalPatch,
   getRenderablePersonalizationItems,
   getSelectablePersonalizationItems,
   makePersonalizationKey,
@@ -63,5 +64,45 @@ describe('personalization item identity', () => {
         )).toBeGreaterThanOrEqual(0.24);
       });
     });
+  });
+});
+
+describe('personalization removal patches', () => {
+  const state = {
+    lighting: 'name-number',
+    overrides: {
+      printItems: [
+        { id: 'print-1', name: 'FIRST', number: '10', placement: { x: 0 } },
+        { id: 'print-2', name: 'SECOND', number: '20', placement: { x: 1 } },
+      ],
+      customTextItems: [
+        { id: 'text-1', text: 'FRONT' },
+        { id: 'text-2', text: 'BACK' },
+      ],
+    },
+  };
+
+  it('removes custom text by its composite key', () => {
+    expect(getPersonalizationRemovalPatch(state, 'text:text-1')).toEqual({
+      overrides: {
+        customTextItems: [expect.objectContaining({ id: 'text-2', text: 'BACK' })],
+      },
+    });
+  });
+
+  it('removes a player set and refreshes its legacy first-item fields', () => {
+    expect(getPersonalizationRemovalPatch(state, 'player:print-1')).toEqual({
+      overrides: {
+        printItems: [expect.objectContaining({ id: 'print-2' })],
+        printName: 'SECOND',
+        printNumber: '20',
+        printPlacement: { x: 1 },
+      },
+    });
+  });
+
+  it('returns null when the composite key is missing or malformed', () => {
+    expect(getPersonalizationRemovalPatch(state, 'text:missing')).toBeNull();
+    expect(getPersonalizationRemovalPatch(state, 'missing')).toBeNull();
   });
 });

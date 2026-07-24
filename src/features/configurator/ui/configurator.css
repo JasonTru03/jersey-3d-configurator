@@ -706,27 +706,49 @@
   outline-offset: 2px;
 }
 
-.personalize-elements button {
+.personalize-element-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
+}
+
+.personalize-elements .personalize-element-select,
+.personalize-elements .personalize-element-delete {
   width: 100%;
   min-height: 44px;
-  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  font-weight: 750;
-  text-align: left;
 }
 
-.personalize-elements button[aria-pressed='true'] {
+.personalize-elements .personalize-element-select {
+  min-width: 0;
+  padding: 10px 12px;
+  font-weight: 750;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personalize-elements .personalize-element-select[aria-pressed='true'] {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
   color: var(--accent);
 }
 
-.personalize-elements button:focus-visible,
+.personalize-element-row .personalize-element-delete {
+  display: grid;
+  padding: 0;
+  place-items: center;
+  color: var(--muted);
+}
+
+.personalize-elements .personalize-element-select:focus-visible,
+.personalize-elements .personalize-element-delete:focus-visible,
 .font-options button:focus-visible,
 .custom-text-fields input:focus-visible {
   outline: 2px solid var(--accent);

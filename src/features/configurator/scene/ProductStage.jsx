@@ -7,11 +7,11 @@ import {
   duplicateCustomTextItem,
   getCustomTextItems,
   patchCustomTextItem,
-  removeCustomTextItem,
 } from '../config/customTextItems.js';
-import { duplicatePrintItem, getPrintItems, legacyFirstItemFields, patchPrintItem, removePrintItem } from '../config/printItems.js';
+import { duplicatePrintItem, getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 import {
   findPersonalizationItem,
+  getPersonalizationRemovalPatch,
   getRenderablePersonalizationItems,
   getSelectablePersonalizationItems,
   makePersonalizationKey,
@@ -240,19 +240,14 @@ export function ProductStage({
             onPersonalizationSelect?.(copyKey);
           }}
           onDelete={(id) => {
-            const item = findPersonalizationItem(selectablePersonalizationItems, id);
-            if (!item) return;
+            const removalPatch = getPersonalizationRemovalPatch(state, id);
+            if (!removalPatch) return;
             reportedNullSelectionRef.current = id;
             setActivePrintId(null);
             setSelectedPrintId(null);
             setPrintAnchor({ visible: false });
             onPersonalizationSelect?.(null);
-            if (item.itemKind === 'text') {
-              onStatePatch({ overrides: { customTextItems: removeCustomTextItem(customTextItems, item.sourceId) } });
-            } else {
-              const nextItems = removePrintItem(printItems, item.sourceId);
-              onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
-            }
+            onStatePatch(removalPatch);
           }}
           onEdit={(id) => onEditPersonalization?.(id)}
           onRotate={(id, rotation) => patchPrint(id, { rotation })}

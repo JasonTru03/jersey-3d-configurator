@@ -78,4 +78,14 @@ describe('wide configurator viewport layout', () => {
     expect(ruleBody(css, '.print-control--rotate.is-dragging')).toContain('cursor: grabbing');
     expect(ruleBody(css, '.print-control--resize')).toContain('top: calc(var(--print-top) + var(--print-height) - 22px)');
   });
+
+  it('keeps each personalization row selectable with a separate touch-sized delete action', () => {
+    expect(ruleBody(css, '.personalize-element-row'))
+      .toContain('grid-template-columns: minmax(0, 1fr) 44px');
+    expect(css).toMatch(
+      /\.personalize-elements \.personalize-element-select,\s*\.personalize-elements \.personalize-element-delete\s*\{[^}]*min-height:\s*44px/,
+    );
+    expect(ruleBody(css, '.personalize-element-row .personalize-element-delete'))
+      .toContain('place-items: center');
+  });
 });

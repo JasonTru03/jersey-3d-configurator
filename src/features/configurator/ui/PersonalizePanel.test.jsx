@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { mergeConfiguratorState } from '../config/state.js';
@@ -118,6 +118,67 @@ describe('PersonalizePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
 
     expect(screen.getByRole('list', { name: 'Personalization elements' })).toHaveFocus();
+  });
+
+  it('deletes the selected text from its row, clears selection, and returns focus to the list', async () => {
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [
+      { id: 'text-1', text: 'FRONT' },
+      { id: 'text-2', text: 'BACK' },
+    ];
+    render(<PersonalizeHarness initialSelection="text:text-1" initialState={state} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete text FRONT (text-1)' }));
+
+    await waitFor(() => expect(screen.getByTestId('selected-key')).toBeEmptyDOMElement());
+    expect(screen.queryByRole('button', { name: 'FRONT' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'BACK' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('list', { name: 'Personalization elements' })).toHaveFocus();
+    });
+  });
+
+  it('deletes a non-selected row without changing the current selection', () => {
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [
+      { id: 'text-1', text: 'FRONT' },
+      { id: 'text-2', text: 'BACK' },
+    ];
+    render(<PersonalizeHarness initialSelection="text:text-1" initialState={state} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete text BACK (text-2)' }));
+
+    expect(screen.queryByRole('button', { name: 'BACK' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('text:text-1');
+    expect(screen.getByLabelText('Text content')).toHaveValue('FRONT');
+  });
+
+  it('deletes a player row with normalized legacy print fields', () => {
+    const onStateChange = vi.fn();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [
+      { id: 'print-1', name: 'FIRST', number: '10' },
+      { id: 'print-2', name: 'SECOND', number: '20' },
+    ];
+    render(
+      <PersonalizeHarness
+        initialSelection="player:print-2"
+        initialState={state}
+        onStateChange={onStateChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete player set FIRST · 10 (print-1)' }));
+
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('player:print-2');
+    expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      overrides: expect.objectContaining({
+        printItems: [expect.objectContaining({ id: 'print-2' })],
+        printName: 'SECOND',
+        printNumber: '20',
+      }),
+    }));
   });
 
   it('keeps state and selection unchanged at the eight-text limit', () => {

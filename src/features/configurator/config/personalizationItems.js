@@ -1,5 +1,5 @@
-import { getCustomTextItems } from './customTextItems.js';
-import { getPrintItems } from './printItems.js';
+import { getCustomTextItems, removeCustomTextItem } from './customTextItems.js';
+import { getPrintItems, legacyFirstItemFields, removePrintItem } from './printItems.js';
 
 const ITEM_KINDS = new Set(['player', 'text']);
 
@@ -26,6 +26,39 @@ export function getRenderablePersonalizationItems(state = {}) {
 
 export function findPersonalizationItem(items, key) {
   return items.find((item) => item.key === key) ?? null;
+}
+
+export function getPersonalizationRemovalPatch(state = {}, key) {
+  const separatorIndex = typeof key === 'string' ? key.indexOf(':') : -1;
+  if (separatorIndex < 1) return null;
+
+  const itemKind = key.slice(0, separatorIndex);
+  const sourceId = key.slice(separatorIndex + 1);
+  if (!sourceId) return null;
+
+  if (itemKind === 'text') {
+    const items = getCustomTextItems(state.overrides);
+    if (!items.some((item) => item.id === sourceId)) return null;
+    return {
+      overrides: {
+        customTextItems: removeCustomTextItem(items, sourceId),
+      },
+    };
+  }
+
+  if (itemKind === 'player') {
+    const items = getPrintItems(state.overrides);
+    if (!items.some((item) => item.id === sourceId)) return null;
+    const nextItems = removePrintItem(items, sourceId);
+    return {
+      overrides: {
+        printItems: nextItems,
+        ...legacyFirstItemFields(nextItems),
+      },
+    };
+  }
+
+  return null;
 }
 
 function withIdentity(itemKind, item) {

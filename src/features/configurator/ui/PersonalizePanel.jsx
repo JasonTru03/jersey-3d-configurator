@@ -1,3 +1,4 @@
+import { Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import {
   CUSTOM_TEXT_FONT_PRESETS,
@@ -9,6 +10,7 @@ import {
 } from '../config/customTextItems.js';
 import {
   findPersonalizationItem,
+  getPersonalizationRemovalPatch,
   getSelectablePersonalizationItems,
   makePersonalizationKey,
 } from '../config/personalizationItems.js';
@@ -65,6 +67,15 @@ export function PersonalizePanel({
     onSelect(makePersonalizationKey('text', item.id));
   };
 
+  const removeItem = async (event, item) => {
+    event.stopPropagation();
+    const patch = getPersonalizationRemovalPatch(state, item.key);
+    if (!patch) return;
+    const result = await updateState(patch);
+    if (result?.ok === false || item.key !== selectedKey) return;
+    onSelect(null);
+  };
+
   return (
     <section aria-label="Personalize jersey" className="personalize-panel">
       <div className="personalize-actions">
@@ -88,13 +99,22 @@ export function PersonalizePanel({
         tabIndex="-1"
       >
         {items.map((item) => (
-          <li key={item.key}>
+          <li className="personalize-element-row" key={item.key}>
             <button
               aria-pressed={item.key === selectedKey}
+              className="personalize-element-select"
               onClick={() => onSelect(item.key)}
               type="button"
             >
               {personalizationLabel(item)}
+            </button>
+            <button
+              aria-label={personalizationDeleteLabel(item)}
+              className="personalize-element-delete"
+              onClick={(event) => removeItem(event, item)}
+              type="button"
+            >
+              <Trash2 aria-hidden="true" size={16} />
             </button>
           </li>
         ))}
@@ -243,4 +263,9 @@ function TextEditor({ item, overrides, updateState }) {
 function personalizationLabel(item) {
   if (item.itemKind === 'text') return item.text.trim() || 'Empty text';
   return [item.name.trim(), item.number.trim()].filter(Boolean).join(' · ') || 'Player set';
+}
+
+function personalizationDeleteLabel(item) {
+  const type = item.itemKind === 'text' ? 'text' : 'player set';
+  return `Delete ${type} ${personalizationLabel(item)} (${item.sourceId})`;
 }

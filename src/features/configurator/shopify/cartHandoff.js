@@ -2,6 +2,7 @@ import {
   getBillableCustomTextItems,
   getCustomTextItems,
 } from '../config/customTextItems.js';
+import { getPrintItems } from '../config/printItems.js';
 
 const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 const EXPIRED_PRICING_MESSAGE = 'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.';
@@ -177,9 +178,10 @@ function parseVariantMap(rawVariantMap) {
 
 function createProperties(state, productionFiles) {
   const appearance = state?.overrides?.appearance ?? {};
-  const hasPlayerSet = state?.lighting && state.lighting !== 'none';
-  const print = hasPlayerSet && (state?.overrides?.printName || state?.overrides?.printNumber)
-    ? `${state.overrides.printName ?? ''}${state.overrides.printNumber ? ` #${state.overrides.printNumber}` : ''}`.trim()
+  const hasPlayerSet = state?.lighting === 'name-number' || state?.lighting === 'raised-print';
+  const player = hasPlayerSet ? getPrintItems(state?.overrides)[0] : null;
+  const print = player && (player.name || player.number)
+    ? `${player.name ?? ''}${player.number ? ` #${player.number}` : ''}`.trim()
     : '';
   const customText = getBillableCustomTextItems(
     getCustomTextItems(state?.overrides),

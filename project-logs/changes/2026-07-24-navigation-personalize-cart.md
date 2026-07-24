@@ -41,12 +41,18 @@
 
 复现：默认 state 保留旧 `PLAYER / 16` 字段，Review 显示 Player set 为 None，但生成的 cart properties 曾出现 `Print: PLAYER #16`。
 
-处理：`cartHandoff.js` 仅在 `state.lighting` 启用 player set 时生成 Print 属性。
+处理：
+
+- 仅 `name-number` 与 `raised-print` 两个 lighting 值启用 Print；`none` 和未知值均为空。
+- Print 以 `getPrintItems(state.overrides)` 返回的第一项为唯一 normalized 真源。
+- legacy 字段仅通过 `getPrintItems` 的兼容回退读取；显式 `printItems` 数组优先，包括用于压住 stale legacy 的空数组。
 
 TDD：
 
 - 红：`cartHandoff.test.js` 21 项中 1 项失败，实际值为 `PLAYER #16`。
 - 绿：21/21 通过，最终 local URL 解码结果为 `Print: ""`、`Custom Text: "CHELSEA FC"`。
+- 质量复审红：23 项中 2 项失败，分别证明 raised-print 仍读取 stale legacy、未知 lighting 仍输出 legacy。
+- 质量复审绿：23/23 通过，并覆盖 none + stale legacy、name-number + legacy-only、raised-print + normalized printItems、bogus + legacy、显式空 `printItems` + stale legacy。
 
 ### 移动端图标菜单缺少可访问名称
 
@@ -77,13 +83,13 @@ TDD：
 
 | 验证 | 结果 |
 | --- | --- |
-| `npm test -- --run` | 41 files，330 tests，全部通过 |
+| `npm test -- --run` | 41 files，332 tests，全部通过 |
 | `npm run build` | app 与 Shopify bundle 均 exit 0 |
-| App asset | `index-BnOtTodz.js` 997.97 kB，gzip 278.76 kB |
+| App asset | `index-BfBRt4zi.js` 997.95 kB，gzip 278.76 kB |
 | App CSS | `index-DNjnujNy.css` 16.96 kB，gzip 3.79 kB |
 | Shopify bundle | 1,355.38 kB，gzip 383.66 kB |
 | `npx wrangler deploy --dry-run` | Wrangler 4.114.0，14 assets，8.98 KiB / gzip 2.87 KiB，exit 0 |
-| `git diff --check` | exit 0 |
+| `git diff --check 89ae7a0..HEAD` | exit 0 |
 
 构建仍显示既有的大 chunk 提示与 Shopify `inlineDynamicImports` 提示；两项均未改变 exit code。
 
@@ -217,4 +223,3 @@ Task 9 仍需：
 - 真实 cart 验证 `$97` 与 `$62 = $50 + $12`；
 - 在已开启 Chrome file URL 权限的会话或人工操作中复验 Open design 和原生颜色选择器；
 - 停在 checkout 之前，不创建订单。
-

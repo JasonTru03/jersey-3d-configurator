@@ -18,7 +18,7 @@ describe('cart handoff', () => {
       context,
       quote: { customizationTotal: 68, merchandisePrice: 89, total: 157 },
       state: {
-        lighting: 'name-number',
+        lighting: 'raised-print',
         layout: 's',
         extras: {},
         overrides: {
@@ -35,6 +35,7 @@ describe('cart handoff', () => {
           },
           printName: 'PLAYER',
           printNumber: '10',
+          printItems: [{ id: 'print-1', name: 'CAPTAIN', number: '9' }],
           customTextItems: [
             { id: 'text-1', text: '  CHELSEA FC  ' },
             { id: 'text-2', text: '   ' },
@@ -57,7 +58,7 @@ describe('cart handoff', () => {
       Size: 's',
       Template: 'solid',
       Colors: JSON.stringify({ body: '#fff', sleeves: '#fff', shoulderSide: '#111', collar: '#111', pattern: '#d8c17a', number: '#111' }),
-      Print: 'PLAYER #10',
+      Print: 'CAPTAIN #9',
       'Custom Text': 'CHELSEA FC | LONDON',
       Extras: '',
       Artwork: '',
@@ -107,6 +108,55 @@ describe('cart handoff', () => {
       Print: '',
       'Custom Text': 'CHELSEA FC',
     });
+  });
+
+  it('uses the normalized legacy fallback when name-number is enabled without printItems', () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com'
+      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
+      + '&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%7D',
+    );
+    const url = createCartUrl({
+      context,
+      quote: { customizationTotal: 18, merchandisePrice: 89, total: 107 },
+      state: {
+        lighting: 'name-number',
+        layout: 'm',
+        extras: {},
+        overrides: {
+          printName: 'PLAYER',
+          printNumber: '16',
+          bottomPattern: { enabled: false },
+        },
+      },
+    });
+
+    expect(decodeProperties(url)).toMatchObject({ Print: 'PLAYER #16' });
+  });
+
+  it('omits legacy player fields for unknown lighting and explicit empty printItems', () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com'
+      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D',
+    );
+    const createUrl = (lighting, overrides) => createCartUrl({
+      context,
+      quote: { customizationTotal: 0, merchandisePrice: 89, total: 89 },
+      state: {
+        lighting,
+        layout: 'm',
+        extras: {},
+        overrides: {
+          printName: 'STALE',
+          printNumber: '99',
+          bottomPattern: { enabled: false },
+          ...overrides,
+        },
+      },
+    });
+
+    expect(decodeProperties(createUrl('bogus')).Print).toBe('');
+    expect(decodeProperties(createUrl('raised-print', { printItems: [] })).Print).toBe('');
   });
 
   it('requires a local design filename and atlas hash for an enabled bottom pattern without uploading assets', () => {

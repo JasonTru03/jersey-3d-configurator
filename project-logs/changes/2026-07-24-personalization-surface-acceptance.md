@@ -161,3 +161,49 @@ Shopify cart 实际结果：
 - 未做浏览器 GPU heap 长时采样；已有 10 次 DOM/价格/画布稳定性证据和自动化 dispose 证据。
 - 移动端本身采用纵向页面流；桌面“首屏无主页面滚动、右侧独立滚动”已通过。
 - 本轮尚未部署新的 Cloudflare Worker，生产仍保持上一版本。
+
+## 最终整合复核（`ea10e7b..a9592b8`）
+
+### 可打印区域约束
+
+- 旧行为中 `scale: 1.8` 超出球衣可打印区域时会进入完整 flat proxy；该结论现已失效。当前最终静态状态会约束为完整贴合的 decal，不再用悬浮平面掩盖越界。
+- Chelsea GLB、默认位置、`rotation: 0` 的真实几何测试中，`scale: 1.8` 被约束为 `1.067578125`；缩放搜索要求文字 alpha 覆盖的 UV 命中率至少为 `0.985`。
+- renderer 从 `0.55` 到用户请求值二分搜索当前表面、位置、旋转和文字 alpha 形状下的最大有效缩放，并同步选择平面、控制框和持久化状态。
+- 约束后的状态 patch 使用 pending signature 去重；父状态读回前不会逐帧重复写入。
+- 拖动到无有效贴合解的位置时恢复该图层上一次有效状态；不支持投射的表面、加载中状态、skinned surface 和手势预览仍保留原有 fallback。
+- 最大缩放不是全局固定数值，会随表面、位置、旋转及文字 alpha 轮廓变化；当前通过实时物理约束与状态回写保持画面、控制框和保存数据一致。
+
+### App 与 Shopify 共用控制栏 CSS
+
+- `personalization-controls.css` 作为控制栏唯一源文件，由 App 直接 import，并由 Shopify CSS 导出脚本显式拼接。
+- 生成 CSS 自动化覆盖 overlay、frame、dock、五个 44px 控件、rotate/drag/resize、disabled、窄容器布局和 Shopify 变量 fallback。
+- App 桌面实测：视口与文档均为 `1908 × 942`，主页面无溢出；stage 为 `1222 × 832`，五个控件均为 `44 × 44`，旋转控件 `cursor: grab`、`touch-action: none`。
+- App 移动端 `390 × 844` 实测：文档宽 `375`，stage 宽 `358`，dock 间距由 container query 收紧为 `2px`，五个控件均为 `44 × 44` 且完整位于 stage 内。
+- Shopify fixture 桌面/移动实测已渲染真实 Shopify entry；计算样式读取到 `--pc3d-line: #dfd9cf`、`--pc3d-panel: #ffffff`、`--pc3d-accent: #1f6e5e`，stage 为 `container-type: inline-size`。移动端 `390 × 844` 下 section 宽 `359`、布局为单列、文档宽 `375`。
+
+### 旋转手势事务
+
+- 60/65 次连续 pointer move 只更新 renderer 预览；不写 configurator state，不触发 Shopify quote。
+- 正常 pointerup 只提交一次最终角度；取消、lost pointer、切换图层、anchor 隐藏、mutation lock 和卸载均恢复原状态且提交次数为 0。
+- 键盘方向键仍保持一次按键一次离散提交。
+- Configurator 历史现已验证：一次 Undo 恢复旋转前角度，一次 Redo 恢复最终角度；这修正了此前“旋转 Undo 未测试”的记录。
+- Shopify 集成现已验证：60 次移动 quote 调用为 0，释放时调用 1 次，表单序列化状态与该次 quote 使用的最终状态一致。
+
+### 最终自动化与构建
+
+| 检查 | 结果 |
+| --- | --- |
+| 旋转/页面/Shopify focused tests | 5 个文件，`139/139` 通过 |
+| 全量测试 | 46 个文件，`448/448` 通过 |
+| App build | 通过；CSS `17.80 kB`（gzip `3.99 kB`），JS `1,020.37 kB`（gzip `285.38 kB`） |
+| Shopify bundle | 通过；`1,376.48 kB`（gzip `389.83 kB`） |
+| Wrangler dry-run | 通过；14 assets，Worker upload `8.98 KiB`（gzip `2.87 KiB`），`LOCAL_PRODUCTION_FILES=true` |
+| `git diff --check` | 通过 |
+
+构建仍有既存的大 chunk 提示及 Shopify `inlineDynamicImports` ignored 提示；本轮未引入新的构建错误。
+
+### 本轮边界与风险
+
+- 浏览器中的长距离环形拖动来自前一轮验收，本轮未重复该手工路径；连续移动、跨象限角度、取消恢复和单次提交由 overlay/renderer/page/Shopify 自动化覆盖。
+- 本轮仍未采集浏览器 GPU heap 长时曲线。
+- 本轮仅完成本地实现、自动化、构建、dry-run 与桌面/移动验收；未执行部署或推送。

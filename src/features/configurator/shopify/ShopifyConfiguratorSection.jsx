@@ -160,9 +160,17 @@ function useShopifyConfigurator(settings) {
     settings.modelUrl,
   ]);
 
-  const updateState = async (patch, { transactional = false } = {}) => {
+  const updateState = async (
+    patch,
+    { quote: shouldQuote = true, transactional = false } = {},
+  ) => {
     if (!product || !state) return { message: 'The configurator is still loading.', ok: false };
     const nextState = mergeConfiguratorState(state, patch);
+    if (!shouldQuote) {
+      setState(nextState);
+      setConfigurationError('');
+      return { ok: true };
+    }
     try {
       if (!transactional) setState(nextState);
       const nextQuote = await productApi.quoteConfiguration(product.id, nextState);

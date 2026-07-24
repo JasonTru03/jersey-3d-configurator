@@ -17,6 +17,15 @@ export function recordDesignState(history, nextState) {
   return { cursor: entries.length - 1, entries };
 }
 
+export function replaceCurrentDesignState(history, nextState) {
+  if (!history || JSON.stringify(getCurrentDesignState(history)) === JSON.stringify(nextState)) {
+    return history;
+  }
+  const entries = history.entries.slice();
+  entries[history.cursor] = structuredClone(nextState);
+  return { ...history, entries };
+}
+
 export function moveDesignHistory(history, offset) {
   const cursor = Math.min(history.entries.length - 1, Math.max(0, history.cursor + offset));
   return cursor === history.cursor ? history : { ...history, cursor };

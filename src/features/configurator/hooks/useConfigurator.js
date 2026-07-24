@@ -9,6 +9,7 @@ import {
   getCurrentDesignState,
   moveDesignHistory,
   recordDesignState,
+  replaceCurrentDesignState,
 } from '../designs/designHistory.js';
 
 export function useConfigurator(initialStateOverride) {
@@ -53,16 +54,27 @@ export function useConfigurator(initialStateOverride) {
   }, []);
 
   const updateState = useCallback(
-    async (patch) => {
+    async (patch, { quote: shouldQuote = true, recordHistory = true } = {}) => {
       const currentState = getCurrentDesignState(history);
       if (!product || !currentState) {
         return { message: 'The configurator is still loading.', ok: false };
       }
       const nextState = mergeConfiguratorState(currentState, patch);
+      if (!recordHistory && !shouldQuote) {
+        setHistory((currentHistory) => replaceCurrentDesignState(currentHistory, nextState));
+        setConfigurationError('');
+        return { ok: true };
+      }
       try {
-        const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
-        setHistory((currentHistory) => recordDesignState(currentHistory, nextState));
-        setQuote(nextQuote);
+        const nextQuote = shouldQuote
+          ? await productApi.quoteConfiguration(product.id, nextState)
+          : quote;
+        setHistory((currentHistory) => (
+          recordHistory
+            ? recordDesignState(currentHistory, nextState)
+            : replaceCurrentDesignState(currentHistory, nextState)
+        ));
+        if (shouldQuote) setQuote(nextQuote);
         setConfigurationError('');
         return { ok: true };
       } catch (error) {
@@ -71,7 +83,7 @@ export function useConfigurator(initialStateOverride) {
         return { message, ok: false };
       }
     },
-    [history, product],
+    [history, product, quote],
   );
 
   const moveHistory = useCallback(async (offset) => {

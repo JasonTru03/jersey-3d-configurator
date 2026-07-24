@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { useConfigurator } from './useConfigurator.js';
 import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
+import { productApi } from '../api/productApi.js';
 
 describe('useConfigurator design files', () => {
   it('initializes the Shopify-selected XL variant and retains its cart variant ID', async () => {
@@ -99,5 +100,71 @@ describe('useConfigurator design files', () => {
     expect(result.current.quote).toEqual(previousQuote);
     expect(result.current.canUndo).toBe(false);
     expect(result.current.configurationError).toBe('Custom text items must be an array.');
+  });
+
+  it('normalizes placement without a quote, history node, or redo truncation', async () => {
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration');
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await result.current.updateState({ colorway: 'away' });
+      await result.current.updateState({ colorway: 'third' });
+    });
+    await act(async () => result.current.undo());
+    const callsBeforeNormalization = quoteSpy.mock.calls.length;
+
+    await act(async () => {
+      await result.current.updateState(
+        { overrides: { customTextItems: [{ id: 'legacy', text: 'MASON', scale: 1.0261 }] } },
+        { quote: false, recordHistory: false },
+      );
+    });
+
+    expect(quoteSpy).toHaveBeenCalledTimes(callsBeforeNormalization);
+    expect(result.current.state.overrides.customTextItems[0].scale).toBe(1.0261);
+    expect(result.current.canRedo).toBe(true);
+    await act(async () => result.current.undo());
+    expect(result.current.state.colorway).toBe('home');
+    quoteSpy.mockRestore();
+  });
+
+  it('roundtrips an opened legacy design after non-historical placement normalization', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const original = JSON.parse(await result.current.saveDesignFile().blob.text());
+    original.state.overrides.customTextItems = [{
+      id: 'legacy',
+      text: 'MASON',
+      placement: { x: 99, y: 99, z: 99 },
+      rotation: 15,
+      scale: 1.8,
+    }];
+    const file = new File(
+      [JSON.stringify(original)],
+      'legacy-invalid-placement.json',
+      { type: 'application/json' },
+    );
+
+    await act(async () => result.current.loadDesignFile(file));
+    await act(async () => result.current.updateState(
+      {
+        overrides: {
+          customTextItems: [{
+            ...result.current.state.overrides.customTextItems[0],
+            placement: { x: 0, y: 0.36, z: 0.5 },
+            scale: 1.0271,
+          }],
+        },
+      },
+      { quote: false, recordHistory: false },
+    ));
+
+    expect(result.current.canUndo).toBe(false);
+    const roundtrip = JSON.parse(await result.current.saveDesignFile().blob.text());
+    expect(roundtrip.state.overrides.customTextItems[0]).toEqual(expect.objectContaining({
+      placement: { x: 0, y: 0.36, z: 0.5 },
+      rotation: 15,
+      scale: 1.0271,
+    }));
   });
 });

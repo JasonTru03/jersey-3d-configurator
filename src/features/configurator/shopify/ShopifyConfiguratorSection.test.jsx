@@ -3,7 +3,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { productApi } from '../api/productApi.js';
 import { ShopifyConfiguratorSection } from './ShopifyConfiguratorSection.jsx';
 
-const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
+const rendererHarness = vi.hoisted(() => ({
+  finalRotationItem: null,
+  focusedDecorationId: null,
+  options: null,
+}));
 
 vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -20,8 +24,12 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       setActivePrintId() {}
       beginPersonalizationRotation() {}
       previewPersonalizationRotation() {}
-      endPersonalizationRotation() {}
+      endPersonalizationRotation() { return rendererHarness.finalRotationItem; }
       cancelPersonalizationRotationPreview() {}
+      beginPersonalizationResize() {}
+      previewPersonalizationScale() {}
+      endPersonalizationResize() {}
+      cancelPersonalizationResizePreview() {}
       setView() {}
       focusDecoration(id) { rendererHarness.focusedDecorationId = id; }
       dispose() {}
@@ -40,6 +48,7 @@ afterAll(() => {
 beforeEach(() => {
   vi.restoreAllMocks();
   rendererHarness.focusedDecorationId = null;
+  rendererHarness.finalRotationItem = null;
   rendererHarness.options = null;
 });
 
@@ -172,6 +181,11 @@ describe('ShopifyConfiguratorSection', () => {
       { container: document.getElementById('mount') },
     );
     await screen.findByText('Customize your match jersey');
+    rendererHarness.finalRotationItem = {
+      placement: { x: 0, y: 0.36, z: 0.5 },
+      rotation: 15,
+      scale: 1.0271,
+    };
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     const handle = await screen.findByRole('button', { name: 'Drag to rotate personalization' });
     quoteSpy.mockClear();
@@ -192,7 +206,45 @@ describe('ShopifyConfiguratorSection', () => {
     const submittedState = JSON.parse(
       document.querySelector('input[name="properties[_3D Config JSON]"]').value,
     ).state;
-    expect(quotedState.overrides.printItems[0].rotation).not.toBe(0);
+    expect(quotedState.overrides.printItems[0]).toEqual(expect.objectContaining({
+      placement: { x: 0, y: 0.36, z: 0.5 },
+      rotation: 15,
+      scale: 1.0271,
+    }));
     expect(submittedState).toEqual(quotedState);
+  });
+
+  it('syncs renderer normalization to the Shopify form without issuing another quote', async () => {
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration');
+    document.body.innerHTML = '<form action="/cart/add" method="post"><input name="id" value="47824466051223"></form><div id="mount"></div>';
+    render(
+      <ShopifyConfiguratorSection settings={{ defaultLighting: 'name-number' }} />,
+      { container: document.getElementById('mount') },
+    );
+    await screen.findByText('Customize your match jersey');
+    quoteSpy.mockClear();
+
+    await act(async () => {
+      await rendererHarness.options.onStateNormalize({
+        overrides: {
+          printItems: [{
+            id: 'print-1',
+            name: 'PLAYER',
+            number: '16',
+            placement: { x: 0, y: 0.36, z: 0.5 },
+            rotation: 0,
+            scale: 1.0271,
+          }],
+        },
+      });
+    });
+
+    await waitFor(() => {
+      const submitted = JSON.parse(
+        document.querySelector('input[name="properties[_3D Config JSON]"]').value,
+      ).state;
+      expect(submitted.overrides.printItems[0].scale).toBe(1.0271);
+    });
+    expect(quoteSpy).not.toHaveBeenCalled();
   });
 });

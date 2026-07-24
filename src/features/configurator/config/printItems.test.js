@@ -39,4 +39,21 @@ describe('print items', () => {
       expect.objectContaining({ id: 'print-4', name: 'CUSTOM' }),
     ]);
   });
+
+  it('assigns unique ids without taking ids explicitly reserved by later items', () => {
+    expect(getPrintItems({
+      printItems: [
+        { name: 'AUTO' },
+        { id: 'print-1', name: 'FIRST' },
+        { id: 'print-1', name: 'DUPLICATE' },
+      ],
+    }).map((item) => item.id)).toEqual(['print-2', 'print-1', 'print-3']);
+  });
+
+  it('preserves the original item id when a patch contains a different id', () => {
+    const items = [createPrintItem({ id: 'print-1', name: 'PLAYER' })];
+
+    expect(patchPrintItem(items, 'print-1', { id: 'other-id', name: 'CAPTAIN' }))
+      .toEqual([expect.objectContaining({ id: 'print-1', name: 'CAPTAIN' })]);
+  });
 });

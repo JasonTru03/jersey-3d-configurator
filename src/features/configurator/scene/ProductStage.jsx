@@ -71,6 +71,9 @@ export function ProductStage({
     reconciliationInputRef.current = { focusId: personalizationFocusId, keys: selectableKeys };
 
     const focusIsValid = personalizationFocusId && selectableKeys.has(personalizationFocusId);
+    const invalidFocusId = personalizationFocusId && !focusIsValid
+      ? personalizationFocusId
+      : null;
     const nextActiveId = focusIsValid
       ? personalizationFocusId
       : (selectableKeys.has(activePrintId)
@@ -81,7 +84,19 @@ export function ProductStage({
       : (selectableKeys.has(selectedPrintId) ? selectedPrintId : null);
 
     if (nextActiveId !== activePrintId) setActivePrintId(nextActiveId);
-    if (nextSelectedId === selectedPrintId) return;
+    const missingSelectedId = selectedPrintId && !selectableKeys.has(selectedPrintId)
+      ? selectedPrintId
+      : null;
+    const invalidSelectionId = invalidFocusId ?? missingSelectedId;
+    const nullReportKey = invalidSelectionId ? `invalid:${invalidSelectionId}` : null;
+    if (nextSelectedId === selectedPrintId) {
+      if (nextSelectedId !== null) reportedNullSelectionRef.current = null;
+      if (nullReportKey && reportedNullSelectionRef.current !== nullReportKey) {
+        reportedNullSelectionRef.current = nullReportKey;
+        onPersonalizationSelect?.(null);
+      }
+      return;
+    }
 
     setSelectedPrintId(nextSelectedId);
     if (nextSelectedId !== null) {
@@ -89,8 +104,8 @@ export function ProductStage({
       return;
     }
     setPrintAnchor({ visible: false });
-    if (selectedPrintId && reportedNullSelectionRef.current !== selectedPrintId) {
-      reportedNullSelectionRef.current = selectedPrintId;
+    if (nullReportKey && reportedNullSelectionRef.current !== nullReportKey) {
+      reportedNullSelectionRef.current = nullReportKey;
       onPersonalizationSelect?.(null);
     }
   }, [

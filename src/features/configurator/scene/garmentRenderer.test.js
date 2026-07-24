@@ -778,6 +778,66 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('renders duplicate raw player ids as independent normalized layers', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'name-number',
+      overrides: {
+        printItems: [
+          { id: 'same-id', name: 'FIRST', number: '10' },
+          { id: 'same-id', name: 'SECOND', number: '20' },
+        ],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    expect([...renderer.printLayers.keys()]).toEqual(['player:same-id', 'player:print-2']);
+    expect(renderer.printLayers.get('player:same-id').plane.userData.sourceId).toBe('same-id');
+    expect(renderer.printLayers.get('player:print-2').plane.userData.sourceId).toBe('print-2');
+    renderer.dispose();
+  });
+
+  it('mutates only the selected normalized player when duplicate raw ids are supplied', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    renderer.state = {
+      lighting: 'name-number',
+      overrides: {
+        printItems: [
+          { id: 'same-id', name: 'FIRST', number: '10' },
+          { id: 'same-id', name: 'SECOND', number: '20' },
+        ],
+      },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('player:print-2');
+    renderer.printPlane.position.set(0.4, 0.5, 0.6);
+
+    renderer.emitPrintPlacement();
+
+    expect(onStatePatch).toHaveBeenCalledWith({
+      overrides: {
+        printItems: [
+          expect.objectContaining({ id: 'same-id', name: 'FIRST', placement: null }),
+          expect.objectContaining({
+            id: 'print-2',
+            name: 'SECOND',
+            placement: expect.objectContaining({ x: 0.4, y: 0.5, z: 0.6 }),
+          }),
+        ],
+        printName: 'FIRST',
+        printNumber: '10',
+        printPlacement: null,
+      },
+    });
+    renderer.dispose();
+  });
+
   it('emits placement to the exact composite-key source when raw ids match', () => {
     installTextCanvasContext();
     const host = document.createElement('div');
@@ -880,6 +940,113 @@ describe('garment decoration mesh selection', () => {
         customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 45 })],
       },
     });
+    renderer.dispose();
+  });
+
+  it('does not fall back to another layer for an explicitly missing active key', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'other-id', text: 'OTHER' }] },
+    };
+    renderer.updatePrintLayer();
+
+    renderer.setActivePrintId('text:missing');
+
+    expect(renderer.printPlane).toBeNull();
+    renderer.emitPrintPlacement();
+    expect(onStatePatch).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it.each([
+    {
+      name: 'custom text becomes blank',
+      initialState: {
+        lighting: 'none',
+        overrides: { customTextItems: [{ id: 'active', text: 'MASON' }] },
+      },
+      activeKey: 'text:active',
+      nextState: {
+        lighting: 'none',
+        overrides: { customTextItems: [{ id: 'active', text: '   ' }] },
+      },
+      remainingKeys: [],
+    },
+    {
+      name: 'player lighting is hidden while text remains',
+      initialState: {
+        lighting: 'name-number',
+        overrides: {
+          printItems: [{ id: 'active', name: 'PLAYER', number: '16' }],
+          customTextItems: [{ id: 'other', text: 'OTHER' }],
+        },
+      },
+      activeKey: 'player:active',
+      nextState: {
+        lighting: 'none',
+        overrides: {
+          printItems: [{ id: 'active', name: 'PLAYER', number: '16' }],
+          customTextItems: [{ id: 'other', text: 'OTHER' }],
+        },
+      },
+      remainingKeys: ['text:other'],
+    },
+    {
+      name: 'active item is deleted while another layer remains',
+      initialState: {
+        lighting: 'none',
+        overrides: {
+          customTextItems: [
+            { id: 'active', text: 'MASON' },
+            { id: 'other', text: 'OTHER' },
+          ],
+        },
+      },
+      activeKey: 'text:active',
+      nextState: {
+        lighting: 'none',
+        overrides: { customTextItems: [{ id: 'other', text: 'OTHER' }] },
+      },
+      remainingKeys: ['text:other'],
+    },
+  ])('cancels an active drag without writing when $name', ({
+    activeKey,
+    initialState,
+    nextState,
+    remainingKeys,
+  }) => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onPrintAnchorChange = vi.fn();
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onPrintAnchorChange, onStatePatch });
+    renderer.state = initialState;
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId(activeKey);
+    renderer.pendingPrintDrag = { x: 1, y: 1 };
+    renderer.activePrintDrag = { grabOffset: new THREE.Vector3(), rotation: 0 };
+    renderer.isDraggingPrint = true;
+    renderer.controls.enabled = false;
+    renderer.lastPrintAnchor = { visible: true, left: 1, top: 1, width: 1, height: 1 };
+
+    renderer.state = nextState;
+    renderer.updatePrintLayer();
+    renderer.handlePointerUp();
+
+    expect([...renderer.printLayers.keys()]).toEqual(remainingKeys);
+    expect(renderer.activePrintId).toBeNull();
+    expect(renderer.pendingPrintDrag).toBeNull();
+    expect(renderer.activePrintDrag).toBeNull();
+    expect(renderer.isDraggingPrint).toBe(false);
+    expect(renderer.controls.enabled).toBe(true);
+    expect(onPrintAnchorChange).toHaveBeenLastCalledWith({ visible: false });
+    expect(onStatePatch).not.toHaveBeenCalled();
     renderer.dispose();
   });
 

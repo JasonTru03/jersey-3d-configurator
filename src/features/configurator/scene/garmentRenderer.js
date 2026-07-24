@@ -159,9 +159,10 @@ export class GarmentRenderer {
   }
 
   get printPlane() {
-    return this.printLayers.get(this.activePrintId)?.plane
-      ?? this.printLayers.values().next().value?.plane
-      ?? null;
+    if (this.activePrintId !== null) {
+      return this.printLayers.get(this.activePrintId)?.plane ?? null;
+    }
+    return this.printLayers.values().next().value?.plane ?? null;
   }
 
   setActivePrintId(id) {
@@ -554,17 +555,20 @@ export class GarmentRenderer {
   updatePrintLayer() {
     const printItems = this.getRenderablePrintItems();
     const keys = new Set(printItems.map((item) => item.key));
+    const activeLayerWasRemoved = this.activePrintId !== null && !keys.has(this.activePrintId);
     this.printLayers.forEach((layer, key) => {
       if (keys.has(key)) return;
       this.disposePrintLayerEntry(layer);
       this.printLayers.delete(key);
     });
     printItems.forEach((item) => this.updatePrintLayerEntry(item));
-    if (!printItems.length) {
+    if (activeLayerWasRemoved || !printItems.length) {
       this.isDraggingPrint = false;
       this.pendingPrintDrag = null;
       this.activePrintDrag = null;
+      this.controls.enabled = true;
       this.syncPrintAnchor();
+      if (activeLayerWasRemoved) this.activePrintId = null;
     }
   }
 
@@ -810,12 +814,13 @@ export class GarmentRenderer {
   }
 
   emitPrintPlacement() {
-    if (!this.printPlane || !this.onStatePatch) return;
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(this.printPlane.quaternion).normalize();
+    const printPlane = this.printPlane;
+    if (!printPlane || !this.onStatePatch) return;
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(printPlane.quaternion).normalize();
     const placement = {
-      x: roundPlacement(this.printPlane.position.x),
-      y: roundPlacement(this.printPlane.position.y),
-      z: roundPlacement(this.printPlane.position.z),
+      x: roundPlacement(printPlane.position.x),
+      y: roundPlacement(printPlane.position.y),
+      z: roundPlacement(printPlane.position.z),
       normal: {
         x: roundPlacement(normal.x),
         y: roundPlacement(normal.y),
@@ -823,9 +828,9 @@ export class GarmentRenderer {
       },
     };
     const selectableItems = getSelectablePersonalizationItems(this.state);
-    const activeItem = findPersonalizationItem(selectableItems, this.activePrintId)
-      ?? this.getRenderablePrintItems()[0]
-      ?? null;
+    const activeItem = this.activePrintId === null
+      ? this.getRenderablePrintItems()[0] ?? null
+      : findPersonalizationItem(selectableItems, this.activePrintId);
     if (!activeItem) return;
     if (activeItem.itemKind === 'text') {
       const customTextItems = getCustomTextItems(this.state?.overrides);

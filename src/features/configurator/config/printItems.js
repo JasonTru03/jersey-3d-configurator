@@ -11,7 +11,7 @@ export function createPrintItem({
   rotation = 0,
 } = {}) {
   return {
-    id,
+    id: String(id),
     name,
     number,
     placement,
@@ -22,10 +22,20 @@ export function createPrintItem({
 
 export function getPrintItems(overrides = {}) {
   if (Array.isArray(overrides.printItems)) {
-    return overrides.printItems.map((item, index) => createPrintItem({
-      ...item,
-      id: item.id ?? `print-${index + 1}`,
-    }));
+    const sourceItems = overrides.printItems.slice(0, MAX_PRINT_ITEMS);
+    const reservedIds = new Set(sourceItems
+      .filter((item) => item?.id !== undefined && item?.id !== null)
+      .map((item) => String(item.id)));
+    const usedIds = new Set();
+
+    return sourceItems.map((item, index) => {
+      const explicitId = item?.id === undefined || item?.id === null ? null : String(item.id);
+      const id = explicitId && !usedIds.has(explicitId)
+        ? explicitId
+        : nextAvailablePrintId(usedIds, reservedIds, index + 1);
+      usedIds.add(id);
+      return createPrintItem({ ...item, id });
+    });
   }
 
   if (!overrides.printName && !overrides.printNumber && !overrides.printPlacement) return [];
@@ -43,7 +53,9 @@ export function ensurePrintItems(items) {
 }
 
 export function patchPrintItem(items, id, patch) {
-  return items.map((item) => item.id === id ? createPrintItem({ ...item, ...patch }) : item);
+  return items.map((item) => (
+    item.id === id ? createPrintItem({ ...item, ...patch, id: item.id }) : item
+  ));
 }
 
 export function removePrintItem(items, id) {
@@ -69,6 +81,12 @@ export function legacyFirstItemFields(items) {
 function nextPrintId(items) {
   let number = items.length + 1;
   while (items.some((item) => item.id === `print-${number}`)) number += 1;
+  return `print-${number}`;
+}
+
+function nextAvailablePrintId(usedIds, reservedIds, startNumber) {
+  let number = startNumber;
+  while (usedIds.has(`print-${number}`) || reservedIds.has(`print-${number}`)) number += 1;
   return `print-${number}`;
 }
 

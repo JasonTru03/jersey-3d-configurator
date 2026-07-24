@@ -297,6 +297,28 @@ describe('ProductStage print toolbar', () => {
     expect(onPersonalizationSelect).not.toHaveBeenCalledWith(null);
   });
 
+  it('reports an initially invalid non-empty focus once in StrictMode', async () => {
+    const onPersonalizationSelect = vi.fn();
+    const props = {
+      onPersonalizationSelect,
+      onStatePatch: vi.fn(),
+      personalizationFocusId: 'text:missing',
+      product,
+      selected,
+      state: {
+        lighting: 'none',
+        overrides: { customTextItems: [{ id: 'custom-id', text: 'MASON' }] },
+      },
+    };
+    const { rerender } = render(<StrictMode><ProductStage {...props} /></StrictMode>);
+
+    await waitFor(() => {
+      expect(onPersonalizationSelect.mock.calls.filter(([id]) => id === null)).toHaveLength(1);
+    });
+    rerender(<StrictMode><ProductStage {...props} /></StrictMode>);
+    expect(onPersonalizationSelect.mock.calls.filter(([id]) => id === null)).toHaveLength(1);
+  });
+
   it('mutates player and text items independently when their raw ids match', () => {
     const state = {
       lighting: 'name-number',

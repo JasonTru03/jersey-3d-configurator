@@ -14,6 +14,10 @@ import { createGarmentAppearanceCanvas } from './garmentAppearanceTexture.js';
 import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
 import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTexture.js';
 import { selectGarmentPatternMeshes } from './modelProjection.js';
+import {
+  createPersonalizationDecalGeometry,
+  resolvePersonalizationSurface,
+} from './personalizationDecal.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
@@ -412,6 +416,9 @@ export class GarmentRenderer {
   setPersonalizationMutationDisabled(disabled) {
     this.personalizationMutationDisabled = Boolean(disabled);
     if (!this.personalizationMutationDisabled) return;
+    if (this.isDraggingPrint) {
+      this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
+    }
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
     this.isDraggingPrint = false;
@@ -601,15 +608,40 @@ export class GarmentRenderer {
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
       const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide });
+      const decalMaterial = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        side: THREE.DoubleSide,
+      });
       const planeHeight = item.itemKind === 'text' ? 1.05 / CUSTOM_TEXT_CANVAS_ASPECT : 0.42;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, planeHeight), material);
+      const decal = new THREE.Mesh(new THREE.BufferGeometry(), decalMaterial);
       plane.renderOrder = 4;
+      decal.renderOrder = 8;
+      decal.visible = false;
       plane.userData.printId = item.key;
       plane.userData.personalizationKey = item.key;
       plane.userData.itemKind = item.itemKind;
       plane.userData.sourceId = item.sourceId;
       this.scene.add(plane);
-      layer = { itemKind: item.itemKind, material, plane, renderKey, texture };
+      this.scene.add(decal);
+      layer = {
+        decal,
+        decalKey: null,
+        decalMaterial,
+        height: planeHeight,
+        itemKind: item.itemKind,
+        material,
+        plane,
+        renderKey,
+        texture,
+        width: 1.05,
+      };
       this.printLayers.set(item.key, layer);
     } else if (layer.renderKey !== renderKey) {
       if (item.itemKind === 'text') {
@@ -621,6 +653,7 @@ export class GarmentRenderer {
       layer.texture.needsUpdate = true;
     }
     this.applyStoredPrintPlacement(layer.plane, item);
+    this.syncPersonalizationDecal(layer, item);
   }
 
   redrawPrintTexture() {
@@ -671,6 +704,75 @@ export class GarmentRenderer {
     plane.userData.rotation = item.rotation ?? 0;
   }
 
+  syncPersonalizationDecal(layer, item, placement = item.placement ?? DEFAULT_PRINT_POSITION) {
+    if (!layer || !item) return false;
+    const surface = resolvePersonalizationSurface(this.decorationMeshes, placement);
+    if (!surface) {
+      layer.plane.material.opacity = 1;
+      layer.decal.visible = false;
+      layer.decalKey = null;
+      return false;
+    }
+
+    const scale = item.scale ?? 1;
+    const rotation = item.rotation ?? 0;
+    const decalKey = JSON.stringify([
+      surface.mesh.uuid,
+      surface.point.x,
+      surface.point.y,
+      surface.point.z,
+      surface.normal.x,
+      surface.normal.y,
+      surface.normal.z,
+      rotation,
+      scale,
+      layer.width,
+      layer.height,
+    ]);
+    if (layer.decalKey !== decalKey) {
+      const geometry = createPersonalizationDecalGeometry({
+        height: layer.height,
+        mesh: surface.mesh,
+        normal: surface.normal,
+        position: surface.point,
+        rotation,
+        scale,
+        width: layer.width,
+      });
+      layer.decal.geometry.dispose();
+      layer.decal.geometry = geometry;
+      layer.decalKey = decalKey;
+    }
+    layer.plane.material.opacity = 0;
+    layer.decal.visible = true;
+    return true;
+  }
+
+  setPrintLayerDragging(layer, dragging) {
+    if (!layer) return;
+    if (dragging) {
+      layer.plane.material.opacity = 1;
+      layer.decal.visible = false;
+      return;
+    }
+    const item = findPersonalizationItem(
+      getSelectablePersonalizationItems(this.state),
+      layer.plane.userData.personalizationKey,
+    );
+    if (!item) return;
+    this.syncPersonalizationDecal(layer, item, this.getPrintPlanePlacement(layer.plane));
+  }
+
+  getPrintPlanePlacement(plane) {
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion).normalize();
+    return {
+      x: plane.position.x,
+      y: plane.position.y,
+      z: plane.position.z,
+      normal: { x: normal.x, y: normal.y, z: normal.z },
+    };
+  }
+
   disposePrintLayer() {
     this.printLayers.forEach((layer) => this.disposePrintLayerEntry(layer));
     this.printLayers.clear();
@@ -684,8 +786,11 @@ export class GarmentRenderer {
 
   disposePrintLayerEntry(layer) {
     this.scene.remove(layer.plane);
+    this.scene.remove(layer.decal);
     layer.plane.geometry.dispose();
+    layer.decal.geometry.dispose();
     layer.material.dispose();
+    layer.decalMaterial.dispose();
     layer.texture.dispose();
   }
 
@@ -742,6 +847,7 @@ export class GarmentRenderer {
       this.pendingPrintDrag = null;
       this.isDraggingPrint = true;
       this.controls.enabled = false;
+      this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), true);
     }
     if (!this.isDraggingPrint || !this.printPlane) return;
     const hit = this.pickJersey(event);
@@ -766,6 +872,7 @@ export class GarmentRenderer {
     if (!this.isDraggingPrint) return;
     this.isDraggingPrint = false;
     this.controls.enabled = true;
+    this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
     this.emitPrintPlacement();
     this.activePrintDrag = null;
   };
@@ -776,6 +883,7 @@ export class GarmentRenderer {
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
     this.isDraggingPrint = false;
+    this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
     this.controls.enabled = shouldEnableOrbitControls({
       isDraggingDecoration: this.decorationEditor?.isEditing(),
       isDraggingPrint: this.isDraggingPrint,

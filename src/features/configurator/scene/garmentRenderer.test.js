@@ -760,6 +760,46 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('restores the projected decal when a pending mutation cancels an active drag', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.5,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+        }],
+      },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:text-1');
+    const layer = renderer.printLayers.get('text:text-1');
+    renderer.isDraggingPrint = true;
+    renderer.activePrintDrag = { grabOffset: new THREE.Vector3(), rotation: 0 };
+    renderer.setPrintLayerDragging(layer, true);
+
+    renderer.setPersonalizationMutationDisabled(true);
+
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(layer.decal.visible).toBe(true);
+    renderer.dispose();
+  });
+
   it('keeps orbit interaction available instead of picking prints while mutations are disabled', () => {
     const renderer = createPointerRenderer({
       printHit: { object: { userData: { printId: 'text:text-1' } } },
@@ -793,6 +833,212 @@ describe('garment decoration mesh selection', () => {
     expect(renderer.printLayers.size).toBe(0);
     expect(geometryDispose).toHaveBeenCalledOnce();
     expect(materialDispose).toHaveBeenCalledOnce();
+    expect(textureDispose).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
+  it('uses a transparent proxy and a projected decal when the garment surface resolves', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.5,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+        }],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    const layer = renderer.printLayers.get('text:text-1');
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(layer.decal.visible).toBe(true);
+    expect(layer.decal.geometry.getAttribute('position').count).toBeGreaterThan(0);
+    expect(layer.decal.material).toMatchObject({
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    expect(renderer.pickPrint).toBeTypeOf('function');
+    renderer.dispose();
+  });
+
+  it('keeps the textured proxy visible as a fallback when no garment surface resolves', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.decorationMeshes = [];
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'text-1', text: 'MASON' }] },
+    };
+
+    renderer.updatePrintLayer();
+
+    const layer = renderer.printLayers.get('text:text-1');
+    expect(layer.plane.material.opacity).toBe(1);
+    expect(layer.plane.material.map).toBe(layer.texture);
+    expect(layer.decal.visible).toBe(false);
+    renderer.dispose();
+  });
+
+  it('rebuilds only the decal whose rotation changes and disposes its old geometry', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    const placement = {
+      x: 0,
+      y: 0,
+      z: 0.5,
+      normal: { x: 0, y: 0, z: 1 },
+    };
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [
+          { id: 'first', text: 'FIRST', placement, rotation: 0 },
+          { id: 'second', text: 'SECOND', placement: { ...placement, x: 0.4 }, rotation: 0 },
+        ],
+      },
+    };
+    renderer.updatePrintLayer();
+    const first = renderer.printLayers.get('text:first');
+    const second = renderer.printLayers.get('text:second');
+    const oldFirstGeometry = first.decal.geometry;
+    const oldSecondGeometry = second.decal.geometry;
+    const dispose = vi.spyOn(oldFirstGeometry, 'dispose');
+
+    renderer.state.overrides.customTextItems[0].rotation = 45;
+    renderer.updatePrintLayer();
+
+    expect(first.decal.geometry).not.toBe(oldFirstGeometry);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(second.decal.geometry).toBe(oldSecondGeometry);
+    renderer.dispose();
+  });
+
+  it('shows the proxy during drag and rebuilds the final decal before publishing placement', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.5,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+        }],
+      },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:text-1');
+    const layer = renderer.printLayers.get('text:text-1');
+    const oldGeometry = layer.decal.geometry;
+    renderer.pickPrint = vi.fn(() => ({
+      object: layer.plane,
+      point: layer.plane.localToWorld(new THREE.Vector3()),
+    }));
+    renderer.pickJersey = vi.fn(() => ({
+      object: jersey,
+      face: { normal: new THREE.Vector3(0, 0, 1) },
+      point: new THREE.Vector3(0.4, 0.2, 0.2),
+    }));
+
+    renderer.handlePointerDown(pointerEvent(100, 100));
+    renderer.handlePointerMove(pointerEvent(110, 100));
+
+    expect(layer.plane.material.opacity).toBe(1);
+    expect(layer.decal.visible).toBe(false);
+
+    renderer.handlePointerUp();
+
+    expect(layer.decal.geometry).not.toBe(oldGeometry);
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(layer.decal.visible).toBe(true);
+    expect(onStatePatch).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
+  it('disposes proxy and decal resources without disposing the shared texture twice', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.5,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+        }],
+      },
+    };
+    renderer.updatePrintLayer();
+    const layer = renderer.printLayers.get('text:text-1');
+    const proxyGeometryDispose = vi.spyOn(layer.plane.geometry, 'dispose');
+    const decalGeometryDispose = vi.spyOn(layer.decal.geometry, 'dispose');
+    const proxyMaterialDispose = vi.spyOn(layer.material, 'dispose');
+    const decalMaterialDispose = vi.spyOn(layer.decalMaterial, 'dispose');
+    const textureDispose = vi.spyOn(layer.texture, 'dispose');
+
+    renderer.state.overrides.customTextItems[0].text = ' ';
+    renderer.updatePrintLayer();
+
+    expect(proxyGeometryDispose).toHaveBeenCalledOnce();
+    expect(decalGeometryDispose).toHaveBeenCalledOnce();
+    expect(proxyMaterialDispose).toHaveBeenCalledOnce();
+    expect(decalMaterialDispose).toHaveBeenCalledOnce();
     expect(textureDispose).toHaveBeenCalledOnce();
     renderer.dispose();
   });

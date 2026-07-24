@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PersonalizationToolbarOverlay } from './PersonalizationToolbarOverlay.jsx';
 
@@ -23,6 +23,68 @@ function renderToolbar(props = {}) {
   return { ...result, callbacks: { ...callbacks, ...props } };
 }
 
+function makeRect({ left = 0, top = 0, width = 0, height = 0 }) {
+  return {
+    bottom: top + height,
+    height,
+    left,
+    right: left + width,
+    top,
+    width,
+    x: left,
+    y: top,
+    toJSON: () => {},
+  };
+}
+
+function renderToolbarInStage({ stageWidth, stageHeight, toolbarRect, anchor: stageAnchor }) {
+  const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+  const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function getBoundingClientRect() {
+    if (this.classList?.contains('print-toolbar-overlay')) {
+      return makeRect({ width: stageWidth, height: stageHeight });
+    }
+    if (this.classList?.contains('stage-toolbar') && toolbarRect) return makeRect(toolbarRect);
+    return originalGetBoundingClientRect.call(this);
+  });
+  const result = render(
+    <section className="stage-wrap">
+      <div className="stage-toolbar"><button type="button">Orbit</button></div>
+      <div className="stage">
+        <PersonalizationToolbarOverlay
+          anchor={stageAnchor}
+          item={{ id: 'print-1', rotation: 0, scale: 1 }}
+        />
+      </div>
+    </section>,
+  );
+  return { ...result, restoreRects: () => rectSpy.mockRestore() };
+}
+
+function getDockButtonRects(dock) {
+  const columns = Number(dock.style.getPropertyValue('--print-dock-columns'));
+  const left = Number.parseFloat(dock.style.getPropertyValue('--print-dock-position-left'));
+  const top = Number.parseFloat(dock.style.getPropertyValue('--print-dock-position-top'));
+  const rows = Math.ceil(4 / columns);
+  const width = columns * 44 + (columns - 1) * 4;
+  return Array.from({ length: 4 }, (_, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    return makeRect({
+      left: left - width / 2 + column * 48,
+      top: top + row * 48,
+      width: 44,
+      height: 44,
+    });
+  }).slice(0, columns * rows);
+}
+
+function intersects(first, second) {
+  return first.left < second.right
+    && first.right > second.left
+    && first.top < second.bottom
+    && first.bottom > second.top;
+}
+
 describe('PersonalizationToolbarOverlay', () => {
   it('exposes the five personalization controls in a compact action dock', () => {
     renderToolbar();
@@ -34,6 +96,90 @@ describe('PersonalizationToolbarOverlay', () => {
     expect(screen.getByRole('button', { name: 'Delete personalization' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Duplicate personalization' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resize personalization' })).toBeInTheDocument();
+  });
+
+  it('moves a left-top dock below the stage toolbar so every action remains hittable', async () => {
+    const toolbarRect = makeRect({ left: 16, top: 16, width: 144, height: 44 });
+    const view = renderToolbarInStage({
+      stageWidth: 640,
+      stageHeight: 400,
+      toolbarRect,
+      anchor: { visible: true, left: 10, top: 20, width: 80, height: 40 },
+    });
+
+    try {
+      const dock = screen.getByTestId('print-control-dock');
+      await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('68px'));
+      const buttonRects = getDockButtonRects(dock);
+      expect(buttonRects).toHaveLength(4);
+      expect(buttonRects.every((buttonRect) => !intersects(buttonRect, toolbarRect))).toBe(true);
+      expect(buttonRects.every((buttonRect) => (
+        buttonRect.left >= 8
+        && buttonRect.right <= 632
+        && buttonRect.top >= 8
+        && buttonRect.bottom <= 392
+      ))).toBe(true);
+      for (const buttonRect of buttonRects) {
+        const hitCount = buttonRects.filter((candidate) => (
+          buttonRect.left + 22 >= candidate.left
+          && buttonRect.left + 22 <= candidate.right
+          && buttonRect.top + 22 >= candidate.top
+          && buttonRect.top + 22 <= candidate.bottom
+        )).length;
+        expect(hitCount).toBe(1);
+      }
+    } finally {
+      view.unmount();
+      view.restoreRects();
+    }
+  });
+
+  it('keeps a right-top dock inside the stage without unnecessary toolbar displacement', async () => {
+    const view = renderToolbarInStage({
+      stageWidth: 640,
+      stageHeight: 400,
+      toolbarRect: { left: 16, top: 16, width: 144, height: 44 },
+      anchor: { visible: true, left: 590, top: 100, width: 40, height: 40 },
+    });
+
+    try {
+      const dock = screen.getByTestId('print-control-dock');
+      await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe('538px'));
+      const buttonRects = getDockButtonRects(dock);
+      expect(buttonRects.every((buttonRect) => buttonRect.left >= 8 && buttonRect.right <= 632)).toBe(true);
+      expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('48px');
+    } finally {
+      view.unmount();
+      view.restoreRects();
+    }
+  });
+
+  it('wraps all four 44px targets inside a stage narrower than the single-row dock', async () => {
+    const view = renderToolbarInStage({
+      stageWidth: 120,
+      stageHeight: 320,
+      toolbarRect: null,
+      anchor: { visible: true, left: 90, top: 150, width: 30, height: 40 },
+    });
+
+    try {
+      const dock = screen.getByTestId('print-control-dock');
+      await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-columns')).toBe('2'));
+      const buttonRects = getDockButtonRects(dock);
+      expect(buttonRects).toHaveLength(4);
+      expect(buttonRects.every((buttonRect) => (
+        buttonRect.width === 44
+        && buttonRect.height === 44
+        && buttonRect.left >= 8
+        && buttonRect.right <= 112
+        && buttonRect.top >= 8
+        && buttonRect.bottom <= 312
+      ))).toBe(true);
+      expect(buttonRects.some((buttonRect) => buttonRect.top !== buttonRects[0].top)).toBe(true);
+    } finally {
+      view.unmount();
+      view.restoreRects();
+    }
   });
 
   it('captures the rotation pointer and emits continuous rotation after a drag threshold', () => {

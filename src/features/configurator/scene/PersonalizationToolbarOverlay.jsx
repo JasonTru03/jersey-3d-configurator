@@ -1,10 +1,15 @@
 import { Maximize2, Pencil, RotateCw, Trash2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   beginRotationGesture,
   normalizeRotation,
   updateRotationGesture,
 } from './personalizationRotation.js';
+import {
+  getPersonalizationDockLayout,
+  measurePersonalizationStageArea,
+  personalizationStageAreasEqual,
+} from './personalizationToolbarLayout.js';
 
 const MIN_PRINT_SCALE = 0.45;
 const MAX_PRINT_SCALE = 2.5;
@@ -43,8 +48,10 @@ function releaseGesturePointer(start) {
 }
 
 export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
+  const overlayRef = useRef(null);
   const resizeStart = useRef(null);
   const rotationStart = useRef(null);
+  const [stageArea, setStageArea] = useState(null);
   const [frozenDock, setFrozenDock] = useState(null);
   const [isRotating, setIsRotating] = useState(false);
   const itemKey = item?.key ?? item?.id ?? null;
@@ -61,8 +68,35 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
     setIsRotating(false);
   }, [anchorVisible, itemKey]);
 
+  useLayoutEffect(() => {
+    const overlay = overlayRef.current;
+    if (!anchorVisible || !overlay) {
+      setStageArea((current) => (current === null ? current : null));
+      return undefined;
+    }
+
+    const updateStageArea = () => {
+      const next = measurePersonalizationStageArea(overlay);
+      setStageArea((current) => (personalizationStageAreasEqual(current, next) ? current : next));
+    };
+    updateStageArea();
+
+    const toolbar = overlay.closest('.stage-wrap')?.querySelector('.stage-toolbar');
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(updateStageArea);
+    resizeObserver?.observe(overlay);
+    if (toolbar) resizeObserver?.observe(toolbar);
+    window.addEventListener('resize', updateStageArea);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateStageArea);
+    };
+  }, [anchorVisible, itemKey]);
+
   if (!item || !anchorVisible) return null;
   const dockPosition = frozenDock ?? getDockPosition(anchor);
+  const dockLayout = getPersonalizationDockLayout(dockPosition, anchor, stageArea);
 
   const clearResize = (event) => {
     const start = resizeStart.current;
@@ -179,6 +213,7 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
     <div
       aria-label="Selected personalization controls"
       className="print-toolbar-overlay"
+      ref={overlayRef}
       role="group"
       style={{
         '--print-left': `${anchor.left}px`,
@@ -190,7 +225,15 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
       }}
     >
       <div className="print-selection-frame" data-testid="print-selection-frame" />
-      <div className="print-control-dock" data-testid="print-control-dock">
+      <div
+        className="print-control-dock"
+        data-testid="print-control-dock"
+        style={{
+          '--print-dock-columns': dockLayout.columns,
+          '--print-dock-position-left': `${dockLayout.left}px`,
+          '--print-dock-position-top': `${dockLayout.top}px`,
+        }}
+      >
         <button aria-label="Edit personalization" className="print-control print-control--edit" onClick={() => onEdit?.(itemKey)} type="button"><Pencil size={15} /></button>
         <button
           aria-label="Drag to rotate personalization"

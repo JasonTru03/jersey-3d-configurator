@@ -65,10 +65,11 @@ describe('wide configurator viewport layout', () => {
 
   it('keeps personalization actions in a touch-friendly horizontal dock while resize stays on the frame', () => {
     expect(ruleBody(css, '.print-toolbar-overlay')).toContain('pointer-events: none');
-    expect(ruleBody(css, '.print-control-dock')).toContain('display: flex');
+    expect(ruleBody(css, '.print-control-dock')).toContain('display: grid');
     expect(ruleBody(css, '.print-control-dock')).toContain('pointer-events: none');
-    expect(ruleBody(css, '.print-control-dock')).toContain('left: clamp(94px, var(--print-dock-left), calc(100% - 94px))');
-    expect(ruleBody(css, '.print-control-dock')).toContain('top: max(8px, var(--print-dock-top))');
+    expect(ruleBody(css, '.print-control-dock')).toContain('left: var(--print-dock-position-left)');
+    expect(ruleBody(css, '.print-control-dock')).toContain('top: var(--print-dock-position-top)');
+    expect(ruleBody(css, '.print-control-dock')).toContain('grid-template-columns: repeat(var(--print-dock-columns), 44px)');
     expect(ruleBody(css, '.print-control')).toContain('width: 44px');
     expect(ruleBody(css, '.print-control')).toContain('height: 44px');
     expect(ruleBody(css, '.print-control')).toContain('pointer-events: auto');

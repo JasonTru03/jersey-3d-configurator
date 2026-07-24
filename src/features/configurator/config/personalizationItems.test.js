@@ -101,6 +101,26 @@ describe('personalization removal patches', () => {
     });
   });
 
+  it('turns off paid player printing when the final player set is removed', () => {
+    const singlePlayerState = {
+      ...state,
+      overrides: {
+        ...state.overrides,
+        printItems: [state.overrides.printItems[0]],
+      },
+    };
+
+    expect(getPersonalizationRemovalPatch(singlePlayerState, 'player:print-1')).toEqual({
+      lighting: 'none',
+      overrides: {
+        printItems: [],
+        printName: '',
+        printNumber: '',
+        printPlacement: null,
+      },
+    });
+  });
+
   it('returns null when the composite key is missing or malformed', () => {
     expect(getPersonalizationRemovalPatch(state, 'text:missing')).toBeNull();
     expect(getPersonalizationRemovalPatch(state, 'missing')).toBeNull();

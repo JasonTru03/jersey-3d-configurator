@@ -51,6 +51,7 @@ export function getPersonalizationRemovalPatch(state = {}, key) {
     if (!items.some((item) => item.id === sourceId)) return null;
     const nextItems = removePrintItem(items, sourceId);
     return {
+      ...(nextItems.length ? {} : { lighting: 'none' }),
       overrides: {
         printItems: nextItems,
         ...legacyFirstItemFields(nextItems),

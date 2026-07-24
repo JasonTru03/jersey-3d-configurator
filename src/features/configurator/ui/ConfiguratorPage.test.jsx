@@ -477,6 +477,7 @@ describe('ConfiguratorPage', () => {
       expect(screen.queryByRole('button', { name: 'Edit personalization' })).not.toBeInTheDocument();
       expect(screen.getByTitle('Orbit view')).toHaveFocus();
     });
+    await waitFor(() => expect(screen.getAllByText('$89').length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
 

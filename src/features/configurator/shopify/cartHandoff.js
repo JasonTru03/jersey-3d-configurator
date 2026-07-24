@@ -5,6 +5,8 @@ import {
 
 const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 const EXPIRED_PRICING_MESSAGE = 'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.';
+export const MAX_SURCHARGE_TOTAL = 10000;
+const PREFERENCE_BASE = BigInt(MAX_SURCHARGE_TOTAL + 1);
 
 export function parseShopifyLaunch(search) {
   const params = new URLSearchParams(search);
@@ -54,6 +56,9 @@ export function createCartUrl({ context, quote, state, productionFiles }) {
     if (!surchargeItems) {
       throw new Error(EXPIRED_PRICING_MESSAGE);
     }
+    if (surchargeItems.some((item) => item.variantId === String(variantId))) {
+      throw new Error(EXPIRED_PRICING_MESSAGE);
+    }
     surchargeItems.forEach(({ variantId: surchargeVariantId, quantity }) => {
       cartItems.push(`${surchargeVariantId}:${quantity}`);
     });
@@ -69,47 +74,75 @@ export function createCartUrl({ context, quote, state, productionFiles }) {
 }
 
 export function findSurchargeCombination(variantMap, target) {
-  if (!Number.isSafeInteger(target) || target < 0) return null;
+  if (
+    !Number.isSafeInteger(target)
+    || target < 0
+    || target > MAX_SURCHARGE_TOTAL
+  ) return null;
   if (target === 0) return [];
 
-  const entries = Object.entries(variantMap ?? {})
-    .map(([amount, variantId]) => ({
-      amount: Number(amount),
-      variantId: String(variantId),
-    }))
-    .filter(({ amount, variantId }) => (
-      Number.isSafeInteger(amount)
-      && amount > 0
-      && amount <= target
-      && isNumericId(variantId)
-    ))
-    .sort(compareSurchargeEntries);
+  const entries = normalizeSurchargeEntries(variantMap);
+  if (!entries?.length) return null;
 
-  if (!entries.length) return null;
+  const exact = entries.find((entry) => entry.amount === target);
+  if (exact) return [{ ...exact, quantity: 1 }];
 
   let bestBySubtotal = Array(target + 1).fill(null);
-  bestBySubtotal[0] = [];
+  bestBySubtotal[0] = createInitialCombinationState();
 
-  for (const entry of entries) {
-    const nextBestBySubtotal = [...bestBySubtotal];
-    for (let subtotal = 0; subtotal <= target; subtotal += 1) {
-      const previous = bestBySubtotal[subtotal];
-      if (!previous) continue;
+  for (const entry of entries.filter((item) => item.amount < target)) {
+    const nextBestBySubtotal = Array(target + 1).fill(null);
+    const maximumRemainder = Math.min(entry.amount - 1, target);
 
-      const maximumQuantity = Math.floor((target - subtotal) / entry.amount);
-      for (let quantity = 1; quantity <= maximumQuantity; quantity += 1) {
-        const nextSubtotal = subtotal + (entry.amount * quantity);
-        const candidate = [...previous, { ...entry, quantity }];
-        const current = nextBestBySubtotal[nextSubtotal];
-        if (!current || compareCombinations(candidate, current) < 0) {
-          nextBestBySubtotal[nextSubtotal] = candidate;
+    for (let remainder = 0; remainder <= maximumRemainder; remainder += 1) {
+      let bestSource = null;
+      let index = 0;
+
+      for (
+        let subtotal = remainder;
+        subtotal <= target;
+        subtotal += entry.amount
+      ) {
+        const previous = bestBySubtotal[subtotal];
+        if (previous) {
+          nextBestBySubtotal[subtotal] = advanceCombinationState(
+            previous,
+            entry,
+            0,
+          );
         }
+
+        if (index > 0) {
+          const sourceState = bestBySubtotal[subtotal - entry.amount];
+          if (sourceState) {
+            const source = { index: index - 1, state: sourceState };
+            if (!bestSource || compareCombinationSources(source, bestSource) < 0) {
+              bestSource = source;
+            }
+          }
+        }
+
+        if (bestSource) {
+          const quantity = index - bestSource.index;
+          const withEntry = advanceCombinationState(
+            bestSource.state,
+            entry,
+            quantity,
+          );
+          const current = nextBestBySubtotal[subtotal];
+          if (!current || compareCombinationStates(withEntry, current) < 0) {
+            nextBestBySubtotal[subtotal] = withEntry;
+          }
+        }
+
+        index += 1;
       }
     }
+
     bestBySubtotal = nextBestBySubtotal;
   }
 
-  return bestBySubtotal[target];
+  return buildSurchargeItems(bestBySubtotal[target]);
 }
 
 function normalizeShop(value) {
@@ -175,28 +208,100 @@ function isNumericId(value) {
     || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 }
 
-function compareCombinations(first, second) {
-  const firstUnits = first.reduce((total, item) => total + item.quantity, 0);
-  const secondUnits = second.reduce((total, item) => total + item.quantity, 0);
-  if (firstUnits !== secondUnits) return firstUnits - secondUnits;
+function normalizeSurchargeEntries(variantMap) {
+  const entries = Object.entries(variantMap ?? {})
+    .map(([amount, variantId]) => ({
+      amount: Number(amount),
+      originalVariantId: variantId,
+    }))
+    .filter(({ amount, originalVariantId }) => (
+      Number.isSafeInteger(amount)
+      && amount > 0
+      && isNumericId(originalVariantId)
+    ))
+    .map(({ amount, originalVariantId }) => ({
+      amount,
+      variantId: String(originalVariantId),
+    }))
+    .sort(compareSurchargeEntries);
 
-  const firstKinds = first.length;
-  const secondKinds = second.length;
-  if (firstKinds !== secondKinds) return firstKinds - secondKinds;
-
-  const amounts = [...new Set([
-    ...first.map((item) => item.amount),
-    ...second.map((item) => item.amount),
-  ])].sort((firstAmount, secondAmount) => secondAmount - firstAmount);
-  for (const amount of amounts) {
-    const firstQuantity = first.find((item) => item.amount === amount)?.quantity ?? 0;
-    const secondQuantity = second.find((item) => item.amount === amount)?.quantity ?? 0;
-    if (firstQuantity !== secondQuantity) return secondQuantity - firstQuantity;
+  const amountByVariantId = new Map();
+  const uniqueEntries = [];
+  for (const entry of entries) {
+    const mappedAmount = amountByVariantId.get(entry.variantId);
+    if (mappedAmount !== undefined && mappedAmount !== entry.amount) return null;
+    if (mappedAmount === entry.amount) continue;
+    amountByVariantId.set(entry.variantId, entry.amount);
+    uniqueEntries.push(entry);
   }
 
-  const firstIds = first.map((item) => item.variantId).sort();
-  const secondIds = second.map((item) => item.variantId).sort();
-  return firstIds.join('|').localeCompare(secondIds.join('|'), 'en', { numeric: true });
+  return uniqueEntries;
+}
+
+function createInitialCombinationState() {
+  return {
+    entry: null,
+    lines: 0,
+    preferenceCode: 0n,
+    previous: null,
+    quantity: 0,
+    units: 0,
+  };
+}
+
+function advanceCombinationState(previous, entry, quantity) {
+  return {
+    entry,
+    lines: previous.lines + (quantity > 0 ? 1 : 0),
+    preferenceCode: (previous.preferenceCode * PREFERENCE_BASE) + BigInt(quantity),
+    previous,
+    quantity,
+    units: previous.units + quantity,
+  };
+}
+
+function compareCombinationStates(first, second) {
+  if (first.units !== second.units) return first.units - second.units;
+  if (first.lines !== second.lines) return first.lines - second.lines;
+  if (first.preferenceCode !== second.preferenceCode) {
+    return first.preferenceCode > second.preferenceCode ? -1 : 1;
+  }
+  return 0;
+}
+
+function compareCombinationSources(first, second) {
+  const firstUnits = first.state.units - first.index;
+  const secondUnits = second.state.units - second.index;
+  if (firstUnits !== secondUnits) return firstUnits - secondUnits;
+  if (first.state.lines !== second.state.lines) {
+    return first.state.lines - second.state.lines;
+  }
+
+  const firstPreference = (first.state.preferenceCode * PREFERENCE_BASE)
+    - BigInt(first.index);
+  const secondPreference = (second.state.preferenceCode * PREFERENCE_BASE)
+    - BigInt(second.index);
+  if (firstPreference !== secondPreference) {
+    return firstPreference > secondPreference ? -1 : 1;
+  }
+  return 0;
+}
+
+function buildSurchargeItems(state) {
+  if (!state) return null;
+
+  const items = [];
+  let current = state;
+  while (current.previous) {
+    if (current.quantity > 0) {
+      items.push({
+        ...current.entry,
+        quantity: current.quantity,
+      });
+    }
+    current = current.previous;
+  }
+  return items.reverse();
 }
 
 function compareSurchargeEntries(first, second) {

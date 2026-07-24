@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createCartUrl,
   findSurchargeCombination,
+  MAX_SURCHARGE_TOTAL,
   parseShopifyLaunch,
 } from './cartHandoff.js';
 
@@ -98,6 +99,19 @@ describe('cart handoff', () => {
     expect(url).toContain('/cart/48039101923479:1,49000000000018:1');
   });
 
+  it('takes the exact fast path at the supported upper boundary', () => {
+    expect(findSurchargeCombination({
+      1: '4900000000000001',
+      [MAX_SURCHARGE_TOTAL]: '4900000000010000',
+    }, MAX_SURCHARGE_TOTAL)).toEqual([
+      {
+        amount: MAX_SURCHARGE_TOTAL,
+        quantity: 1,
+        variantId: '4900000000010000',
+      },
+    ]);
+  });
+
   it('composes 62 dollars from 50 and 12 when the exact amount is absent', () => {
     const context = parseShopifyLaunch(
       '?shop=testcsj.myshopify.com'
@@ -169,6 +183,73 @@ describe('cart handoff', () => {
     ]);
   });
 
+  it('rejects totals above the supported price domain without allocating by target', () => {
+    expect(findSurchargeCombination({
+      [MAX_SURCHARGE_TOTAL + 1]: '4900000000010001',
+    }, MAX_SURCHARGE_TOTAL + 1)).toBeNull();
+
+    expect(() => createCartUrl({
+      context: {
+        shop: 'testcsj.myshopify.com',
+        variantMap: { m: '48039101923479' },
+        surchargeVariantMap: {
+          [MAX_SURCHARGE_TOTAL + 1]: '4900000000010001',
+        },
+      },
+      quote: {
+        customizationTotal: MAX_SURCHARGE_TOTAL + 1,
+        merchandisePrice: 89,
+        total: MAX_SURCHARGE_TOTAL + 90,
+      },
+      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    })).toThrow(
+      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
+    );
+  });
+
+  it('rejects one surcharge variant mapped to different amounts', () => {
+    const conflictingMap = {
+      8: '4900000000000008',
+      12: '4900000000000008',
+    };
+
+    expect(findSurchargeCombination(conflictingMap, 16)).toBeNull();
+    expect(() => createCartUrl({
+      context: {
+        shop: 'testcsj.myshopify.com',
+        variantMap: { m: '48039101923479' },
+        surchargeVariantMap: conflictingMap,
+      },
+      quote: { customizationTotal: 16, merchandisePrice: 89, total: 105 },
+      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    })).toThrow(
+      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
+    );
+  });
+
+  it('allows equal amounts with different variants and chooses a stable variant id', () => {
+    expect(findSurchargeCombination({
+      8: '4900000000000009',
+      '08': '4900000000000008',
+    }, 8)).toEqual([
+      { amount: 8, quantity: 1, variantId: '4900000000000008' },
+    ]);
+  });
+
+  it('rejects a surcharge combination that reuses the base jersey variant', () => {
+    expect(() => createCartUrl({
+      context: {
+        shop: 'testcsj.myshopify.com',
+        variantMap: { m: '48039101923479' },
+        surchargeVariantMap: { 8: '48039101923479' },
+      },
+      quote: { customizationTotal: 8, merchandisePrice: 89, total: 97 },
+      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    })).toThrow(
+      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
+    );
+  });
+
   it('reports expired pricing before cart navigation when no exact sum exists', () => {
     const context = parseShopifyLaunch(
       '?shop=testcsj.myshopify.com'
@@ -183,6 +264,34 @@ describe('cart handoff', () => {
     })).toThrow(
       'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
     );
+  });
+
+  it('round-trips Unicode and reserved characters in compact custom text properties', () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com'
+      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D',
+    );
+    const url = createCartUrl({
+      context,
+      quote: { customizationTotal: 0, merchandisePrice: 89, total: 89 },
+      state: {
+        layout: 'm',
+        extras: {},
+        overrides: {
+          bottomPattern: { enabled: false },
+          customTextItems: [
+            { id: 'text-1', text: '  蓝军⚽\nLONDON | & =  ' },
+            { id: 'text-2', text: '🔥冠军' },
+          ],
+        },
+      },
+    });
+
+    expect(decodeProperties(url)).toMatchObject({
+      'Custom Text': '蓝军⚽\nLONDON | & = | 🔥冠军',
+    });
+    expect(url).not.toContain('蓝军');
+    expect(url).not.toContain('data:');
   });
 
   it('rejects an invalid shop host, malformed maps, and missing selected-size variants', () => {

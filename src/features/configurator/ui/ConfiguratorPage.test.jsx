@@ -79,6 +79,51 @@ beforeEach(() => {
 });
 
 describe('ConfiguratorPage', () => {
+  it('shows the six task-based navigation sections', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    const navigation = screen.getByRole('navigation', { name: 'Configurator sections' });
+    expect(within(navigation).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Size',
+      'Design',
+      'Fabric',
+      'Personalize',
+      'Artwork',
+      'Extras',
+    ]);
+    expect(within(navigation).queryByRole('button', { name: 'Colorway' })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
+  });
+
+  it('keeps jersey appearance controls together under Design', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
+
+    expect(screen.getByRole('region', { name: 'Jersey templates' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Zone colors' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Continuous bottom pattern' })).toBeInTheDocument();
+  });
+
+  it('adds custom text from Personalize and updates the total by eight dollars', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
+
+    await waitFor(() => expect(screen.getAllByText('$97').length).toBeGreaterThan(0));
+    expect(await screen.findByLabelText('Text content')).toHaveValue('YOUR TEXT');
+  });
+
+  it('shows the active design and fabric in the stage caption', async () => {
+    render(<ConfiguratorPage />);
+
+    expect(await screen.findByText('Solid / Stadium knit')).toBeInTheDocument();
+  });
+
   it('announces configuration update errors', async () => {
     rendererHarness.configurationError = 'Custom text items must be an array.';
     render(<ConfiguratorPage />);
@@ -166,17 +211,17 @@ describe('ConfiguratorPage', () => {
 
     expect(await screen.findByText('Chelsea Match Jersey')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
-    fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fabric' }));
+    fireEvent.click(screen.getByRole('button', { name: /Player mesh/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Away Black/i })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: /Player mesh/i })).toHaveAttribute('aria-pressed', 'true');
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Home White/i })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: /Stadium knit/i })).toHaveAttribute('aria-pressed', 'true');
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
@@ -190,7 +235,7 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
     await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
@@ -208,7 +253,7 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
     await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
@@ -239,8 +284,8 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
-    fireEvent.click(screen.getByRole('button', { name: /Name and number set/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
     await waitFor(() => expect(screen.getAllByText('$107').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
 
@@ -258,14 +303,14 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
     await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     fireEvent.click(await screen.findByRole('link', { name: 'Download production ZIP' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
-    fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Away Black/i })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+    fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
+    await waitFor(() => expect(document.querySelector('[data-option-group="layout"][data-option-id="xl"]')).toHaveAttribute('aria-pressed', 'true'));
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
@@ -279,7 +324,7 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Diagonal' }));
     fireEvent.click(screen.getByRole('button', { name: 'Sleeves' }));
     fireEvent.click(screen.getByRole('button', { name: 'Use #C84F3D' }));
@@ -296,35 +341,41 @@ describe('ConfiguratorPage', () => {
     });
   });
 
-  it('focuses the name field when editing a selected print', async () => {
+  it('opens the matching Personalize editor from the 3D toolbar', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
-    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
-    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
+    await screen.findByLabelText('Name');
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Size' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Edit personalization' }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Name')).toHaveFocus();
+      expect(screen.getByRole('heading', { name: 'Personalize' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Name')).toHaveValue('PLAYER');
     });
   });
 
-  it('recreates a name set after its only print is deleted', async () => {
+  it('focuses the element list after deletion and can recreate a player set', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
-    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
+    await screen.findByLabelText('Name');
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete personalization' }));
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Edit personalization' })).not.toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Personalization elements' })).toHaveFocus();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
 
-    expect(screen.queryByRole('button', { name: 'Edit personalization' })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Name')).toHaveValue('PLAYER');
+    await waitFor(() => expect(screen.getAllByText('$107').length).toBeGreaterThan(0));
   });
 });
 

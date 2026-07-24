@@ -4,7 +4,6 @@ import {
   CircuitBoard,
   FolderOpen,
   Layers3,
-  Lightbulb,
   Moon,
   PackageCheck,
   Palette,
@@ -18,12 +17,12 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { ensurePrintItems, getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
-import { findPersonalizationItem, getSelectablePersonalizationItems } from '../config/personalizationItems.js';
+import { getSelectablePersonalizationItems } from '../config/personalizationItems.js';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
+import { PersonalizePanel } from './PersonalizePanel.jsx';
 import { TemplateLibrary } from './TemplateLibrary.jsx';
 import { ZoneColorPanel } from './ZoneColorPanel.jsx';
 import { BottomPatternPanel } from './BottomPatternPanel.jsx';
@@ -40,10 +39,9 @@ import './configurator.css';
 
 const sectionDefaults = [
   { id: 'layout', label: 'Size', icon: Shirt },
-  { id: 'colorway', label: 'Color', icon: Palette },
-  { id: 'templates', label: 'Template', icon: Palette },
+  { id: 'design', label: 'Design', icon: Palette },
   { id: 'material', label: 'Fabric', icon: Layers3 },
-  { id: 'lighting', label: 'Print', icon: Lightbulb },
+  { id: 'personalize', label: 'Personalize', icon: Settings2 },
   { id: 'decorations', label: 'Artwork', icon: Sticker },
   { id: 'extras', label: 'Extras', icon: Cable },
 ];
@@ -66,8 +64,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     updateState,
   } = useConfigurator(shopifyContext?.initialLayout ? { layout: shopifyContext.initialLayout } : undefined);
   const fileInputRef = useRef(null);
-  const nameInputRef = useRef(null);
-  const [editingPrintId, setEditingPrintId] = useState(null);
+  const [selectedPersonalizationKey, setSelectedPersonalizationKey] = useState(null);
   const [artworkFocusId, setArtworkFocusId] = useState(null);
   const [section, setSection] = useState('layout');
   const [theme, setTheme] = useState('light');
@@ -79,18 +76,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const bakeProviderRef = useRef(null);
 
   useEffect(() => () => preparedDownload?.release(), [preparedDownload]);
-
-  const handleLightingSelect = (lighting) => {
-    if (lighting === 'none') {
-      updateState({ lighting });
-      return;
-    }
-    const printItems = ensurePrintItems(getPrintItems(state.overrides));
-    updateState({
-      lighting,
-      overrides: { printItems, ...legacyFirstItemFields(printItems) },
-    });
-  };
 
   const handleSaveDesign = async () => {
     try {
@@ -171,8 +156,9 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           theme={theme}
           />
           <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
-          {fileError && <p className="file-error" role="alert">{fileError}</p>}
-          {configurationError && <p className="file-error" role="alert">{configurationError}</p>}
+          {(fileError || configurationError) && (
+            <p className="file-error" role="alert">{fileError || configurationError}</p>
+          )}
           {preparedDownload && !reviewOpen && (
             <div className="prepared-download">
               <PreparedDownloadLink
@@ -186,12 +172,12 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             artworkFocusId={artworkFocusId}
             onBakeProvider={(provider) => { bakeProviderRef.current = provider; }}
             onEditPersonalization={(id) => {
-              const item = findPersonalizationItem(getSelectablePersonalizationItems(state), id);
-              setEditingPrintId(item?.sourceId ?? null);
-              setSection('lighting');
-              requestAnimationFrame(() => nameInputRef.current?.focus());
+              setSelectedPersonalizationKey(id);
+              setSection('personalize');
             }}
+            onPersonalizationSelect={setSelectedPersonalizationKey}
             onStatePatch={updateState}
+            personalizationFocusId={selectedPersonalizationKey}
             product={product}
             state={state}
             selected={selected}
@@ -202,11 +188,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             quote={quote}
             section={section}
             selected={selected}
+            selectedPersonalizationKey={selectedPersonalizationKey}
             state={state}
             updateState={updateState}
-            onLightingSelect={handleLightingSelect}
-            editingPrintId={editingPrintId}
-            nameInputRef={nameInputRef}
+            onPersonalizationSelect={setSelectedPersonalizationKey}
           />
         </div>
       </section>
@@ -322,7 +307,17 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThem
   );
 }
 
-function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLightingSelect, product, quote, section, selected, state, updateState }) {
+function ConfigPanel({
+  onArtworkSelect,
+  onPersonalizationSelect,
+  product,
+  quote,
+  section,
+  selected,
+  selectedPersonalizationKey,
+  state,
+  updateState,
+}) {
   const patchAppearance = (patch) => {
     const currentAppearance = state.overrides?.appearance ?? {};
     updateState({
@@ -351,14 +346,7 @@ function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLighting
           onSelect={(layout) => updateState({ layout })}
         />
       )}
-      {section === 'colorway' && (
-        <ColorwayPanel
-          options={product.options.colorway}
-          selectedId={state.colorway}
-          onSelect={(colorway) => updateState({ colorway })}
-        />
-      )}
-      {section === 'templates' && (
+      {section === 'design' && (
         <>
           <TemplateLibrary
             activeTemplate={state.overrides?.appearance?.template}
@@ -384,23 +372,13 @@ function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLighting
           onSelect={(material) => updateState({ material })}
         />
       )}
-      {section === 'lighting' && (
-        <>
-          <OptionGrid
-            group="lighting"
-            options={product.options.lighting}
-            selectedId={state.lighting}
-            onSelect={onLightingSelect}
-          />
-          {state.lighting !== 'none' && (
-            <PrintFields
-              overrides={state.overrides}
-              editingPrintId={editingPrintId}
-              nameInputRef={nameInputRef}
-              updateState={updateState}
-            />
-          )}
-        </>
+      {section === 'personalize' && (
+        <PersonalizePanel
+          onSelect={onPersonalizationSelect}
+          selectedKey={selectedPersonalizationKey}
+          state={state}
+          updateState={updateState}
+        />
       )}
       {section === 'extras' && (
         <ExtrasPanel
@@ -412,7 +390,7 @@ function ConfigPanel({ editingPrintId, nameInputRef, onArtworkSelect, onLighting
       {section === 'decorations' && (
         <DecorationPanel onArtworkSelect={onArtworkSelect} product={product} state={state} updateState={updateState} />
       )}
-      <BuildSummary quote={quote} selected={selected} />
+      <BuildSummary product={product} quote={quote} selected={selected} state={state} />
     </aside>
   );
 }
@@ -456,36 +434,6 @@ function OptionGrid({ group, options, selectedId, onSelect }) {
   );
 }
 
-function ColorwayPanel({ options, selectedId, onSelect }) {
-  return (
-    <div className="option-stack">
-      {options.map((option) => (
-        <button
-          aria-pressed={selectedId === option.id}
-          className={selectedId === option.id ? 'option-card color-card active' : 'option-card color-card'}
-          data-option-group="colorway"
-          data-option-id={option.id}
-          key={option.id}
-          onClick={() => onSelect(option.id)}
-          type="button"
-        >
-          <span>
-            <strong>{option.label}</strong>
-            <small>{option.description}</small>
-          </span>
-          <span className="swatch-row" aria-hidden="true">
-            {Object.entries(option.swatches)
-              .slice(0, 3)
-              .map(([key, value]) => (
-                <i key={key} style={{ background: value }} />
-              ))}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function ExtrasPanel({ extras, state, updateState }) {
   return (
     <div className="option-stack">
@@ -519,43 +467,11 @@ function ExtrasPanel({ extras, state, updateState }) {
   );
 }
 
-function PrintFields({ editingPrintId, nameInputRef, overrides, updateState }) {
-  const items = getPrintItems(overrides);
-  const active = items.find((item) => item.id === editingPrintId) ?? items[0];
-  const patchActive = (patch) => {
-    const next = patchPrintItem(items, active.id, patch);
-    updateState({ overrides: { printItems: next, ...legacyFirstItemFields(next) } });
-  };
-  return (
-    <div className="print-fields">
-      <label>
-        <span>Name</span>
-        <input
-          maxLength={14}
-          onChange={(event) => patchActive({ name: event.target.value })}
-          placeholder="PLAYER"
-          type="text"
-          ref={nameInputRef}
-          value={active?.name ?? ''}
-        />
-      </label>
-      <label>
-        <span>Number</span>
-        <input
-          inputMode="numeric"
-          maxLength={2}
-          onChange={(event) => patchActive({ number: event.target.value })}
-          placeholder="16"
-          type="text"
-          value={active?.number ?? ''}
-        />
-      </label>
-      <p>Drag the print on the jersey to place it.</p>
-    </div>
-  );
-}
-
-function BuildSummary({ quote, selected }) {
+function BuildSummary({ product, quote, selected, state }) {
+  const templateLabel = product.options.templates.find(
+    (template) => template.id === state.overrides?.appearance?.template,
+  )?.label ?? 'Solid';
+  const personalizationCount = getSelectablePersonalizationItems(state).length;
   return (
     <section className="summary-panel">
       <div className="summary-title">
@@ -568,16 +484,16 @@ function BuildSummary({ quote, selected }) {
           <dd>{selected.layout?.shortLabel}</dd>
         </div>
         <div>
-          <dt>Colorway</dt>
-          <dd>{selected.colorway?.label}</dd>
+          <dt>Design</dt>
+          <dd>{templateLabel}</dd>
         </div>
         <div>
           <dt>Fabric</dt>
           <dd>{selected.material?.shortLabel}</dd>
         </div>
         <div>
-          <dt>Print</dt>
-          <dd>{selected.lighting?.shortLabel}</dd>
+          <dt>Personalize</dt>
+          <dd>{personalizationCount ? `${personalizationCount} element${personalizationCount === 1 ? '' : 's'}` : 'None'}</dd>
         </div>
       </dl>
       <div className="quote-lines">

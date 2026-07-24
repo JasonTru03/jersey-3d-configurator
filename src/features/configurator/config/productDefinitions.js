@@ -21,11 +21,11 @@ export const jerseyProduct = {
   },
   optionLabels: {
     layout: 'Size',
-    colorway: 'Colorway',
+    design: 'Design',
     material: 'Fabric',
-    lighting: 'Print',
+    personalize: 'Personalize',
+    decorations: 'Artwork',
     extras: 'Extras',
-    templates: 'Template',
   },
   decorationPresets: [
     {

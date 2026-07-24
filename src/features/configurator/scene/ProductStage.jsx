@@ -57,6 +57,9 @@ export function ProductStage({
   const [activePrintId, setActivePrintId] = useState(null);
   const [selectedPrintId, setSelectedPrintId] = useState(null);
   const [printAnchor, setPrintAnchor] = useState({ visible: false });
+  const templateLabel = (product.options?.templates ?? []).find(
+    (template) => template.id === state.overrides?.appearance?.template,
+  )?.label ?? 'Solid';
 
   const handlePrintSelectionChange = useCallback((id) => {
     reportedNullSelectionRef.current = id === null ? reportedNullSelectionRef.current : null;
@@ -258,7 +261,7 @@ export function ProductStage({
       </div>
       <div className="stage-caption">
         <strong>{selected.layout?.label}</strong>
-        <span>{selected.colorway?.label} / {selected.material?.shortLabel}</span>
+        <span>{templateLabel} / {selected.material?.shortLabel}</span>
       </div>
     </section>
   );

@@ -86,16 +86,16 @@ describe('ProductStage print toolbar', () => {
     expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
   });
 
-  it('stores a clockwise forty-five-degree rotation from one button click', () => {
+  it('stores a five-degree rotation from the rotate handle keyboard control', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate personalization 45 degrees' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to rotate personalization' }), { key: 'ArrowLeft' });
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({
-        printItems: [expect.objectContaining({ id: 'print-1', rotation: 45 })],
+        printItems: [expect.objectContaining({ id: 'print-1', rotation: 5 })],
       }),
     }));
   });
@@ -167,7 +167,7 @@ describe('ProductStage print toolbar', () => {
     expect(screen.getByRole('group', { name: 'Selected personalization controls' })).toBeInTheDocument();
   });
 
-  it('rotates a custom text personalization by forty-five degrees', () => {
+  it('rotates a custom text personalization by five degrees from the keyboard', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
       lighting: 'none',
@@ -175,11 +175,11 @@ describe('ProductStage print toolbar', () => {
     }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate personalization 45 degrees' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to rotate personalization' }), { key: 'ArrowLeft' });
 
     expect(onStatePatch).toHaveBeenCalledWith({
       overrides: {
-        customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 45 })],
+        customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 5 })],
       },
     });
   });
@@ -331,10 +331,10 @@ describe('ProductStage print toolbar', () => {
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('text:same-id'));
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate personalization 45 degrees' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to rotate personalization' }), { key: 'ArrowLeft' });
     expect(onStatePatch).toHaveBeenLastCalledWith({
       overrides: {
-        customTextItems: [expect.objectContaining({ id: 'same-id', rotation: 45 })],
+        customTextItems: [expect.objectContaining({ id: 'same-id', rotation: 5 })],
       },
     });
 

@@ -62,4 +62,17 @@ describe('wide configurator viewport layout', () => {
     const mobile = css.slice(css.indexOf('@media (max-width: 720px)'));
     expect(ruleBody(mobile, '.side-nav')).toContain('grid-template-columns: repeat(3, 1fr)');
   });
+
+  it('keeps personalization actions in a touch-friendly horizontal dock while resize stays on the frame', () => {
+    expect(ruleBody(css, '.print-toolbar-overlay')).toContain('pointer-events: none');
+    expect(ruleBody(css, '.print-control-dock')).toContain('display: flex');
+    expect(ruleBody(css, '.print-control-dock')).toContain('pointer-events: none');
+    expect(ruleBody(css, '.print-control')).toContain('width: 44px');
+    expect(ruleBody(css, '.print-control')).toContain('height: 44px');
+    expect(ruleBody(css, '.print-control')).toContain('pointer-events: auto');
+    expect(ruleBody(css, '.print-control--rotate')).toContain('touch-action: none');
+    expect(ruleBody(css, '.print-control--rotate')).toContain('cursor: grab');
+    expect(ruleBody(css, '.print-control--rotate.is-dragging')).toContain('cursor: grabbing');
+    expect(ruleBody(css, '.print-control--resize')).toContain('top: calc(var(--print-top) + var(--print-height) - 22px)');
+  });
 });

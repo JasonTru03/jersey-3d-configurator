@@ -46,18 +46,23 @@ function renderToolbarInStage({ stageWidth, stageHeight, toolbarRect, anchor: st
     if (this.classList?.contains('stage-toolbar') && toolbarRect) return makeRect(toolbarRect);
     return originalGetBoundingClientRect.call(this);
   });
-  const result = render(
+  const renderStage = (currentAnchor) => (
     <section className="stage-wrap">
       <div className="stage-toolbar"><button type="button">Orbit</button></div>
       <div className="stage">
         <PersonalizationToolbarOverlay
-          anchor={stageAnchor}
+          anchor={currentAnchor}
           item={{ id: 'print-1', rotation: 0, scale: 1 }}
         />
       </div>
-    </section>,
+    </section>
   );
-  return { ...result, restoreRects: () => rectSpy.mockRestore() };
+  const result = render(renderStage(stageAnchor));
+  return {
+    ...result,
+    rerenderToolbar: (nextAnchor) => result.rerender(renderStage(nextAnchor)),
+    restoreRects: () => rectSpy.mockRestore(),
+  };
 }
 
 function getDockButtonRects(dock) {
@@ -98,7 +103,7 @@ describe('PersonalizationToolbarOverlay', () => {
     expect(screen.getByRole('button', { name: 'Resize personalization' })).toBeInTheDocument();
   });
 
-  it('moves a left-top dock below the stage toolbar so every action remains hittable', async () => {
+  it('models four distinct action rectangles below an overlapping left-top stage toolbar', async () => {
     const toolbarRect = makeRect({ left: 16, top: 16, width: 144, height: 44 });
     const view = renderToolbarInStage({
       stageWidth: 640,
@@ -182,6 +187,41 @@ describe('PersonalizationToolbarOverlay', () => {
     }
   });
 
+  it('freezes the resolved dock geometry until the rotation pointer is released', async () => {
+    const view = renderToolbarInStage({
+      stageWidth: 640,
+      stageHeight: 400,
+      toolbarRect: { left: 16, top: 16, width: 144, height: 44 },
+      anchor: { visible: true, left: 10, top: 20, width: 80, height: 40 },
+    });
+
+    try {
+      const dock = screen.getByTestId('print-control-dock');
+      const rotateHandle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+      await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('68px'));
+      const frozenGeometry = {
+        columns: dock.style.getPropertyValue('--print-dock-columns'),
+        left: dock.style.getPropertyValue('--print-dock-position-left'),
+        top: dock.style.getPropertyValue('--print-dock-position-top'),
+      };
+
+      fireEvent.pointerDown(rotateHandle, { pointerId: 20, clientX: 50, clientY: -20 });
+      view.rerenderToolbar({ visible: true, left: 400, top: 300, width: 170, height: 90 });
+
+      expect(dock.style.getPropertyValue('--print-dock-columns')).toBe(frozenGeometry.columns);
+      expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe(frozenGeometry.left);
+      expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe(frozenGeometry.top);
+
+      fireEvent.pointerUp(rotateHandle, { pointerId: 20, clientX: 50, clientY: -20 });
+      expect(dock.style.getPropertyValue('--print-dock-columns')).toBe('4');
+      expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe('485px');
+      expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('248px');
+    } finally {
+      view.unmount();
+      view.restoreRects();
+    }
+  });
+
   it('captures the rotation pointer and emits continuous rotation after a drag threshold', () => {
     const { callbacks } = renderToolbar();
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
@@ -216,7 +256,10 @@ describe('PersonalizationToolbarOverlay', () => {
     fireEvent.pointerDown(handle, { pointerId: 4, clientX: 150, clientY: 50 });
     fireEvent.pointerMove(handle, { pointerId: 4, clientX: 250, clientY: 130 });
     const dock = screen.getByTestId('print-control-dock');
-    expect(dock).toHaveStyle({ '--print-dock-left': '150px', '--print-dock-top': '48px' });
+    expect(dock).toHaveStyle({
+      '--print-dock-position-left': '150px',
+      '--print-dock-position-top': '48px',
+    });
 
     rerender(
       <PersonalizationToolbarOverlay
@@ -225,13 +268,19 @@ describe('PersonalizationToolbarOverlay', () => {
         {...callbacks}
       />,
     );
-    expect(dock).toHaveStyle({ '--print-dock-left': '150px', '--print-dock-top': '48px' });
+    expect(dock).toHaveStyle({
+      '--print-dock-position-left': '150px',
+      '--print-dock-position-top': '48px',
+    });
 
     fireEvent.pointerMove(handle, { pointerId: 4, clientX: 150, clientY: 230 });
     expect(callbacks.onRotate).toHaveBeenLastCalledWith('print-1', 180);
 
     fireEvent.pointerUp(handle, { pointerId: 4, clientX: 150, clientY: 50 });
-    expect(dock).toHaveStyle({ '--print-dock-left': '175px', '--print-dock-top': '128px' });
+    expect(dock).toHaveStyle({
+      '--print-dock-position-left': '175px',
+      '--print-dock-position-top': '128px',
+    });
   });
 
   it('clears a hidden anchor gesture before showing the latest unfrozen dock', () => {
@@ -261,8 +310,8 @@ describe('PersonalizationToolbarOverlay', () => {
     );
     expect(screen.getByRole('button', { name: 'Drag to rotate personalization' })).not.toHaveClass('is-dragging');
     expect(screen.getByTestId('print-control-dock')).toHaveStyle({
-      '--print-dock-left': '60px',
-      '--print-dock-top': '148px',
+      '--print-dock-position-left': '60px',
+      '--print-dock-position-top': '148px',
     });
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(10);
   });
@@ -320,7 +369,10 @@ describe('PersonalizationToolbarOverlay', () => {
     fireEvent.pointerMove(handle, { pointerId: 5, clientX: 200, clientY: 100 });
 
     expect(callbacks.onRotate).not.toHaveBeenCalled();
-    expect(screen.getByTestId('print-control-dock')).toHaveStyle({ '--print-dock-left': '150px', '--print-dock-top': '48px' });
+    expect(screen.getByTestId('print-control-dock')).toHaveStyle({
+      '--print-dock-position-left': '150px',
+      '--print-dock-position-top': '48px',
+    });
   });
 
   it('consumes a distinct pointer-up position once and does not duplicate the last move', () => {

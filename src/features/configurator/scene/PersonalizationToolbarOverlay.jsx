@@ -52,7 +52,7 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
   const resizeStart = useRef(null);
   const rotationStart = useRef(null);
   const [stageArea, setStageArea] = useState(null);
-  const [frozenDock, setFrozenDock] = useState(null);
+  const [frozenDockLayout, setFrozenDockLayout] = useState(null);
   const [isRotating, setIsRotating] = useState(false);
   const itemKey = item?.key ?? item?.id ?? null;
   const anchorVisible = Boolean(anchor?.visible);
@@ -64,7 +64,7 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
     resizeStart.current = null;
     releaseGesturePointer(rotation);
     releaseGesturePointer(resizeGesture);
-    setFrozenDock(null);
+    setFrozenDockLayout(null);
     setIsRotating(false);
   }, [anchorVisible, itemKey]);
 
@@ -95,8 +95,9 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
   }, [anchorVisible, itemKey]);
 
   if (!item || !anchorVisible) return null;
-  const dockPosition = frozenDock ?? getDockPosition(anchor);
-  const dockLayout = getPersonalizationDockLayout(dockPosition, anchor, stageArea);
+  const dockPosition = getDockPosition(anchor);
+  const dockLayout = frozenDockLayout
+    ?? getPersonalizationDockLayout(dockPosition, anchor, stageArea);
 
   const clearResize = (event) => {
     const start = resizeStart.current;
@@ -168,7 +169,7 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
     const finalStart = rotationStart.current ?? start;
     rotationStart.current = null;
     releaseGesturePointer(finalStart);
-    setFrozenDock(null);
+    setFrozenDockLayout(null);
     setIsRotating(false);
   };
 
@@ -194,7 +195,7 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
       }),
       hasMoved: false,
     };
-    setFrozenDock(getDockPosition(anchor));
+    setFrozenDockLayout(dockLayout);
     setIsRotating(true);
   };
 
@@ -220,8 +221,6 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
         '--print-top': `${anchor.top}px`,
         '--print-width': `${anchor.width}px`,
         '--print-height': `${anchor.height}px`,
-        '--print-dock-left': `${dockPosition.left}px`,
-        '--print-dock-top': `${dockPosition.top}px`,
       }}
     >
       <div className="print-selection-frame" data-testid="print-selection-frame" />

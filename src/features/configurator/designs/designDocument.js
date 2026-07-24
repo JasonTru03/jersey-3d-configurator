@@ -1,9 +1,10 @@
 import { normalizeAppearance } from '../config/appearance.js';
 import { createDefaultBottomPattern, normalizeBottomPattern } from '../config/bottomPattern.js';
+import { getCustomTextItems } from '../config/customTextItems.js';
 import { getPrintItems, legacyFirstItemFields } from '../config/printItems.js';
 
 export const DESIGN_DOCUMENT_FORMAT = 'jersey-design';
-export const DESIGN_DOCUMENT_VERSION = 2;
+export const DESIGN_DOCUMENT_VERSION = 3;
 
 export class DesignDocumentError extends Error {
   constructor(code, message) {
@@ -34,7 +35,7 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
     throw new DesignDocumentError('invalid-json', 'This design file is not valid JSON.');
   }
 
-  if (document?.format !== DESIGN_DOCUMENT_FORMAT || ![1, DESIGN_DOCUMENT_VERSION].includes(document.version)) {
+  if (document?.format !== DESIGN_DOCUMENT_FORMAT || ![1, 2, DESIGN_DOCUMENT_VERSION].includes(document.version)) {
     throw new DesignDocumentError('unsupported-version', 'This design file format is not supported.');
   }
 
@@ -50,12 +51,18 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
   const mergedOverrides = { ...defaultState.overrides, ...documentOverrides };
   const printSource = hasDocumentPrintData(documentOverrides) ? documentOverrides : mergedOverrides;
   const printItems = getPrintItems(printSource);
+  let customTextItems;
   const colorwayId = document.state.colorway ?? defaultState.colorway;
   const legacySwatches = colorways.find((colorway) => colorway.id === colorwayId)?.swatches;
   let appearance;
 
   try {
     appearance = normalizeAppearance(documentOverrides.appearance, legacySwatches);
+  } catch (error) {
+    throw new DesignDocumentError('invalid-state', error.message);
+  }
+  try {
+    customTextItems = getCustomTextItems(documentOverrides);
   } catch (error) {
     throw new DesignDocumentError('invalid-state', error.message);
   }
@@ -69,6 +76,7 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
       ...mergedOverrides,
       appearance,
       bottomPattern,
+      customTextItems,
       printItems,
       ...legacyFirstItemFields(printItems),
     },
@@ -78,12 +86,14 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
 function normalizePrintState(state) {
   const overrides = state.overrides ?? {};
   const printItems = getPrintItems(overrides);
+  const customTextItems = getCustomTextItems(overrides);
   return {
     ...state,
     overrides: {
       ...overrides,
       ...(overrides.appearance ? { appearance: normalizeAppearance(overrides.appearance) } : {}),
       ...(overrides.bottomPattern ? { bottomPattern: normalizeDocumentBottomPattern(overrides.bottomPattern, DESIGN_DOCUMENT_VERSION) } : {}),
+      customTextItems,
       printItems,
       ...legacyFirstItemFields(printItems),
     },

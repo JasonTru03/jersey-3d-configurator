@@ -41,6 +41,24 @@ describe('calculateQuote', () => {
     expect(quote.total).toBe(89);
   });
 
+  it('prices only non-blank custom text items as one aggregate adjustment', () => {
+    const quote = calculateQuote(jerseyProduct, {
+      ...jerseyProduct.defaultState,
+      overrides: {
+        customTextItems: [
+          { id: 'text-1', text: 'MASON' },
+          { id: 'text-2', text: '   ' },
+          { id: 'text-3', text: '10' },
+        ],
+      },
+    });
+
+    expect(quote.optionAdjustments).toEqual([{ label: 'Custom text × 2', amount: 16 }]);
+    expect(quote.merchandisePrice).toBe(89);
+    expect(quote.customizationTotal).toBe(16);
+    expect(quote.total).toBe(105);
+  });
+
   it('ignores unknown options instead of hiding the pricing error with a fake amount', () => {
     const quote = calculateQuote(jerseyProduct, {
       ...jerseyProduct.defaultState,

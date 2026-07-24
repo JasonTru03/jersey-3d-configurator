@@ -197,7 +197,7 @@ describe('design document', () => {
     const document = createDesignDocument({ productId: 'fn8788-jersey', state: { ...defaultState, overrides: { bottomPattern } } });
     const loaded = parseDesignDocument(JSON.stringify(document), { defaultState, expectedProductId: 'fn8788-jersey' });
 
-    expect(document.version).toBe(2);
+    expect(document.version).toBe(3);
     expect(document.state.overrides.bottomPattern.bakeMetadata).toEqual({ bakeKey: 'bottom-pattern-atlas:abc', mimeType: 'image/png', width: 2048 });
     expect(JSON.stringify(document)).not.toContain('data:image/png');
     expect(loaded.overrides.bottomPattern).toMatchObject({ enabled: true, transform: bottomPattern.transform, bakeMetadata: { bakeKey: 'bottom-pattern-atlas:abc' } });
@@ -244,5 +244,72 @@ describe('design document', () => {
 
     expect(document.state.overrides.bottomPattern.source).toEqual({ kind: 'uploaded', id: 'pattern-upload-1', assetRef: '' });
     expect(JSON.stringify(document)).not.toContain('data:image/png');
+  });
+
+  it('preserves complete custom text items through a save and import roundtrip', () => {
+    const customTextItems = [{
+      id: 'text-1',
+      text: 'MASON',
+      fontPreset: 'block',
+      fillColor: '#F7F5EF',
+      outlineEnabled: true,
+      outlineColor: '#20242A',
+      letterSpacing: 3,
+      placement: { region: 'back', position: { x: 0, y: 0.25, z: -0.7 }, normal: { x: 0, y: 0, z: -1 } },
+      scale: 1.2,
+      rotation: 25,
+    }];
+    const saved = createDesignDocument({
+      productId: 'fn8788-jersey',
+      state: { ...defaultState, overrides: { customTextItems } },
+    });
+    const loaded = parseDesignDocument(JSON.stringify(saved), { defaultState, expectedProductId: 'fn8788-jersey' });
+
+    expect(saved.version).toBe(3);
+    expect(loaded.overrides.customTextItems).toStrictEqual(customTextItems);
+  });
+
+  it.each([1, 2])('migrates a v%s document without custom text items to an empty collection', (version) => {
+    const state = parseDesignDocument(JSON.stringify({
+      format: 'jersey-design',
+      productId: 'fn8788-jersey',
+      state: defaultState,
+      version,
+    }), { defaultState, expectedProductId: 'fn8788-jersey' });
+
+    expect(state.overrides.customTextItems).toEqual([]);
+  });
+
+  it('rejects an explicitly invalid custom text collection as invalid state', () => {
+    let error;
+    try {
+      parseDesignDocument(JSON.stringify({
+        format: 'jersey-design',
+        productId: 'fn8788-jersey',
+        state: { ...defaultState, overrides: { customTextItems: 'MASON' } },
+        version: 3,
+      }), { defaultState, expectedProductId: 'fn8788-jersey' });
+    } catch (caughtError) {
+      error = caughtError;
+    }
+
+    expect(error).toMatchObject({ code: 'invalid-state' });
+  });
+
+  it('normalizes custom text items when saving', () => {
+    const document = createDesignDocument({
+      productId: 'fn8788-jersey',
+      state: {
+        ...defaultState,
+        overrides: {
+          customTextItems: [{ fillColor: '#f7f5ef', outlineColor: '#20242a', scale: 3, rotation: -20 }],
+        },
+      },
+    });
+
+    expect(document.state.overrides.customTextItems).toEqual([{
+      id: 'text-1', text: '', fontPreset: 'athletic', fillColor: '#F7F5EF', outlineEnabled: true,
+      outlineColor: '#20242A', letterSpacing: 0, placement: null, scale: 1.8, rotation: 340,
+    }]);
   });
 });

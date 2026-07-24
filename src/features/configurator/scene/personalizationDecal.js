@@ -358,6 +358,77 @@ export function shouldUsePersonalizationDecal(
   return coverage === null || coverage >= minimumCoverage;
 }
 
+export function fitPersonalizationDecalToSurface({
+  alphaMask,
+  height,
+  meshes,
+  minimumCoverage = 0.985,
+  minimumScale = 0.55,
+  placement,
+  rotation = 0,
+  scale = 1,
+  width,
+}) {
+  const requestedScale = Number(scale);
+  const floorScale = Math.min(requestedScale, Number(minimumScale));
+  if (![requestedScale, floorScale].every(Number.isFinite)
+    || requestedScale <= 0 || floorScale <= 0) return null;
+
+  const createCandidate = (candidateScale) => {
+    const footprint = {
+      height,
+      rotation,
+      scale: candidateScale,
+      width,
+    };
+    const surface = resolvePersonalizationSurface(meshes, placement, footprint);
+    if (!surface) return null;
+    const geometry = createPersonalizationDecalGeometry({
+      ...footprint,
+      depth: surface.depth,
+      mesh: surface.mesh,
+      normal: surface.normal,
+      position: surface.point,
+      surfaces: surface.surfaces,
+    });
+    const coverage = getPersonalizationUvCoverage(geometry, alphaMask);
+    return {
+      coverage,
+      geometry,
+      scale: candidateScale,
+      surface,
+      valid: coverage === null || coverage >= minimumCoverage,
+    };
+  };
+
+  const requested = createCandidate(requestedScale);
+  if (requested?.valid) return requested;
+  requested?.geometry.dispose();
+
+  let lower = createCandidate(floorScale);
+  if (!lower?.valid) {
+    lower?.geometry.dispose();
+    return null;
+  }
+  if (floorScale === requestedScale) return lower;
+
+  let lowerScale = floorScale;
+  let upperScale = requestedScale;
+  for (let iteration = 0; iteration < 10; iteration += 1) {
+    const candidateScale = (lowerScale + upperScale) / 2;
+    const candidate = createCandidate(candidateScale);
+    if (candidate?.valid) {
+      lower.geometry.dispose();
+      lower = candidate;
+      lowerScale = candidateScale;
+    } else {
+      candidate?.geometry.dispose();
+      upperScale = candidateScale;
+    }
+  }
+  return lower;
+}
+
 function uvContainsPoint(uv, point) {
   const a = new THREE.Vector2();
   const b = new THREE.Vector2();

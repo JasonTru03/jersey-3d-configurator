@@ -15,12 +15,11 @@ import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
 import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTexture.js';
 import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
-  createPersonalizationDecalGeometry,
+  fitPersonalizationDecalToSurface,
   getPersonalizationAlphaMask,
   getPersonalizationSurfaceFromIntersection,
   projectPersonalizationCenterOntoSurface,
   resolvePersonalizationSurface,
-  shouldUsePersonalizationDecal,
   supportsPersonalizationDecalMesh,
 } from './personalizationDecal.js';
 
@@ -29,6 +28,7 @@ const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
 const MIN_PRINT_COPY_DISTANCE = 0.24;
 const PRINT_DRAG_THRESHOLD = 4;
 const MIN_PERSONALIZATION_UV_COVERAGE = 0.985;
+const MIN_PERSONALIZATION_SCALE = 0.55;
 
 export function getPrintPointerDownAction({ hasPrintHit, handledDecoration }) {
   if (hasPrintHit) return 'select-print';
@@ -147,6 +147,7 @@ export class GarmentRenderer {
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
     this.rotationPreviewKey = null;
+    this.pendingPersonalizationConstraints = new Map();
     this.personalizationMutationDisabled = false;
     this.pendingDecorationDeselect = null;
     this.printColor = '#20242a';
@@ -599,6 +600,7 @@ export class GarmentRenderer {
       if (keys.has(key)) return;
       this.disposePrintLayerEntry(layer);
       this.printLayers.delete(key);
+      this.pendingPersonalizationConstraints.delete(key);
       if (this.rotationPreviewKey === key) this.rotationPreviewKey = null;
     });
     printItems.forEach((item) => this.updatePrintLayerEntry(item));
@@ -736,17 +738,16 @@ export class GarmentRenderer {
     preferredSurface = null,
   ) {
     if (!layer || !item) return false;
-    const scale = item.scale ?? 1;
+    const requestedScale = item.scale ?? 1;
     const rotation = item.rotation ?? 0;
-    const footprint = {
-      height: layer.height,
-      rotation,
-      scale,
-      width: layer.width,
-    };
     const surface = preferredSurface && supportsPersonalizationDecalMesh(preferredSurface.mesh)
       ? preferredSurface
-      : resolvePersonalizationSurface(this.decorationMeshes, placement, footprint);
+      : resolvePersonalizationSurface(this.decorationMeshes, placement, {
+          height: layer.height,
+          rotation,
+          scale: requestedScale,
+          width: layer.width,
+        });
     if (!surface) {
       layer.plane.material.opacity = 1;
       layer.decal.visible = false;
@@ -755,8 +756,48 @@ export class GarmentRenderer {
       return false;
     }
 
+    const fit = fitPersonalizationDecalToSurface({
+      alphaMask: layer.alphaMask,
+      height: layer.height,
+      meshes: this.decorationMeshes,
+      minimumCoverage: MIN_PERSONALIZATION_UV_COVERAGE,
+      minimumScale: MIN_PERSONALIZATION_SCALE,
+      placement,
+      rotation,
+      scale: requestedScale,
+      width: layer.width,
+    });
+    if (!fit) {
+      const previous = layer.lastValidItem;
+      if (previous && (
+        previous.scale !== requestedScale
+        || JSON.stringify(previous.placement) !== JSON.stringify(placement)
+      )) {
+        this.publishPersonalizationConstraint(item, previous);
+        this.applyStoredPrintPlacement(layer.plane, previous);
+        return this.syncPersonalizationDecal(
+          layer,
+          previous,
+          previous.placement ?? DEFAULT_PRINT_POSITION,
+        );
+      }
+      layer.plane.material.opacity = 0;
+      layer.decal.visible = false;
+      layer.decalFallback = false;
+      return false;
+    }
+    const constrainedItem = fit.scale < requestedScale - 0.000001
+      ? { ...item, scale: fit.scale }
+      : item;
+    if (constrainedItem !== item) {
+      this.publishPersonalizationConstraint(item, constrainedItem);
+      this.applyStoredPrintPlacement(layer.plane, constrainedItem);
+    } else {
+      this.clearSatisfiedPersonalizationConstraint(item);
+    }
+    const scale = constrainedItem.scale ?? 1;
     const decalKey = JSON.stringify([
-      (surface.surfaces ?? [surface]).map((entry) => [
+      (fit.surface.surfaces ?? [fit.surface]).map((entry) => [
         entry.mesh.uuid,
         entry.point.x,
         entry.point.y,
@@ -774,39 +815,54 @@ export class GarmentRenderer {
     ]);
     if (layer.decalKey === decalKey && layer.decalFallback) return false;
     if (layer.decalKey !== decalKey) {
-      const geometry = createPersonalizationDecalGeometry({
-        depth: surface.depth,
-        height: layer.height,
-        mesh: surface.mesh,
-        normal: surface.normal,
-        position: surface.point,
-        rotation,
-        scale,
-        surfaces: surface.surfaces,
-        width: layer.width,
-      });
-      if (!shouldUsePersonalizationDecal(
-        geometry,
-        layer.alphaMask,
-        MIN_PERSONALIZATION_UV_COVERAGE,
-      )) {
-        geometry.dispose();
-        layer.decal.geometry.dispose();
-        layer.decal.geometry = new THREE.BufferGeometry();
-        layer.decalKey = decalKey;
-        layer.decalFallback = true;
-        layer.plane.material.opacity = 1;
-        layer.decal.visible = false;
-        return false;
-      }
+      const geometry = fit.geometry;
       layer.decal.geometry.dispose();
       layer.decal.geometry = geometry;
       layer.decalKey = decalKey;
       layer.decalFallback = false;
+    } else {
+      fit.geometry.dispose();
     }
+    layer.lastValidItem = {
+      ...constrainedItem,
+      placement: constrainedItem.placement ? structuredClone(constrainedItem.placement) : null,
+    };
     layer.plane.material.opacity = 0;
     layer.decal.visible = true;
     return true;
+  }
+
+  publishPersonalizationConstraint(item, constrainedItem) {
+    const signature = JSON.stringify([
+      constrainedItem.scale,
+      constrainedItem.placement ?? null,
+    ]);
+    if (this.pendingPersonalizationConstraints.get(item.key) === signature) return;
+    this.pendingPersonalizationConstraints.set(item.key, signature);
+    const patch = {
+      placement: constrainedItem.placement,
+      scale: constrainedItem.scale,
+    };
+    if (item.itemKind === 'text') {
+      const items = patchCustomTextItem(
+        getCustomTextItems(this.state?.overrides),
+        item.sourceId,
+        patch,
+      );
+      this.onStatePatch?.({ overrides: { customTextItems: items } });
+      return;
+    }
+    const items = patchPrintItem(getPrintItems(this.state?.overrides), item.sourceId, patch);
+    this.onStatePatch?.({
+      overrides: { printItems: items, ...legacyFirstItemFields(items) },
+    });
+  }
+
+  clearSatisfiedPersonalizationConstraint(item) {
+    const signature = JSON.stringify([item.scale, item.placement ?? null]);
+    if (this.pendingPersonalizationConstraints.get(item.key) === signature) {
+      this.pendingPersonalizationConstraints.delete(item.key);
+    }
   }
 
   setPrintLayerDragging(layer, dragging, preferredSurface = null) {
@@ -856,6 +912,7 @@ export class GarmentRenderer {
   endPersonalizationRotation(key, rotation) {
     if (this.rotationPreviewKey !== key) return false;
     this.rotationPreviewKey = null;
+    this.pendingPersonalizationConstraints.clear();
     const layer = this.printLayers.get(key);
     const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
     if (!layer || !item) return false;

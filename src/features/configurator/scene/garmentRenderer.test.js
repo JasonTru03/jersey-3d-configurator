@@ -940,13 +940,14 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
-  it('keeps the complete textured proxy when actual alpha UV coverage is clipped', () => {
+  it('clamps a loaded oversized personalization to a complete decal and syncs state once', () => {
     installTextCanvasContext();
     const host = document.createElement('div');
     document.body.append(host);
-    const renderer = new GarmentRenderer(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
     const jersey = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.5, 2),
+      new THREE.PlaneGeometry(0.8, 2),
       new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
     );
     jersey.updateMatrixWorld(true);
@@ -960,6 +961,7 @@ describe('garment decoration mesh selection', () => {
         normal: { x: 0, y: 0, z: 1 },
       },
       rotation: 0,
+      scale: 1.8,
     };
     renderer.decorationMeshes = [jersey];
     renderer.state = {
@@ -968,21 +970,23 @@ describe('garment decoration mesh selection', () => {
     };
     renderer.updatePrintLayer();
     const layer = renderer.printLayers.get('text:text-1');
-    const oldGeometry = layer.decal.geometry;
-    const dispose = vi.spyOn(oldGeometry, 'dispose');
     layer.alphaMask = { samples: [new THREE.Vector2(0.05, 0.5)] };
     renderer.state = {
       ...renderer.state,
       overrides: { customTextItems: [{ ...item, rotation: 1 }] },
     };
-
     renderer.updatePrintLayer();
 
-    expect(dispose).toHaveBeenCalledOnce();
-    expect(layer.decal.geometry.getAttribute('position')).toBeUndefined();
-    expect(layer.decal.visible).toBe(false);
-    expect(layer.plane.material.opacity).toBe(1);
-    expect(layer.plane.material.map).toBe(layer.texture);
+    expect(layer.decal.geometry.getAttribute('position').count).toBeGreaterThan(0);
+    expect(layer.decal.visible).toBe(true);
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(layer.plane.scale.x).toBeLessThan(1.8);
+    expect(onStatePatch).toHaveBeenCalledOnce();
+    expect(onStatePatch.mock.calls[0][0].overrides.customTextItems[0].scale)
+      .toBeCloseTo(layer.plane.scale.x, 6);
+
+    renderer.updatePrintLayer();
+    expect(onStatePatch).toHaveBeenCalledOnce();
     renderer.dispose();
   });
 

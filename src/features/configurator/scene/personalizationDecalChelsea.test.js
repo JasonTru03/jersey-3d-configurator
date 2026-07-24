@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   createPersonalizationDecalGeometry,
+  fitPersonalizationDecalToSurface,
   getPersonalizationAlphaMask,
   getPersonalizationUvCoverage,
   resolvePersonalizationSurface,
@@ -89,6 +90,27 @@ describe('Chelsea personalization decal coverage', () => {
     if (expectedUseDecal) expect(alphaCoverage).toBeGreaterThanOrEqual(0.985);
     else expect(alphaCoverage).toBeLessThan(0.985);
     geometry.dispose();
+  });
+
+  it('clamps an oversized saved scale to the largest complete Chelsea decal', () => {
+    const fit = fitPersonalizationDecalToSurface({
+      alphaMask: textAlphaMask,
+      height: TEXT_HEIGHT,
+      meshes: garmentMeshes,
+      minimumCoverage: 0.985,
+      minimumScale: 0.55,
+      placement: DEFAULT_PLACEMENT,
+      rotation: 0,
+      scale: 1.8,
+      width: TEXT_WIDTH,
+    });
+
+    expect(fit).not.toBeNull();
+    expect(fit.scale).toBeGreaterThanOrEqual(0.55);
+    expect(fit.scale).toBeLessThan(1.8);
+    expect(fit.coverage).toBeGreaterThanOrEqual(0.985);
+    expect(shouldUsePersonalizationDecal(fit.geometry, textAlphaMask)).toBe(true);
+    fit.geometry.dispose();
   });
 });
 

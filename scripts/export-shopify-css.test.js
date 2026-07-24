@@ -34,5 +34,9 @@ describe('Shopify CSS export', () => {
     expect(css).toContain('var(--pc3d-panel, var(--panel))');
     expect(css).toContain('var(--pc3d-accent, var(--accent))');
     expect(css).toContain('@container stage (max-width: 360px)');
+    expect(css).toContain(':is(.configurator-root, .pc3d-section) .stage');
+    expect(css).toContain(':is(.configurator-root, .pc3d-section) .print-control');
+    expect(css).not.toMatch(/(^|})\s*\.stage\s*\{/);
+    expect(css).not.toMatch(/(^|})\s*\.print-control\s*\{/);
   });
 });

@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+const sharedCss = readFileSync(
+  resolve(process.cwd(), 'src/features/configurator/scene/personalization-controls.css'),
+  'utf8',
+);
 const css = [
   'src/features/configurator/ui/configurator.css',
   'src/features/configurator/scene/personalization-controls.css',
@@ -15,6 +19,31 @@ function ruleBody(source, selector) {
 }
 
 describe('wide configurator viewport layout', () => {
+  it('scopes shared stage and personalization controls to a configurator root', () => {
+    expect(css).toContain(':is(.configurator-root, .pc3d-section) .stage');
+    expect(css).toContain(':is(.configurator-root, .pc3d-section) .print-control');
+    expect(sharedCss).not.toMatch(/(^|})\s*\.stage\s*\{/);
+    expect(sharedCss).not.toMatch(/(^|})\s*\.print-control\s*\{/);
+  });
+
+  it('leaves same-named stage and print controls outside configurator fixtures untouched', () => {
+    const style = document.createElement('style');
+    style.textContent = sharedCss.replace(/@container[\s\S]*$/, '');
+    document.head.append(style);
+    document.body.innerHTML = `
+      <div data-testid="outside"><div class="stage"></div><button class="print-control"></button></div>
+      <div class="pc3d-section" data-testid="inside"><div class="stage"></div><button class="print-control"></button></div>
+    `;
+
+    const outside = document.querySelector('[data-testid="outside"]');
+    const inside = document.querySelector('[data-testid="inside"]');
+    expect(getComputedStyle(outside.querySelector('.stage')).containerType).not.toBe('inline-size');
+    expect(getComputedStyle(outside.querySelector('.print-control')).position).not.toBe('absolute');
+    expect(getComputedStyle(inside.querySelector('.print-control')).position).toBe('absolute');
+    style.remove();
+    document.body.innerHTML = '';
+  });
+
   it('keeps the stage in one viewport and gives overflow to the right panel', () => {
     expect(ruleBody(css, '.configurator-shell')).toContain('height: 100dvh');
     expect(ruleBody(css, '.configurator-shell')).toContain('overflow: hidden');

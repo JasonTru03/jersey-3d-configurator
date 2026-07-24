@@ -146,7 +146,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   }
 
   return (
-    <main className="configurator-shell" data-theme={theme}>
+    <main className="configurator-root configurator-shell" data-theme={theme}>
       <Sidebar activeSection={section} labels={product.optionLabels} onSelect={setSection} />
       <section className="workspace app-shell">
         <TopBar

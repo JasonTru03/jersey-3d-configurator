@@ -27,10 +27,23 @@ describe('wide configurator viewport layout', () => {
 
   it('keeps the panel header and checkout footer outside the scroll region', () => {
     expect(ruleBody(css, '.panel-header')).toContain('flex: 0 0 auto');
+    expect(ruleBody(css, '.panel-scroll')).toContain('flex: 1 1 auto');
     expect(ruleBody(css, '.panel-scroll')).toContain('overflow-y: auto');
     expect(ruleBody(css, '.panel-scroll')).toContain('overflow-x: hidden');
     expect(ruleBody(css, '.panel-scroll')).toContain('min-height: 0');
     expect(ruleBody(css, '.panel-checkout')).toContain('flex: 0 0 auto');
+    expect(ruleBody(css, '.panel-checkout .primary-button')).toContain('min-height: 44px');
+  });
+
+  it('keeps status content in a collapsible row above the main workspace', () => {
+    expect(ruleBody(css, '.app-shell')).toContain('grid-template-rows: auto auto minmax(0, 1fr)');
+    expect(ruleBody(css, '.workspace-status')).toContain('grid-row: 2');
+    expect(ruleBody(css, '.workspace-grid')).toContain('grid-row: 3');
+  });
+
+  it('keeps the detailed review inside the viewport with internal scrolling', () => {
+    expect(ruleBody(css, '.review-dialog')).toContain('max-height: calc(100dvh - 40px)');
+    expect(ruleBody(css, '.review-dialog')).toContain('overflow-y: auto');
   });
 
   it('restores document flow at the existing single-column breakpoint', () => {
@@ -41,6 +54,12 @@ describe('wide configurator viewport layout', () => {
     expect(ruleBody(narrow, '.workspace-grid')).toContain('overflow: visible');
     expect(ruleBody(narrow, '.stage-wrap')).toContain('min-height: 560px');
     expect(ruleBody(narrow, '.config-panel')).toContain('overflow: visible');
+    expect(ruleBody(narrow, '.panel-scroll')).toContain('flex: 0 0 auto');
     expect(ruleBody(narrow, '.panel-scroll')).toContain('overflow: visible');
+  });
+
+  it('lays out all six mobile navigation items as two complete rows', () => {
+    const mobile = css.slice(css.indexOf('@media (max-width: 720px)'));
+    expect(ruleBody(mobile, '.side-nav')).toContain('grid-template-columns: repeat(3, 1fr)');
   });
 });

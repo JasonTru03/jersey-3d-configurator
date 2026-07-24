@@ -163,7 +163,26 @@ describe('ConfiguratorPage', () => {
     rendererHarness.configurationError = 'Custom text items must be an array.';
     render(<ConfiguratorPage />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Custom text items must be an array.');
+    const alert = await screen.findByRole('alert');
+    const statusRegion = screen.getByRole('region', { name: 'Configurator status' });
+    expect(alert).toHaveTextContent('Custom text items must be an array.');
+    expect(statusRegion).toContainElement(alert);
+    expect(statusRegion.parentElement).toHaveClass('app-shell');
+    expect(statusRegion.parentElement.querySelector('.topbar')).toBeInTheDocument();
+    expect(statusRegion.nextElementSibling).toHaveClass('workspace-grid');
+  });
+
+  it('keeps a prepared download in the status row above the main workspace', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    expect(screen.queryByRole('region', { name: 'Configurator status' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+
+    const download = await screen.findByRole('link', { name: 'Download design JSON' });
+    const statusRegion = screen.getByRole('region', { name: 'Configurator status' });
+    expect(statusRegion).toContainElement(download);
+    expect(statusRegion.nextElementSibling).toHaveClass('workspace-grid');
   });
 
   it('only requires a baked asset when the bottom pattern is enabled', () => {

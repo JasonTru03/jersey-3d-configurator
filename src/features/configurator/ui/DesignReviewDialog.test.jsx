@@ -1,9 +1,58 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
 
 describe('DesignReviewDialog', () => {
+  it('moves focus into the dialog and loops Tab in both directions', async () => {
+    render(<ReviewFocusHarness />);
+    const trigger = screen.getByRole('button', { name: 'Open review' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const close = screen.getByRole('button', { name: 'Close review' });
+    const last = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    await waitFor(() => expect(close).toHaveFocus());
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(close).toHaveFocus();
+
+    close.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+
+    trigger.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(close).toHaveFocus();
+  });
+
+  it('closes on Escape and restores focus to the trigger', async () => {
+    render(<ReviewFocusHarness />);
+    const trigger = screen.getByRole('button', { name: 'Open review' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await screen.findByRole('dialog');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
+  it('restores focus to the trigger after the close button is used', async () => {
+    render(<ReviewFocusHarness />);
+    const trigger = screen.getByRole('button', { name: 'Open review' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const close = await screen.findByRole('button', { name: 'Close review' });
+
+    fireEvent.click(close);
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
   it('shows a cart generation error inside the open review dialog', () => {
     function CartErrorHarness() {
       const [cartError, setCartError] = useState('');
@@ -154,3 +203,23 @@ describe('DesignReviewDialog', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 });
+
+function ReviewFocusHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)} type="button">Open review</button>
+      <DesignReviewDialog
+        onAddToCart={() => {}}
+        onClose={() => setOpen(false)}
+        onSave={() => {}}
+        open={open}
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ customizationTotal: 0, total: 89 }}
+        selected={{}}
+        shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+        state={{ overrides: {} }}
+      />
+    </>
+  );
+}

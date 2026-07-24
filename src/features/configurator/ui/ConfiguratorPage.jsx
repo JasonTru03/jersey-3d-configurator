@@ -139,7 +139,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   return (
     <main className="configurator-shell" data-theme={theme}>
       <Sidebar activeSection={section} labels={product.optionLabels} onSelect={setSection} />
-      <section className="workspace">
+      <section className="workspace app-shell">
         <TopBar
           canRedo={canRedo}
           canUndo={canUndo}
@@ -152,16 +152,20 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           theme={theme}
         />
         <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
-        {(fileError || configurationError) && (
-          <p className="file-error" role="alert">{fileError || configurationError}</p>
-        )}
-        {preparedDownload && !reviewOpen && (
-          <div className="prepared-download">
-            <PreparedDownloadLink
-              download={preparedDownload}
-              onDownload={() => setLocalProductionReceipt(preparedDownload.receipt)}
-            />
-          </div>
+        {(fileError || configurationError || (preparedDownload && !reviewOpen)) && (
+          <section aria-label="Configurator status" className="workspace-status">
+            {(fileError || configurationError) && (
+              <p className="file-error" role="alert">{fileError || configurationError}</p>
+            )}
+            {preparedDownload && !reviewOpen && (
+              <div className="prepared-download">
+                <PreparedDownloadLink
+                  download={preparedDownload}
+                  onDownload={() => setLocalProductionReceipt(preparedDownload.receipt)}
+                />
+              </div>
+            )}
+          </section>
         )}
         <div className="workspace-grid">
           <ProductStage

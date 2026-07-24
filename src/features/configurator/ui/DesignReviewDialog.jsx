@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import {
   getBillableCustomTextItems,
   getCustomTextItems,
@@ -13,6 +14,52 @@ const APPEARANCE_SUMMARY_ROWS = [
 ];
 
 export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const previousActiveElement = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current?.();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = getFocusableElements(dialogRef.current);
+      if (!focusableElements.length) return;
+      const first = focusableElements[0];
+      const last = focusableElements.at(-1);
+      const activeElement = document.activeElement;
+
+      if (!dialogRef.current?.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousActiveElement?.focus();
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const artworkCount = state.overrides?.decorations?.length ?? 0;
@@ -35,13 +82,27 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload
 
   return (
     <div className="review-backdrop" role="presentation">
-      <section aria-labelledby="design-review-title" aria-modal="true" className="review-dialog" role="dialog">
+      <section
+        aria-labelledby="design-review-title"
+        aria-modal="true"
+        className="review-dialog"
+        ref={dialogRef}
+        role="dialog"
+      >
         <div className="review-header">
           <div>
             <p className="eyebrow">Design review</p>
             <h2 id="design-review-title">Review your design</h2>
           </div>
-          <button aria-label="Close review" className="icon-button" onClick={onClose} type="button">×</button>
+          <button
+            aria-label="Close review"
+            className="icon-button"
+            onClick={() => onCloseRef.current?.()}
+            ref={closeButtonRef}
+            type="button"
+          >
+            ×
+          </button>
         </div>
         <p className="review-product">{product.name}</p>
         <dl className="review-summary">
@@ -84,4 +145,11 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload
       </section>
     </div>
   );
+}
+
+function getFocusableElements(container) {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  ));
 }

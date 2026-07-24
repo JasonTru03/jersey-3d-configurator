@@ -1,3 +1,8 @@
+import {
+  getBillableCustomTextItems,
+  getCustomTextItems,
+} from '../config/customTextItems.js';
+
 const APPEARANCE_SUMMARY_ROWS = [
   ['body', 'Body'],
   ['sleeves', 'Sleeves'],
@@ -14,6 +19,19 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload
   const artworkLabel = `${artworkCount} artwork item${artworkCount === 1 ? '' : 's'}`;
   const appearance = state.overrides?.appearance;
   const templateLabel = product.options.templates.find((template) => template.id === appearance?.template)?.label ?? 'Solid';
+  const customTextItems = getBillableCustomTextItems(getCustomTextItems(state.overrides));
+  const customTextLabel = customTextItems.length
+    ? `${customTextItems.length} item${customTextItems.length === 1 ? '' : 's'}: ${
+      customTextItems.map((item) => item.text.trim()).join(', ')
+    }`
+    : 'None';
+  const extras = selected.extras ?? [];
+  const extrasLabel = extras.length
+    ? extras.map((extra) => extra.label ?? extra.shortLabel ?? extra.id).join(', ')
+    : 'None';
+  const customizationTotal = Number.isFinite(quote.customizationTotal)
+    ? quote.customizationTotal
+    : 0;
 
   return (
     <div className="review-backdrop" role="presentation">
@@ -28,14 +46,16 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload
         <p className="review-product">{product.name}</p>
         <dl className="review-summary">
           <div><dt>Size</dt><dd>{selected.layout?.shortLabel}</dd></div>
-          <div><dt>Colorway</dt><dd>{selected.colorway?.label}</dd></div>
           <div><dt>Fabric</dt><dd>{selected.material?.shortLabel}</dd></div>
-          <div><dt>Print</dt><dd>{selected.lighting?.shortLabel}</dd></div>
+          <div><dt>Design</dt><dd>{templateLabel}</dd></div>
+          <div><dt>Player set</dt><dd>{selected.lighting?.shortLabel ?? 'None'}</dd></div>
+          <div><dt>Custom text</dt><dd>{customTextLabel}</dd></div>
           <div><dt>Artwork</dt><dd>{artworkLabel}</dd></div>
-          <div><dt>Template</dt><dd>{templateLabel}</dd></div>
+          <div><dt>Extras</dt><dd>{extrasLabel}</dd></div>
           {APPEARANCE_SUMMARY_ROWS.map(([zone, label]) => (
             <div key={zone}><dt>{label}</dt><dd>{`${label}: ${appearance?.colors?.[zone] ?? '—'}`}</dd></div>
           ))}
+          <div><dt>Customization subtotal</dt><dd>${customizationTotal}</dd></div>
         </dl>
         <div className="review-total"><span>Total</span><strong>${quote.total}</strong></div>
         <p className="review-note">Shopify cart total: ${quote.total}</p>

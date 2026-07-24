@@ -1,5 +1,4 @@
 import {
-  BadgeDollarSign,
   Cable,
   CircuitBoard,
   FolderOpen,
@@ -17,7 +16,6 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { getSelectablePersonalizationItems } from '../config/personalizationItems.js';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
@@ -147,26 +145,24 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           canUndo={canUndo}
           onOpenFile={() => fileInputRef.current?.click()}
           onRedo={redo}
-          onReview={() => setReviewOpen(true)}
           onSave={handleSaveDesign}
           onThemeToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')}
           onUndo={undo}
           product={product}
-          quote={quote}
           theme={theme}
-          />
-          <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
-          {(fileError || configurationError) && (
-            <p className="file-error" role="alert">{fileError || configurationError}</p>
-          )}
-          {preparedDownload && !reviewOpen && (
-            <div className="prepared-download">
-              <PreparedDownloadLink
-                download={preparedDownload}
-                onDownload={() => setLocalProductionReceipt(preparedDownload.receipt)}
-              />
-            </div>
-          )}
+        />
+        <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
+        {(fileError || configurationError) && (
+          <p className="file-error" role="alert">{fileError || configurationError}</p>
+        )}
+        {preparedDownload && !reviewOpen && (
+          <div className="prepared-download">
+            <PreparedDownloadLink
+              download={preparedDownload}
+              onDownload={() => setLocalProductionReceipt(preparedDownload.receipt)}
+            />
+          </div>
+        )}
         <div className="workspace-grid">
           <ProductStage
             artworkFocusId={artworkFocusId}
@@ -184,10 +180,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           />
           <ConfigPanel
             onArtworkSelect={setArtworkFocusId}
+            onReview={() => setReviewOpen(true)}
             product={product}
             quote={quote}
             section={section}
-            selected={selected}
             selectedPersonalizationKey={selectedPersonalizationKey}
             state={state}
             updateState={updateState}
@@ -279,7 +275,7 @@ function Sidebar({ activeSection, labels, onSelect }) {
   );
 }
 
-function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThemeToggle, onUndo, product, quote, theme }) {
+function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onSave, onThemeToggle, onUndo, product, theme }) {
   return (
     <header className="topbar">
       <div>
@@ -297,11 +293,6 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThem
           <Save size={17} />
           Save design
         </button>
-        <button className="primary-button" onClick={onReview} type="button">
-          <ShoppingCart size={17} />
-          Review design
-        </button>
-        <strong className="price-pill">${quote.total}</strong>
       </div>
     </header>
   );
@@ -310,10 +301,10 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onReview, onSave, onThem
 function ConfigPanel({
   onArtworkSelect,
   onPersonalizationSelect,
+  onReview,
   product,
   quote,
   section,
-  selected,
   selectedPersonalizationKey,
   state,
   updateState,
@@ -338,59 +329,70 @@ function ConfigPanel({
   return (
     <aside className="config-panel">
       <PanelHeader labels={product.optionLabels} section={section} />
-      {section === 'layout' && (
-        <OptionGrid
-          group="layout"
-          options={product.options.layout}
-          selectedId={state.layout}
-          onSelect={(layout) => updateState({ layout })}
-        />
-      )}
-      {section === 'design' && (
-        <>
-          <TemplateLibrary
-            activeTemplate={state.overrides?.appearance?.template}
-            onSelect={(template) => patchAppearance({ template })}
-            templates={product.options.templates}
+      <div className="panel-scroll">
+        {section === 'layout' && (
+          <OptionGrid
+            group="layout"
+            options={product.options.layout}
+            selectedId={state.layout}
+            onSelect={(layout) => updateState({ layout })}
           />
-          <ZoneColorPanel
-            colors={state.overrides?.appearance?.colors ?? {}}
-            onColorChange={(colors) => patchAppearance({ colors })}
-            palette={APPEARANCE_PALETTE}
+        )}
+        {section === 'design' && (
+          <>
+            <TemplateLibrary
+              activeTemplate={state.overrides?.appearance?.template}
+              onSelect={(template) => patchAppearance({ template })}
+              templates={product.options.templates}
+            />
+            <ZoneColorPanel
+              colors={state.overrides?.appearance?.colors ?? {}}
+              onColorChange={(colors) => patchAppearance({ colors })}
+              palette={APPEARANCE_PALETTE}
+            />
+            <BottomPatternPanel
+              pattern={state.overrides?.bottomPattern}
+              onChange={patchBottomPattern}
+            />
+          </>
+        )}
+        {section === 'material' && (
+          <OptionGrid
+            group="material"
+            options={product.options.material}
+            selectedId={state.material}
+            onSelect={(material) => updateState({ material })}
           />
-          <BottomPatternPanel
-            pattern={state.overrides?.bottomPattern}
-            onChange={patchBottomPattern}
+        )}
+        {section === 'personalize' && (
+          <PersonalizePanel
+            onSelect={onPersonalizationSelect}
+            selectedKey={selectedPersonalizationKey}
+            state={state}
+            updateState={updateState}
           />
-        </>
-      )}
-      {section === 'material' && (
-        <OptionGrid
-          group="material"
-          options={product.options.material}
-          selectedId={state.material}
-          onSelect={(material) => updateState({ material })}
-        />
-      )}
-      {section === 'personalize' && (
-        <PersonalizePanel
-          onSelect={onPersonalizationSelect}
-          selectedKey={selectedPersonalizationKey}
-          state={state}
-          updateState={updateState}
-        />
-      )}
-      {section === 'extras' && (
-        <ExtrasPanel
-          extras={product.options.extras}
-          state={state}
-          updateState={updateState}
-        />
-      )}
-      {section === 'decorations' && (
-        <DecorationPanel onArtworkSelect={onArtworkSelect} product={product} state={state} updateState={updateState} />
-      )}
-      <BuildSummary product={product} quote={quote} selected={selected} state={state} />
+        )}
+        {section === 'extras' && (
+          <ExtrasPanel
+            extras={product.options.extras}
+            state={state}
+            updateState={updateState}
+          />
+        )}
+        {section === 'decorations' && (
+          <DecorationPanel onArtworkSelect={onArtworkSelect} product={product} state={state} updateState={updateState} />
+        )}
+      </div>
+      <div className="panel-checkout" data-testid="panel-checkout">
+        <span>
+          <small>Total</small>
+          <strong>${quote.total}</strong>
+        </span>
+        <button className="primary-button" onClick={onReview} type="button">
+          <ShoppingCart size={17} />
+          Review design
+        </button>
+      </div>
     </aside>
   );
 }
@@ -464,51 +466,6 @@ function ExtrasPanel({ extras, state, updateState }) {
         );
       })}
     </div>
-  );
-}
-
-function BuildSummary({ product, quote, selected, state }) {
-  const templateLabel = product.options.templates.find(
-    (template) => template.id === state.overrides?.appearance?.template,
-  )?.label ?? 'Solid';
-  const personalizationCount = getSelectablePersonalizationItems(state).length;
-  return (
-    <section className="summary-panel">
-      <div className="summary-title">
-        <BadgeDollarSign size={18} />
-        <h2>Build Summary</h2>
-      </div>
-      <dl>
-        <div>
-          <dt>Size</dt>
-          <dd>{selected.layout?.shortLabel}</dd>
-        </div>
-        <div>
-          <dt>Design</dt>
-          <dd>{templateLabel}</dd>
-        </div>
-        <div>
-          <dt>Fabric</dt>
-          <dd>{selected.material?.shortLabel}</dd>
-        </div>
-        <div>
-          <dt>Personalize</dt>
-          <dd>{personalizationCount ? `${personalizationCount} element${personalizationCount === 1 ? '' : 's'}` : 'None'}</dd>
-        </div>
-      </dl>
-      <div className="quote-lines">
-        {quote.optionAdjustments.map((adjustment) => (
-          <span key={adjustment.label}>
-            {adjustment.label}
-            <b>+${adjustment.amount}</b>
-          </span>
-        ))}
-      </div>
-      <div className="quote-total">
-        <span>Total</span>
-        <strong>${quote.total}</strong>
-      </div>
-    </section>
   );
 }
 

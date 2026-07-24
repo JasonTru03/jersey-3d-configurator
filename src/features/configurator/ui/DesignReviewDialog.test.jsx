@@ -99,10 +99,10 @@ describe('DesignReviewDialog', () => {
           name: 'FN8788 Match Jersey',
           options: { templates: [{ id: 'vertical-stripes', label: 'Vertical Stripes' }] },
         }}
-        quote={{ total: 107 }}
+        quote={{ customizationTotal: 18, total: 107 }}
         selected={{
           colorway: { label: 'Away Black' },
-          extras: [{ id: 'sleeveBadge' }],
+          extras: [{ id: 'sleeveBadge', label: 'League sleeve badge' }],
           layout: { shortLabel: 'M' },
           lighting: { shortLabel: 'Name set' },
           material: { shortLabel: 'Stadium knit' },
@@ -121,13 +121,28 @@ describe('DesignReviewDialog', () => {
               },
             },
             decorations: [{ id: 'crest' }],
+            customTextItems: [
+              { id: 'text-1', text: 'CHELSEA FC' },
+              { id: 'text-2', text: '   ' },
+            ],
           },
         }}
       />,
     );
 
     expect(screen.getByText('FN8788 Match Jersey')).toBeInTheDocument();
+    expect(screen.queryByText('Colorway')).not.toBeInTheDocument();
+    expect(screen.queryByText('Print')).not.toBeInTheDocument();
+    expect(screen.getByText('Design')).toBeInTheDocument();
+    expect(screen.getByText('Player set')).toBeInTheDocument();
+    expect(screen.getByText('Custom text')).toBeInTheDocument();
+    expect(screen.getByText('1 item: CHELSEA FC')).toBeInTheDocument();
+    expect(screen.queryByText(/text-2/i)).not.toBeInTheDocument();
     expect(screen.getByText('1 artwork item')).toBeInTheDocument();
+    expect(screen.getByText('Extras')).toBeInTheDocument();
+    expect(screen.getByText('League sleeve badge')).toBeInTheDocument();
+    expect(screen.getByText('Customization subtotal')).toBeInTheDocument();
+    expect(screen.getByText('$18')).toBeInTheDocument();
     expect(screen.getByText('Vertical Stripes')).toBeInTheDocument();
     expect(screen.getByText('Body: #FFFFFF')).toBeInTheDocument();
     expect(screen.getByText('Sleeves: #20242A')).toBeInTheDocument();

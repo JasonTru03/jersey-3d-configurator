@@ -22,7 +22,15 @@ describe('wide configurator viewport layout', () => {
     expect(ruleBody(css, '.workspace')).toContain('overflow: hidden');
     expect(ruleBody(css, '.workspace-grid')).toContain('overflow: hidden');
     expect(ruleBody(css, '.stage-wrap')).toContain('min-height: 0');
-    expect(ruleBody(css, '.config-panel')).toContain('overflow-y: auto');
+    expect(ruleBody(css, '.config-panel')).toContain('overflow: hidden');
+  });
+
+  it('keeps the panel header and checkout footer outside the scroll region', () => {
+    expect(ruleBody(css, '.panel-header')).toContain('flex: 0 0 auto');
+    expect(ruleBody(css, '.panel-scroll')).toContain('overflow-y: auto');
+    expect(ruleBody(css, '.panel-scroll')).toContain('overflow-x: hidden');
+    expect(ruleBody(css, '.panel-scroll')).toContain('min-height: 0');
+    expect(ruleBody(css, '.panel-checkout')).toContain('flex: 0 0 auto');
   });
 
   it('restores document flow at the existing single-column breakpoint', () => {
@@ -33,5 +41,6 @@ describe('wide configurator viewport layout', () => {
     expect(ruleBody(narrow, '.workspace-grid')).toContain('overflow: visible');
     expect(ruleBody(narrow, '.stage-wrap')).toContain('min-height: 560px');
     expect(ruleBody(narrow, '.config-panel')).toContain('overflow: visible');
+    expect(ruleBody(narrow, '.panel-scroll')).toContain('overflow: visible');
   });
 });

@@ -118,6 +118,41 @@ describe('ConfiguratorPage', () => {
     expect(await screen.findByLabelText('Text content')).toHaveValue('YOUR TEXT');
   });
 
+  it('shows total and review action in a fixed footer instead of the top bar', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    const topbar = document.querySelector('.topbar');
+    const panel = document.querySelector('.config-panel');
+    const footer = screen.getByTestId('panel-checkout');
+    const panelScroll = document.querySelector('.panel-scroll');
+
+    expect(within(topbar).queryByRole('button', { name: 'Review design' })).not.toBeInTheDocument();
+    expect(topbar.querySelector('.price-pill')).not.toBeInTheDocument();
+    expect(panel.children[0]).toHaveClass('panel-header');
+    expect(panel.children[1]).toBe(panelScroll);
+    expect(panel.children[2]).toBe(footer);
+    expect(footer).toHaveTextContent('$89');
+
+    fireEvent.click(within(footer).getByRole('button', { name: 'Review design' }));
+    expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
+  });
+
+  it('updates the fixed footer price through add text, undo, and redo', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
+    await waitFor(() => expect(screen.getByTestId('panel-checkout')).toHaveTextContent('$97'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(screen.getByTestId('panel-checkout')).toHaveTextContent('$89'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    await waitFor(() => expect(screen.getByTestId('panel-checkout')).toHaveTextContent('$97'));
+  });
+
   it('shows the active design and fabric in the stage caption', async () => {
     render(<ConfiguratorPage />);
 

@@ -30,19 +30,30 @@ export function PersonalizePanel({
 }) {
   const listRef = useRef(null);
   const pendingDeleteFocusRef = useRef(null);
+  const previousDeletePendingRef = useRef(deletePending);
   const previousSelectionRef = useRef(selectedKey);
   const items = useMemo(() => getSelectablePersonalizationItems(state), [state]);
   const customTextItems = getCustomTextItems(state.overrides);
   const selectedItem = findPersonalizationItem(items, selectedKey);
 
   useEffect(() => {
-    if (previousSelectionRef.current && !selectedKey) listRef.current?.focus();
+    const selectionClearedByDeletion = previousDeletePendingRef.current && !selectedKey;
+    const selectionClearedByListDeletion = pendingDeleteFocusRef.current?.wasSelected;
+    if (
+      previousSelectionRef.current
+      && !selectedKey
+      && (!selectionClearedByDeletion || selectionClearedByListDeletion)
+    ) {
+      listRef.current?.focus();
+    }
+    previousDeletePendingRef.current = deletePending;
     previousSelectionRef.current = selectedKey;
-  }, [selectedKey]);
+  }, [deletePending, selectedKey]);
 
   useEffect(() => {
     const pending = pendingDeleteFocusRef.current;
     if (!pending || items.some((item) => item.key === pending.itemKey)) return;
+    if (pending.wasSelected && selectedKey) return;
     pendingDeleteFocusRef.current = null;
     if (!pending.hadFocus || typeof document === 'undefined') return;
 
@@ -59,7 +70,7 @@ export function PersonalizePanel({
       : null;
     const focusTarget = nextRow?.querySelector('.personalize-element-select') ?? listRef.current;
     focusTarget?.focus();
-  }, [items]);
+  }, [items, selectedKey]);
 
   useEffect(() => {
     const pending = pendingDeleteFocusRef.current;

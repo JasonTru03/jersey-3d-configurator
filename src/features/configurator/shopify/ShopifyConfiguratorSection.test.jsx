@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { productApi } from '../api/productApi.js';
 import { ShopifyConfiguratorSection } from './ShopifyConfiguratorSection.jsx';
 
 const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
@@ -33,6 +34,7 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
 });
@@ -122,6 +124,7 @@ describe('ShopifyConfiguratorSection', () => {
   });
 
   it('deletes the selected personalization through the Shopify 3D toolbar', async () => {
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration');
     document.body.innerHTML = '<form action="/cart/add" method="post"><input name="id" value="47824466051223"></form><div id="mount"></div>';
     render(
       <ShopifyConfiguratorSection settings={{ defaultLighting: 'name-number' }} />,
@@ -133,6 +136,7 @@ describe('ShopifyConfiguratorSection', () => {
     await waitFor(() => {
       expect(document.querySelector('input[name="properties[Print Name]"]').value).toBe('DELETE ME');
     });
+    quoteSpy.mockClear();
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete personalization' }));
 
@@ -140,5 +144,19 @@ describe('ShopifyConfiguratorSection', () => {
       expect(screen.queryByRole('button', { name: 'Delete personalization' })).not.toBeInTheDocument();
       expect(document.querySelector('input[name="properties[Print Name]"]').value).toBe('');
     });
+    expect(quoteSpy).toHaveBeenCalledTimes(1);
+    const [, quotedState] = quoteSpy.mock.calls[0];
+    const quotedResult = await quoteSpy.mock.results[0].value;
+    expect(quotedState.overrides).toMatchObject({
+      printItems: [],
+      printName: '',
+      printNumber: '',
+    });
+    const submittedState = JSON.parse(
+      document.querySelector('input[name="properties[_3D Config JSON]"]').value,
+    ).state;
+    expect(submittedState).toEqual(quotedState);
+    expect(within(screen.getByRole('heading', { name: 'Configuration summary' }).closest('section'))
+      .getByText(`$${quotedResult.total}`)).toBeVisible();
   });
 });

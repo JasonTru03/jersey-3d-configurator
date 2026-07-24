@@ -259,12 +259,10 @@ export function PersonalizationToolbarOverlay({
           if (typeof document === 'undefined') return;
           const activeElement = document.activeElement;
           if (
-            pendingFocus.hadFocus
-            && pendingFocus.stableTarget?.isConnected
+            pendingFocus.stableTarget?.isConnected
             && (
               activeElement === pendingFocus.trigger
               || activeElement === document.body
-              || !pendingFocus.trigger.isConnected
             )
           ) {
             pendingFocus.stableTarget.focus();

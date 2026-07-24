@@ -463,7 +463,7 @@ describe('ConfiguratorPage', () => {
     });
   });
 
-  it('focuses the element list after deletion and can recreate a player set', async () => {
+  it('focuses the stable stage toolbar after 3D deletion and can recreate a player set', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
 
@@ -475,7 +475,7 @@ describe('ConfiguratorPage', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Edit personalization' })).not.toBeInTheDocument();
-      expect(screen.getByRole('list', { name: 'Personalization elements' })).toHaveFocus();
+      expect(screen.getByTitle('Orbit view')).toHaveFocus();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));

@@ -193,6 +193,24 @@ describe('usePersonalizationDeletion coordination', () => {
     expect(screen.getByRole('button', { name: 'Orbit view' })).toHaveFocus();
   });
 
+  it('preserves focus moved to another control while overlay deletion is pending', async () => {
+    const deferred = createDeferred();
+    render(<CoordinatedDeletionHarness deferred={deferred} />);
+    const overlayDelete = screen.getByRole('button', { name: 'Delete personalization' });
+    const userTarget = screen.getByRole('button', { name: 'Add latest state' });
+    overlayDelete.focus();
+    fireEvent.click(overlayDelete);
+    userTarget.focus();
+    expect(userTarget).toHaveFocus();
+
+    await settle(deferred, { ok: true });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Delete personalization' })).not.toBeInTheDocument();
+    });
+    expect(userTarget).toHaveFocus();
+  });
+
   it('does not publish stale state after the shared owner unmounts mid-request', async () => {
     const deferred = createDeferred();
     const onError = vi.fn();

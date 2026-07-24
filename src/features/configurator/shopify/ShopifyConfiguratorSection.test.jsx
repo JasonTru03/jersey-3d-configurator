@@ -149,6 +149,7 @@ describe('ShopifyConfiguratorSection', () => {
     await waitFor(() => {
       expect(document.querySelector('input[name="properties[Print Name]"]').value).toBe('DELETE ME');
     });
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
     quoteSpy.mockClear();
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete personalization' }));
@@ -181,6 +182,7 @@ describe('ShopifyConfiguratorSection', () => {
       { container: document.getElementById('mount') },
     );
     await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
     rendererHarness.finalRotationItem = {
       placement: { x: 0, y: 0.36, z: 0.5 },
       rotation: 15,
@@ -222,6 +224,7 @@ describe('ShopifyConfiguratorSection', () => {
       { container: document.getElementById('mount') },
     );
     await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
     quoteSpy.mockClear();
 
     await act(async () => {

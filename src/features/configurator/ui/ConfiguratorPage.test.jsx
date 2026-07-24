@@ -183,6 +183,8 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
+    await screen.findByLabelText('Text content');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
     rendererHarness.finalRotationItem = {
       placement: { x: 0, y: 0.36, z: 0.5 },
       rotation: 15,
@@ -513,6 +515,7 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
     await screen.findByLabelText('Name');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Size' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Edit personalization' }));
@@ -530,6 +533,7 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
     await screen.findByLabelText('Name');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete personalization' }));
 

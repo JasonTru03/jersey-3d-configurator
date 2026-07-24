@@ -217,9 +217,111 @@ https://testcsj.myshopify.com/cart/48039101923479:1,49000000000050:1,49000000000
 
 Task 9 仍需：
 
-- 部署 Cloudflare Worker 并 readback version/asset；
-- 更新并 readback Shopify launcher；
-- 从真实 storefront 打开 configurator；
-- 真实 cart 验证 `$97` 与 `$62 = $50 + $12`；
 - 在已开启 Chrome file URL 权限的会话或人工操作中复验 Open design 和原生颜色选择器；
+- 在通过 storefront 密码页且页面稳定的会话中补验 `$97` exact cart 与 `$62 = $50 + $12` composed cart；
 - 停在 checkout 之前，不创建订单。
+
+## Task 9 生产部署与读回
+
+### 部署检查点
+
+- 分支：`codex/continuous-bottom-pattern`
+- 部署代码提交：`8734e08d7e324524cca57633676814bdadea1114`
+- 部署前状态：仅 `.superpowers/` 为未跟踪目录，未暂存、未修改。
+- `npm test -- --run`：41 files，332 tests，全部通过。
+- `npm run build`：app 与 Shopify bundle 均 exit 0。
+- `git diff --check 89ae7a0..HEAD`：exit 0。
+- 既有大 chunk 与 `inlineDynamicImports` 提示未改变构建 exit code。
+
+### Cloudflare Worker
+
+- Live URL：`https://jersey-3d-configurator.jason1064969838.workers.dev/`
+- 新版本：`110d64b1-9eee-4d7c-b7bc-4a9807c4e09f`
+- 部署时间：`2026-07-24T06:18:01.507Z`
+- 回滚版本：`8f60a18e-e881-43c0-904d-fdfd77dd106d`
+- cache-busting readback：`/?acceptance=20260724-1419`
+- index：HTTP 200，`Content-Type: text/html`，`Cache-Control: public, max-age=0, must-revalidate`
+- JavaScript：`/assets/index-BfBRt4zi.js`，HTTP 200，997,950 bytes。
+- CSS：`/assets/index-DNjnujNy.css`，HTTP 200，16,968 bytes。
+- favicon：`/favicon.ico`，HTTP 404，未出现旧的 Worker 500。
+- 线上页面浏览器 error/warning 日志：0。
+
+回滚命令：
+
+```powershell
+npx wrangler rollback 8f60a18e-e881-43c0-904d-fdfd77dd106d
+npx wrangler deployments status --name jersey-3d-configurator
+```
+
+### 生产 Worker 浏览器验收
+
+桌面 viewport 为 `1908 × 942`：
+
+| 项目 | 生产读回 |
+| --- | --- |
+| document client/scroll height | `942 / 942` |
+| scrollY | `0` |
+| stage | `(272, 84) 1224 × 834` |
+| panel | `(1512, 84) 372 × 834` |
+| panel header | `(1513, 85) 370 × 79` |
+| panel editor | `675px` high，`overflow-y: auto` |
+| Design editor scroll height | `917px` |
+| checkout footer | `(1513, 839) 370 × 78` |
+
+- Size / Design / Personalize 切换时 stage 几何保持一致。
+- 六菜单为 Size、Design、Fabric、Personalize、Artwork、Extras。
+- Design 包含模板、Zone colors 和 Continuous bottom pattern。
+- 一个 `CHELSEA FC` custom text 将价格从 `$89` 更新为 `$97`。
+- Block 字体和 letter spacing 6 读回成功。
+- Rotate 点击成功；Duplicate 后 `$105`；Delete 后回到 `$97`，焦点回到 Personalization elements 列表。
+- Review 显示 `Custom text: 1 item: CHELSEA FC`、`Customization subtotal: $8`、`Total: $97`，初始焦点为 Close review。
+- 线上 Save design file 成功生成 `Download design JSON` 原生链接。
+
+移动 viewport 为 `390 × 844`：
+
+- 六菜单均保留可访问名称。
+- Review dialog 为 `(0, 0) 375 × 844`，client/scroll height 为 `843 / 979`，`overflow-y: auto`。
+- 滚至 `scrollTop = 136` 后 Add to Shopify cart、Download design JSON、Save design file、Continue editing 均在 viewport 内。
+- 移动端继续使用普通 document flow；桌面 document lock 未错误扩展到移动 breakpoint。
+
+### Shopify live theme 与商品读回
+
+- Store：`testcsj.myshopify.com`
+- Live theme：`152029888663`，Horizon，`processing: false`
+- Launcher：`sections/product-3d-configurator-launch.liquid`
+- Launcher SHA-256：`7DD82A7E4A8E360D097F5014EBB9C4623146DC696B68A30F69EAF88C2CB39DBF`
+- 远端 launcher 与仓库文件 byte-for-byte 相等。
+- Launcher 指向稳定 Worker URL，并通过 `all_products['3d-customization-surcharge']` 动态生成 `surchargeVariantMap`。
+- Live product template 仍为 `main -> product_3d_configurator_launch -> product_recommendations_qggXJq`，launcher 已启用。
+- 因 live readback 已与仓库和当前 Worker URL一致，本轮未写 Shopify theme。
+
+Admin GraphQL 读回：
+
+- Jersey product：`9676223545495`，active，published。
+- M variant：`48039101923479`，`$89`，available。
+- Surcharge product：`9678531559575`，active，33 variants。
+- `$8`：`48046656028823`
+- `$12`：`48046656094359`
+- `$50`：`48046656651415`
+- `$62`：`48046656848023`
+
+### Cart 证据与外部限制
+
+本轮使用 live Admin 读回的真实 variant ID 生成以下生产 cart path：
+
+- `$97` exact：`/cart/48039101923479:1,48046656028823:1`
+  - quote：M `$89` + custom text `$8` = `$97`
+  - properties：`Print: ""`，`Custom Text: "CHELSEA FC"`
+- `$151` composed：`/cart/48039101923479:1,48046656651415:1,48046656094359:1`
+  - quote：M `$89` + Player mesh `$24` + Name set `$18` + Match patch `$12` + Gift box `$8` = `$151`
+  - surcharge composition：`$50 + $12 = $62`
+  - properties：`Print: "PLAYER #16"`，`Extras: "giftBox, matchPatch"`
+
+真实 storefront/cart 的当前边界：
+
+- 公开 cart permalink 的 HTTP 读回为 302 到 `/password`。
+- 新建 Chrome storefront/product 与 cart 标签显示 Shopify 的 `There was a problem loading this website`。
+- 一个任务开始前已打开的真实 Shopify cart 可读回：M `$89` + exact `$62` surcharge，2 lines、每行 quantity 1、总计 `$151.00 USD`，且 `Print: PLAYER #16`、`Extras: giftBox, matchPatch`。
+- 上述已打开 cart 使用 exact `$62` variant，不是本轮要求的 `$50 + $12` composed cart，也不含 `CHELSEA FC`；它只证明真实 Shopify 的 M `$89` + surcharge `$62` 总计 `$151`。
+- 因此本轮 `$97` exact cart 与 `$50 + $12` composed cart 已完成真实 variant/theme/URL/properties 读回，但浏览器 line-item 验收仍标记为待补。
+- checkout 未进入，未创建订单，未读取客户、支付或地址数据。

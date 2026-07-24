@@ -33,6 +33,7 @@ function PersonalizeHarness({
       <button onClick={() => setSelectedKey(null)} type="button">Clear selection</button>
       <output data-testid="selected-key">{selectedKey ?? ''}</output>
       <output data-testid="state-lighting">{state.lighting}</output>
+      <output data-testid="text-count">{state.overrides.customTextItems.length}</output>
     </>
   );
 }
@@ -117,5 +118,29 @@ describe('PersonalizePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
 
     expect(screen.getByRole('list', { name: 'Personalization elements' })).toHaveFocus();
+  });
+
+  it('keeps state and selection unchanged at the eight-text limit', () => {
+    const onStateChange = vi.fn();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = Array.from({ length: 8 }, (_, index) => ({
+      id: `text-${index + 1}`,
+      text: `TEXT ${index + 1}`,
+    }));
+    render(
+      <PersonalizeHarness
+        initialSelection="text:text-8"
+        initialState={state}
+        onStateChange={onStateChange}
+      />,
+    );
+
+    const addText = screen.getByRole('button', { name: 'Add text' });
+    expect(addText).toBeDisabled();
+    fireEvent.click(addText);
+
+    expect(screen.getByTestId('text-count')).toHaveTextContent('8');
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('text:text-8');
+    expect(onStateChange).not.toHaveBeenCalled();
   });
 });

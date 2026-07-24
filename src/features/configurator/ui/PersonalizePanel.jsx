@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import {
   CUSTOM_TEXT_FONT_PRESETS,
+  MAX_CUSTOM_TEXT_ITEMS,
   createCustomTextItem,
   getCustomTextItems,
   nextTextId,
@@ -27,6 +28,7 @@ export function PersonalizePanel({
   const listRef = useRef(null);
   const previousSelectionRef = useRef(selectedKey);
   const items = useMemo(() => getSelectablePersonalizationItems(state), [state]);
+  const customTextItems = getCustomTextItems(state.overrides);
   const selectedItem = findPersonalizationItem(items, selectedKey);
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export function PersonalizePanel({
   };
 
   const addText = async () => {
-    const customTextItems = getCustomTextItems(state.overrides);
+    if (customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS) return;
     const item = createCustomTextItem({
       id: nextTextId(customTextItems),
       text: 'YOUR TEXT',
@@ -69,7 +71,13 @@ export function PersonalizePanel({
         <button aria-label="Add player set" className="soft-button" onClick={addPlayerSet} type="button">
           + Player set
         </button>
-        <button aria-label="Add text" className="soft-button" onClick={addText} type="button">
+        <button
+          aria-label="Add text"
+          className="soft-button"
+          disabled={customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS}
+          onClick={addText}
+          type="button"
+        >
           + Text
         </button>
       </div>

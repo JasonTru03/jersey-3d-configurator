@@ -2,8 +2,19 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfiguratorPage, createLocalProductionFiles, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
 
-const rendererHarness = vi.hoisted(() => ({ focusedDecorationId: null, options: null }));
+const rendererHarness = vi.hoisted(() => ({ configurationError: '', focusedDecorationId: null, options: null }));
 let downloadClick;
+
+vi.mock('../hooks/useConfigurator.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useConfigurator: (...args) => ({
+      ...actual.useConfigurator(...args),
+      configurationError: rendererHarness.configurationError,
+    }),
+  };
+});
 
 vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -60,6 +71,7 @@ afterAll(() => {
 beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
+  rendererHarness.configurationError = '';
   downloadClick.mockClear();
   URL.createObjectURL.mockClear();
   URL.revokeObjectURL.mockClear();
@@ -67,6 +79,13 @@ beforeEach(() => {
 });
 
 describe('ConfiguratorPage', () => {
+  it('announces configuration update errors', async () => {
+    rendererHarness.configurationError = 'Custom text items must be an array.';
+    render(<ConfiguratorPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Custom text items must be an array.');
+  });
+
   it('only requires a baked asset when the bottom pattern is enabled', () => {
     expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: false } } })).toBe(false);
     expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: true } } })).toBe(true);
@@ -130,7 +149,9 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Artwork' }));
     fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
+    await waitFor(() => expect(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Crest Badge' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^Roundel Badge$/ }));
+    await waitFor(() => expect(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Crest Badge' })).toBeInTheDocument());
     expect(rendererHarness.focusedDecorationId).toBeNull();
 
     fireEvent.click(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Crest Badge' }));
@@ -171,6 +192,7 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
@@ -188,6 +210,7 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     const productionDownload = await screen.findByRole('link', { name: 'Download production ZIP' });
     expect(productionDownload).toHaveAttribute('download', 'fn8788-jersey-production.zip');
@@ -237,10 +260,12 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Template' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     fireEvent.click(await screen.findByRole('link', { name: 'Download production ZIP' }));
     fireEvent.click(screen.getByRole('button', { name: 'Colorway' }));
     fireEvent.click(screen.getByRole('button', { name: /Away Black/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Away Black/i })).toHaveAttribute('aria-pressed', 'true'));
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 

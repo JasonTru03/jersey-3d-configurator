@@ -15,6 +15,7 @@ export function useConfigurator(initialStateOverride) {
   const [product, setProduct] = useState(null);
   const [history, setHistory] = useState(null);
   const [quote, setQuote] = useState(null);
+  const [configurationError, setConfigurationError] = useState('');
   const [status, setStatus] = useState('loading');
 
   useEffect(() => {
@@ -54,10 +55,21 @@ export function useConfigurator(initialStateOverride) {
   const updateState = useCallback(
     async (patch) => {
       const currentState = getCurrentDesignState(history);
-      if (!product || !currentState) return;
+      if (!product || !currentState) {
+        return { message: 'The configurator is still loading.', ok: false };
+      }
       const nextState = mergeConfiguratorState(currentState, patch);
-      setHistory((currentHistory) => recordDesignState(currentHistory, nextState));
-      setQuote(await productApi.quoteConfiguration(product.id, nextState));
+      try {
+        const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
+        setHistory((currentHistory) => recordDesignState(currentHistory, nextState));
+        setQuote(nextQuote);
+        setConfigurationError('');
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Configuration update failed.';
+        setConfigurationError(message);
+        return { message, ok: false };
+      }
     },
     [history, product],
   );
@@ -106,11 +118,15 @@ export function useConfigurator(initialStateOverride) {
         defaultState: product.defaultState,
         expectedProductId: product.id,
       });
+      const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
       setHistory(createDesignHistory(nextState));
-      setQuote(await productApi.quoteConfiguration(product.id, nextState));
+      setQuote(nextQuote);
+      setConfigurationError('');
       return { ok: true };
     } catch (error) {
-      return { message: error.message, ok: false };
+      const message = error instanceof Error ? error.message : 'Design file loading failed.';
+      setConfigurationError(message);
+      return { message, ok: false };
     }
   }, [product]);
 
@@ -134,6 +150,7 @@ export function useConfigurator(initialStateOverride) {
     redo: () => moveHistory(1),
     canUndo,
     canRedo,
+    configurationError,
     loadDesignFile,
     saveDesignFile,
   };

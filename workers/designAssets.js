@@ -61,7 +61,7 @@ async function enforceRateLimit(ip, rateLimit) {
 }
 
 function isConsistentDesignUpload(design, metadata) {
-  if (!isPlainObject(design) || design.format !== 'jersey-design' || design.version !== 2 || typeof design.productId !== 'string' || design.productId.length === 0 || !isPlainObject(design.state) || !isValidBakeMetadata(metadata)) return false;
+  if (!isPlainObject(design) || design.format !== 'jersey-design' || ![2, 3].includes(design.version) || typeof design.productId !== 'string' || design.productId.length === 0 || !isPlainObject(design.state) || !isValidBakeMetadata(metadata)) return false;
   const pattern = design.state.overrides?.bottomPattern;
   return isPlainObject(pattern) && pattern.enabled === true && isPlainObject(pattern.source) && typeof pattern.source.assetRef === 'string'
     && pattern.source.assetRef === metadata.sourceHash && pattern.projectionVersion === metadata.projectionVersion && pattern.modelProjectionId === metadata.projectionId

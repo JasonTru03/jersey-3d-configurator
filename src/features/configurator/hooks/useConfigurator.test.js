@@ -82,4 +82,22 @@ describe('useConfigurator design files', () => {
       atlasSha256: 'sha256:abc123',
     });
   });
+
+  it('keeps the current configuration when an invalid custom text patch cannot be quoted', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const previousState = result.current.state;
+    const previousQuote = result.current.quote;
+    let response;
+
+    await act(async () => {
+      response = await result.current.updateState({ overrides: { customTextItems: 'not-an-array' } });
+    });
+
+    expect(response).toEqual({ ok: false, message: 'Custom text items must be an array.' });
+    expect(result.current.state).toEqual(previousState);
+    expect(result.current.quote).toEqual(previousQuote);
+    expect(result.current.canUndo).toBe(false);
+    expect(result.current.configurationError).toBe('Custom text items must be an array.');
+  });
 });

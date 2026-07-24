@@ -185,7 +185,7 @@ describe('design document', () => {
     expect(state.overrides.bottomPattern).toMatchObject({ enabled: false });
   });
 
-  it('saves v2 bottom-pattern metadata without baking image payloads and round-trips its controls', () => {
+  it('saves current v3 bottom-pattern metadata without baking image payloads and round-trips its controls', () => {
     const bottomPattern = {
       enabled: true,
       source: { kind: 'preset', id: 'micro-chevron', assetRef: '/patterns/micro-chevron.svg' },
@@ -227,7 +227,7 @@ describe('design document', () => {
     expect(JSON.stringify(document)).not.toContain('data:image');
   });
 
-  it('does not embed a bottom-pattern Data URL in a v2 document', () => {
+  it('does not embed a bottom-pattern Data URL in a current v3 document', () => {
     const document = createDesignDocument({
       productId: 'fn8788-jersey',
       state: {

@@ -52,6 +52,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const {
     canRedo,
     canUndo,
+    configurationError,
     loadDesignFile,
     product,
     quote,
@@ -170,6 +171,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           />
           <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
           {fileError && <p className="file-error" role="alert">{fileError}</p>}
+          {configurationError && <p className="file-error" role="alert">{configurationError}</p>}
           {preparedDownload && !reviewOpen && (
             <div className="prepared-download">
               <PreparedDownloadLink

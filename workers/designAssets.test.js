@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDesignAssetsHandler } from './designAssets.js';
+import { createDesignDocument } from '../src/features/configurator/designs/designDocument.js';
 
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]);
 const transform = { offset: { u: 0, v: 0 }, scale: 1, rotationDeg: 0, repeat: { u: 3, v: 4 } };
@@ -57,7 +58,7 @@ describe('design asset worker', () => {
     expect(await response.json()).toEqual({ turnstileSiteKey: 'public-site-key' });
   });
 
-  it('stores a captcha-verified, rate-limited, internally consistent normalized design', async () => {
+  it('stores a captcha-verified, rate-limited, internally consistent v2 design', async () => {
     acceptTurnstile();
     const runtime = env();
     const response = await createDesignAssetsHandler(runtime)(request());
@@ -67,6 +68,19 @@ describe('design asset worker', () => {
     expect(fetch).toHaveBeenCalledWith('https://challenges.cloudflare.com/turnstile/v0/siteverify', expect.objectContaining({ method: 'POST' }));
     expect(runtime.DESIGN_UPLOAD_RATE_LIMIT.put).toHaveBeenCalledTimes(1);
     expect(runtime.DESIGN_ASSETS.put).toHaveBeenCalledTimes(3);
+  });
+
+  it('accepts a current v3 design document created by the configurator', async () => {
+    acceptTurnstile();
+    const v3Document = createDesignDocument({
+      productId: 'jersey-1',
+      savedAt: '2026-07-24T00:00:00.000Z',
+      state: design().state,
+    });
+    const response = await createDesignAssetsHandler(env())(request({ designDocument: v3Document }));
+
+    expect(v3Document.version).toBe(3);
+    expect(response.status).toBe(201);
   });
 
   it('rejects missing or failed Turnstile verification before storage', async () => {

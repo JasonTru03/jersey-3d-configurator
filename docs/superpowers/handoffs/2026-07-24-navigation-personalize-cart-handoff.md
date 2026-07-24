@@ -6,7 +6,10 @@
 - Branch: `codex/continuous-bottom-pattern`
 - Deployed code commit: `8734e08d7e324524cca57633676814bdadea1114`
 - Handoff content commit: `da5349f5c49fd86fb5ffb99dd051697a545f6bcd`
-- Final branch head: use the verified local/origin/backup hashes in the final delivery report
+- Handoff evidence checkpoint: `a19882349401dd857a9cef8ca853f839d8ec4bd2`
+  (local, origin, and backup verified before this final documentation correction)
+- Final documentation correction commit: recorded in the final delivery report
+  after this file is committed and the three branch hashes are verified
 - Merge status: not merged to `main`
 - Working-tree companion: `.superpowers/` remains untracked and excluded
 

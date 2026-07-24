@@ -9,7 +9,7 @@
 - 让旧 Shopify launcher 的 surcharge map 通过确定性组合补足缺失金额。
 - 完成自动化、本地 production-shaped Worker、桌面与移动端浏览器验收。
 
-本轮起始检查点为 `89ae7a0`。本轮未执行 Cloudflare 真实部署、Git push 或 Shopify 外部购物车导航。
+本轮起始检查点为 `89ae7a0`。Task 8 本地验收阶段当时尚未执行 Cloudflare 真实部署、Git push 或 Shopify 外部购物车导航；Task 9 的生产部署、双远端 push 与 storefront/cart 验收结果见后文。
 
 ## 改动职责
 

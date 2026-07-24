@@ -47,8 +47,18 @@ function releaseGesturePointer(start) {
   target.releasePointerCapture(start.pointerId);
 }
 
-export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
+export function PersonalizationToolbarOverlay({
+  anchor,
+  deleteDisabled = false,
+  item,
+  onCopy,
+  onDelete,
+  onEdit,
+  onRotate,
+  onScale,
+}) {
   const overlayRef = useRef(null);
+  const deleteFocusRef = useRef(null);
   const resizeStart = useRef(null);
   const rotationStart = useRef(null);
   const [stageArea, setStageArea] = useState(null);
@@ -67,6 +77,20 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
     setFrozenDockLayout(null);
     setIsRotating(false);
   }, [anchorVisible, itemKey]);
+
+  useEffect(() => {
+    const pending = deleteFocusRef.current;
+    if (deleteDisabled || !pending?.failed || typeof document === 'undefined') return;
+    deleteFocusRef.current = null;
+    const activeElement = document.activeElement;
+    if (
+      pending.hadFocus
+      && pending.trigger.isConnected
+      && (activeElement === pending.trigger || activeElement === document.body)
+    ) {
+      pending.trigger.focus();
+    }
+  }, [deleteDisabled]);
 
   useLayoutEffect(() => {
     const overlay = overlayRef.current;
@@ -210,6 +234,23 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
     onRotate?.(itemKey, normalizeRotation((item.rotation ?? 0) + direction * KEYBOARD_ROTATION_STEP));
   };
 
+  const deleteItem = (event) => {
+    const trigger = event.currentTarget;
+    const pendingFocus = {
+      failed: false,
+      hadFocus: typeof document !== 'undefined' && document.activeElement === trigger,
+      trigger,
+    };
+    onDelete?.(itemKey, {
+      onFailure: () => {
+        pendingFocus.failed = true;
+      },
+      onStart: () => {
+        deleteFocusRef.current = pendingFocus;
+      },
+    });
+  };
+
   return (
     <div
       aria-label="Selected personalization controls"
@@ -246,7 +287,7 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
           type="button"
         ><RotateCw size={15} /></button>
         <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" onClick={() => onCopy?.(itemKey)} type="button">×2</button>
-        <button aria-label="Delete personalization" className="print-control print-control--delete" onClick={() => onDelete?.(itemKey)} type="button"><Trash2 size={15} /></button>
+        <button aria-label="Delete personalization" className="print-control print-control--delete" disabled={deleteDisabled} onClick={deleteItem} type="button"><Trash2 size={15} /></button>
       </div>
       <button
         aria-label="Resize personalization"

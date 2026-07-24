@@ -299,6 +299,11 @@
   inset: auto;
 }
 
+.print-control--delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .print-control--resize {
   top: calc(var(--print-top) + var(--print-height) - 22px);
   left: calc(var(--print-left) + var(--print-width) - 22px);

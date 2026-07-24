@@ -11,7 +11,6 @@ import {
 import { duplicatePrintItem, getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
 import {
   findPersonalizationItem,
-  getPersonalizationRemovalPatch,
   getRenderablePersonalizationItems,
   getSelectablePersonalizationItems,
   makePersonalizationKey,
@@ -26,7 +25,9 @@ const rendererRegistry = {
 
 export function ProductStage({
   artworkFocusId,
+  deletePending = false,
   onBakeProvider,
+  onDeletePersonalization,
   onEditPersonalization,
   onPersonalizationSelect,
   onStatePatch,
@@ -216,6 +217,7 @@ export function ProductStage({
         </div>
         <PersonalizationToolbarOverlay
           anchor={selectedPrintId === activePrintId ? printAnchor : { visible: false }}
+          deleteDisabled={deletePending}
           item={findPersonalizationItem(renderablePersonalizationItems, selectedPrintId)}
           onCopy={(id) => {
             const item = findPersonalizationItem(selectablePersonalizationItems, id);
@@ -239,16 +241,7 @@ export function ProductStage({
             setSelectedPrintId(copyKey);
             onPersonalizationSelect?.(copyKey);
           }}
-          onDelete={(id) => {
-            const removalPatch = getPersonalizationRemovalPatch(state, id);
-            if (!removalPatch) return;
-            reportedNullSelectionRef.current = id;
-            setActivePrintId(null);
-            setSelectedPrintId(null);
-            setPrintAnchor({ visible: false });
-            onPersonalizationSelect?.(null);
-            onStatePatch(removalPatch);
-          }}
+          onDelete={onDeletePersonalization}
           onEdit={(id) => onEditPersonalization?.(id)}
           onRotate={(id, rotation) => patchPrint(id, { rotation })}
           onScale={(id, scale) => patchPrint(id, { scale })}

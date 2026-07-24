@@ -445,7 +445,10 @@ describe('PersonalizationToolbarOverlay', () => {
 
     expect(callbacks.onEdit).toHaveBeenCalledWith('print-1');
     expect(callbacks.onCopy).toHaveBeenCalledWith('print-1');
-    expect(callbacks.onDelete).toHaveBeenCalledWith('print-1');
+    expect(callbacks.onDelete).toHaveBeenCalledWith('print-1', expect.objectContaining({
+      onFailure: expect.any(Function),
+      onStart: expect.any(Function),
+    }));
     expect(resize.setPointerCapture).toHaveBeenCalledWith(8);
     expect(callbacks.onScale).toHaveBeenCalledWith('print-1', expect.any(Number));
   });

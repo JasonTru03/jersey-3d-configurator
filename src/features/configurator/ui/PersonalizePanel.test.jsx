@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { mergeConfiguratorState } from '../config/state.js';
 import { jerseyProduct } from '../config/productDefinitions.js';
+import { usePersonalizationDeletion } from '../hooks/usePersonalizationDeletion.js';
 import { PersonalizePanel } from './PersonalizePanel.jsx';
 
 function PersonalizeHarness({
@@ -34,10 +35,18 @@ function PersonalizeHarness({
     applyPatch(patch);
     return { ok: true };
   };
+  const deletion = usePersonalizationDeletion({
+    onSelectionChange: setSelectedKey,
+    selectedKey,
+    state,
+    updateState,
+  });
 
   return (
     <>
       <PersonalizePanel
+        deletePending={deletion.deletePending}
+        deletePersonalization={deletion.deletePersonalization}
         onSelect={setSelectedKey}
         selectedKey={selectedKey}
         state={state}

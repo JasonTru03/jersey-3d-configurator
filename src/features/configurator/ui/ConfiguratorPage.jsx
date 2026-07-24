@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useConfigurator } from '../hooks/useConfigurator.js';
+import { usePersonalizationDeletion } from '../hooks/usePersonalizationDeletion.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
 import { DesignReviewDialog } from './DesignReviewDialog.jsx';
@@ -72,6 +73,13 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
   const [preparedDownload, setPreparedDownload] = useState(null);
   const bakeProviderRef = useRef(null);
+  const personalizationDeletion = usePersonalizationDeletion({
+    onError: setFileError,
+    onSelectionChange: setSelectedPersonalizationKey,
+    selectedKey: selectedPersonalizationKey,
+    state,
+    updateState,
+  });
 
   useEffect(() => () => preparedDownload?.release(), [preparedDownload]);
 
@@ -170,11 +178,13 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         <div className="workspace-grid">
           <ProductStage
             artworkFocusId={artworkFocusId}
+            deletePending={personalizationDeletion.deletePending}
             onBakeProvider={(provider) => { bakeProviderRef.current = provider; }}
             onEditPersonalization={(id) => {
               setSelectedPersonalizationKey(id);
               setSection('personalize');
             }}
+            onDeletePersonalization={personalizationDeletion.deletePersonalization}
             onPersonalizationSelect={setSelectedPersonalizationKey}
             onStatePatch={updateState}
             personalizationFocusId={selectedPersonalizationKey}
@@ -183,6 +193,8 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             selected={selected}
           />
           <ConfigPanel
+            deletePending={personalizationDeletion.deletePending}
+            deletePersonalization={personalizationDeletion.deletePersonalization}
             onArtworkSelect={setArtworkFocusId}
             onReview={() => setReviewOpen(true)}
             product={product}
@@ -304,6 +316,8 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onSave, onThemeToggle, o
 }
 
 function ConfigPanel({
+  deletePending,
+  deletePersonalization,
   onArtworkSelect,
   onPersonalizationSelect,
   onReview,
@@ -371,6 +385,8 @@ function ConfigPanel({
         )}
         {section === 'personalize' && (
           <PersonalizePanel
+            deletePending={deletePending}
+            deletePersonalization={deletePersonalization}
             onSelect={onPersonalizationSelect}
             selectedKey={selectedPersonalizationKey}
             state={state}

@@ -100,16 +100,17 @@ describe('ProductStage print toolbar', () => {
     }));
   });
 
-  it('removes the active print through the state patch callback', () => {
-    const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
+  it('routes active print deletion through the shared executor', () => {
+    const onDeletePersonalization = vi.fn();
+    render(<ProductStage onDeletePersonalization={onDeletePersonalization} onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
 
-    expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
-      overrides: expect.objectContaining({ printItems: [] }),
-    }));
+    expect(onDeletePersonalization).toHaveBeenCalledWith(
+      'player:print-1',
+      expect.objectContaining({ onFailure: expect.any(Function), onStart: expect.any(Function) }),
+    );
   });
 
   it('duplicates the active print at a distinct placement', async () => {
@@ -167,6 +168,34 @@ describe('ProductStage print toolbar', () => {
     expect(screen.getByRole('group', { name: 'Selected personalization controls' })).toBeInTheDocument();
   });
 
+  it('uses the shared deletion executor and disables the overlay while it is pending', () => {
+    const onDeletePersonalization = vi.fn();
+    const props = {
+      deletePending: true,
+      onDeletePersonalization,
+      onStatePatch: vi.fn(),
+      product,
+      selected,
+      state: {
+        lighting: 'name-number',
+        overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] },
+      },
+    };
+    const { rerender } = render(<ProductStage {...props} />);
+
+    act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
+    expect(screen.getByRole('button', { name: 'Delete personalization' })).toBeDisabled();
+
+    rerender(<ProductStage {...props} deletePending={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
+
+    expect(onDeletePersonalization).toHaveBeenCalledWith(
+      'player:print-1',
+      expect.objectContaining({ onFailure: expect.any(Function), onStart: expect.any(Function) }),
+    );
+    expect(props.onStatePatch).not.toHaveBeenCalled();
+  });
+
   it('rotates a custom text personalization by five degrees from the keyboard', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
@@ -207,9 +236,9 @@ describe('ProductStage print toolbar', () => {
     await waitFor(() => expect(rendererHarness.activePrintId).toBe('text:text-2'));
   });
 
-  it('deletes custom text without mutating the player collection', () => {
-    const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+  it('routes custom text deletion through its composite key', () => {
+    const onDeletePersonalization = vi.fn();
+    render(<ProductStage onDeletePersonalization={onDeletePersonalization} onStatePatch={vi.fn()} product={product} selected={selected} state={{
       lighting: 'name-number',
       overrides: {
         printItems: [{ id: 'player-id', name: 'PLAYER', number: '16' }],
@@ -220,7 +249,10 @@ describe('ProductStage print toolbar', () => {
     act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
 
-    expect(onStatePatch).toHaveBeenCalledWith({ overrides: { customTextItems: [] } });
+    expect(onDeletePersonalization).toHaveBeenCalledWith(
+      'text:custom-id',
+      expect.objectContaining({ onFailure: expect.any(Function), onStart: expect.any(Function) }),
+    );
   });
 
   it('notifies the parent when the renderer selection changes', () => {
@@ -328,7 +360,8 @@ describe('ProductStage print toolbar', () => {
       },
     };
     const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
+    const onDeletePersonalization = vi.fn();
+    render(<ProductStage onDeletePersonalization={onDeletePersonalization} onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('text:same-id'));
     fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to rotate personalization' }), { key: 'ArrowLeft' });
@@ -340,14 +373,10 @@ describe('ProductStage print toolbar', () => {
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:same-id'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
-    expect(onStatePatch).toHaveBeenLastCalledWith({
-      overrides: {
-        printItems: [],
-        printName: '',
-        printNumber: '',
-        printPlacement: null,
-      },
-    });
+    expect(onDeletePersonalization).toHaveBeenCalledWith(
+      'player:same-id',
+      expect.objectContaining({ onFailure: expect.any(Function), onStart: expect.any(Function) }),
+    );
   });
 
   it('reports a deleted selection once in StrictMode without render-phase updates', async () => {

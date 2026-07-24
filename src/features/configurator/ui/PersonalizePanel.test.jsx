@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { mergeConfiguratorState } from '../config/state.js';
@@ -9,16 +9,27 @@ function PersonalizeHarness({
   initialState = jerseyProduct.defaultState,
   initialSelection = null,
   onStateChange = vi.fn(),
+  updateDeferred = null,
 }) {
   const [state, setState] = useState(initialState);
   const [selectedKey, setSelectedKey] = useState(initialSelection);
 
-  const updateState = (patch) => {
+  const applyPatch = (patch) => {
     setState((current) => {
       const next = mergeConfiguratorState(current, patch);
       onStateChange(next);
       return next;
     });
+  };
+
+  const updateState = (patch) => {
+    if (updateDeferred) {
+      return updateDeferred.promise.then((result) => {
+        if (result?.ok !== false) applyPatch(patch);
+        return result;
+      });
+    }
+    applyPatch(patch);
     return { ok: true };
   };
 
@@ -153,6 +164,142 @@ describe('PersonalizePanel', () => {
     expect(screen.getByLabelText('Text content')).toHaveValue('FRONT');
   });
 
+  it('keeps a newer selection when a selected-row deletion finishes later', async () => {
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [
+      { id: 'text-1', text: 'FRONT' },
+      { id: 'text-2', text: 'BACK' },
+    ];
+    render(
+      <PersonalizeHarness
+        initialSelection="text:text-1"
+        initialState={state}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete text FRONT (text-1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'BACK' }));
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('text:text-2');
+
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'FRONT' })).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('text:text-2');
+    expect(screen.getByLabelText('Text content')).toHaveValue('BACK');
+  });
+
+  it('moves keyboard focus to the next row after a non-selected deletion succeeds', async () => {
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [
+      { id: 'text-1', text: 'FRONT' },
+      { id: 'text-2', text: 'MIDDLE' },
+      { id: 'text-3', text: 'BACK' },
+    ];
+    render(
+      <PersonalizeHarness
+        initialSelection="text:text-1"
+        initialState={state}
+        updateDeferred={updateDeferred}
+      />,
+    );
+    const deleteMiddle = screen.getByRole('button', { name: 'Delete text MIDDLE (text-2)' });
+    deleteMiddle.focus();
+    fireEvent.click(deleteMiddle);
+
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'BACK' })).toHaveFocus());
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('text:text-1');
+  });
+
+  it('falls back to the list when keyboard deletion removes the last row', async () => {
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [
+      { id: 'text-1', text: 'FRONT' },
+      { id: 'text-2', text: 'BACK' },
+    ];
+    render(
+      <PersonalizeHarness
+        initialSelection="text:text-1"
+        initialState={state}
+        updateDeferred={updateDeferred}
+      />,
+    );
+    const deleteBack = screen.getByRole('button', { name: 'Delete text BACK (text-2)' });
+    deleteBack.focus();
+    fireEvent.click(deleteBack);
+
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('list', { name: 'Personalization elements' })).toHaveFocus();
+    });
+  });
+
+  it('does not steal focus when the shopper moves elsewhere during deletion', async () => {
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [
+      { id: 'text-1', text: 'FRONT' },
+      { id: 'text-2', text: 'BACK' },
+    ];
+    render(<PersonalizeHarness initialState={state} updateDeferred={updateDeferred} />);
+    const deleteBack = screen.getByRole('button', { name: 'Delete text BACK (text-2)' });
+    deleteBack.focus();
+    fireEvent.click(deleteBack);
+    screen.getByRole('button', { name: 'Add text' }).focus();
+
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'BACK' })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Add text' })).toHaveFocus();
+  });
+
+  it('keeps the item, selection, and focus when a deferred deletion fails', async () => {
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [{ id: 'text-1', text: 'FRONT' }];
+    render(
+      <PersonalizeHarness
+        initialSelection="text:text-1"
+        initialState={state}
+        updateDeferred={updateDeferred}
+      />,
+    );
+    const deleteFront = screen.getByRole('button', { name: 'Delete text FRONT (text-1)' });
+    deleteFront.focus();
+    fireEvent.click(deleteFront);
+
+    await act(async () => {
+      updateDeferred.resolve({ message: 'Quote failed', ok: false });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => expect(deleteFront).toHaveFocus());
+    expect(screen.getByRole('button', { name: 'FRONT' })).toBeInTheDocument();
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('text:text-1');
+  });
+
   it('deletes a player row with normalized legacy print fields', () => {
     const onStateChange = vi.fn();
     const state = structuredClone(jerseyProduct.defaultState);
@@ -205,3 +352,11 @@ describe('PersonalizePanel', () => {
     expect(onStateChange).not.toHaveBeenCalled();
   });
 });
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}

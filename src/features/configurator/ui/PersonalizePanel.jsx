@@ -28,7 +28,10 @@ export function PersonalizePanel({
   updateState,
 }) {
   const listRef = useRef(null);
+  const latestSelectedKeyRef = useRef(selectedKey);
+  const pendingDeleteFocusRef = useRef(null);
   const previousSelectionRef = useRef(selectedKey);
+  latestSelectedKeyRef.current = selectedKey;
   const items = useMemo(() => getSelectablePersonalizationItems(state), [state]);
   const customTextItems = getCustomTextItems(state.overrides);
   const selectedItem = findPersonalizationItem(items, selectedKey);
@@ -37,6 +40,27 @@ export function PersonalizePanel({
     if (previousSelectionRef.current && !selectedKey) listRef.current?.focus();
     previousSelectionRef.current = selectedKey;
   }, [selectedKey]);
+
+  useEffect(() => {
+    const pending = pendingDeleteFocusRef.current;
+    if (!pending || items.some((item) => item.key === pending.itemKey)) return;
+    pendingDeleteFocusRef.current = null;
+    if (!pending.hadFocus || typeof document === 'undefined') return;
+
+    const activeElement = document.activeElement;
+    if (activeElement !== pending.trigger && activeElement !== document.body) return;
+    if (pending.wasSelected) {
+      listRef.current?.focus();
+      return;
+    }
+
+    const rows = listRef.current?.querySelectorAll('.personalize-element-row');
+    const nextRow = pending.rowIndex >= 0 && pending.rowIndex < (rows?.length ?? 0)
+      ? rows[pending.rowIndex]
+      : null;
+    const focusTarget = nextRow?.querySelector('.personalize-element-select') ?? listRef.current;
+    focusTarget?.focus();
+  }, [items]);
 
   const addPlayerSet = async () => {
     const printItems = ensurePrintItems(getPrintItems(state.overrides));
@@ -71,9 +95,22 @@ export function PersonalizePanel({
     event.stopPropagation();
     const patch = getPersonalizationRemovalPatch(state, item.key);
     if (!patch) return;
+    const trigger = event.currentTarget;
+    const rows = Array.from(listRef.current?.children ?? []);
+    const pendingFocus = {
+      hadFocus: typeof document !== 'undefined' && document.activeElement === trigger,
+      itemKey: item.key,
+      rowIndex: rows.indexOf(trigger.closest('.personalize-element-row')),
+      trigger,
+      wasSelected: latestSelectedKeyRef.current === item.key,
+    };
+    pendingDeleteFocusRef.current = pendingFocus;
     const result = await updateState(patch);
-    if (result?.ok === false || item.key !== selectedKey) return;
-    onSelect(null);
+    if (result?.ok === false) {
+      if (pendingDeleteFocusRef.current === pendingFocus) pendingDeleteFocusRef.current = null;
+      return;
+    }
+    if (latestSelectedKeyRef.current === item.key) onSelect(null);
   };
 
   return (

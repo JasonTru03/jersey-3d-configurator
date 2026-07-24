@@ -207,3 +207,52 @@ Shopify cart 实际结果：
 - 浏览器中的长距离环形拖动来自前一轮验收，本轮未重复该手工路径；连续移动、跨象限角度、取消恢复和单次提交由 overlay/renderer/page/Shopify 自动化覆盖。
 - 本轮仍未采集浏览器 GPU heap 长时曲线。
 - 本轮仅完成本地实现、自动化、构建、dry-run 与桌面/移动验收；未执行部署或推送。
+
+## 原子约束、旧设计迁移与 CSS 作用域复核（`caa8a7e..41488aa`）
+
+### 手势约束原子提交
+
+- renderer 的旋转与缩放结束方法现在同步返回完整 `finalItem`，其中同时包含最终 `rotation`、约束后的 `scale` 与合法 `placement`。
+- ProductStage 在正常 pointer release 后只持久化一次该完整结果；renderer 的 gesture end 不再另行发送 `onStatePatch`。
+- resize 的连续 pointer move 与 rotation 一样只更新 3D preview，持久化、quote 和 history 次数均为 0；release 后仅提交一次。
+- placement 拖动结束也先同步求出合法最终项，再发送一次完整 transform patch，移除了 constraint patch 与 placement patch 竞态。
+- 键盘旋转仍为一次按键一次提交，同时也经过相同的同步约束入口。
+- 取消、lost pointer、图层切换、隐藏、mutation lock、卸载、焦点与删除链路保持原行为。
+
+Chelsea 真实 GLB、同一文字 alpha mask、默认 front placement 的临界值：
+
+- `rotation: 0`：最大合法 scale 为 `1.067578125`。
+- 从 0° 旋转到 15°：本机真实结果为 `1.027142333984375`，测试按 `1.0271` 校验；alpha UV coverage 仍不低于 `0.985`。
+- 该实测值比复审阶段的约数 `1.0261` 略高，验收以当前真实几何与 alpha 采样结果为准。
+
+自动化证明 60/65 次 move 后 release 恰好形成一次包含 rotation、scale 和 placement 的更新；Configurator 一次 Undo 回到手势前的 rotation/scale，一次 Redo 回到完整最终结果；Shopify 同样只 quote 一次且 form state 与 quoted state 完全一致。resize 60 次 move 后只保存最终合法 scale 一条。
+
+### 非历史 normalization
+
+- 新增 `replaceCurrentDesignState`，只替换当前 history snapshot，不新增 Undo 节点，也不截断现有 redo 分支。
+- App normalization 使用 `{ recordHistory: false, quote: false }`；placement 与 scale 不参与定价，因此复用当前 quote。
+- Shopify normalization 使用 `quote: false` 即时同步 React state 与原生产品表单，不发起并行 quote。
+- renderer 使用独立 `onStateNormalize` 通道；首次打开 legacy design 时，如 placement 无解，会清到默认 front placement 后重新 fit；最终支持表面上的文字保持可见。
+- invalid placement JSON 的 load → normalize → save roundtrip 已验证：保存结果包含默认合法 placement 与约束 scale，初始历史仍无 Undo 节点。
+- 另有 history 测试证明在已有 Undo/Redo 分支中 normalization 不截断 redo，Undo 也不会反弹到未迁移的非法 snapshot。
+
+### 共享 CSS 作用域
+
+- App 根节点新增 `.configurator-root`。
+- `personalization-controls.css` 中所有 `.stage`、overlay、frame、dock 与 control 选择器均限定在 `:is(.configurator-root, .pc3d-section)` 下。
+- `@container stage` 仍生效，窄 stage 的 dock gap 仍为 `2px`。
+- App 与 Shopify 继续从同一个共享 CSS 源生成。
+- fixture 负向测试已验证：配置器区块外同名 `.stage` 与 `.print-control` 不获得 container、absolute position 等关键样式；`.pc3d-section` 内对应控件仍正确命中。
+
+### 本轮验证
+
+| 检查 | 结果 |
+| --- | --- |
+| focused tests | 10 个文件，`169/169` 通过 |
+| 全量测试 | 46 个文件，`457/457` 通过 |
+| App build | 通过；CSS `18.44 kB`（gzip `4.02 kB`），JS `1,023.77 kB`（gzip `286.13 kB`） |
+| Shopify bundle | 通过；`1,379.66 kB`（gzip `390.41 kB`） |
+| Wrangler dry-run | 通过；14 files，Worker upload `8.98 KiB`（gzip `2.87 KiB`），`LOCAL_PRODUCTION_FILES=true` |
+| `git diff HEAD~3..HEAD --check` | 通过 |
+
+构建仍只有既存的大 chunk、Shopify `inlineDynamicImports` ignored 与 Wrangler proxy 提示。本轮未执行部署或推送。

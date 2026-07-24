@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CUSTOM_TEXT_FONT_PRESETS,
   MAX_CUSTOM_TEXT_ITEMS,
@@ -28,9 +28,11 @@ export function PersonalizePanel({
   updateState,
 }) {
   const listRef = useRef(null);
+  const deleteInFlightRef = useRef(false);
   const latestSelectedKeyRef = useRef(selectedKey);
   const pendingDeleteFocusRef = useRef(null);
   const previousSelectionRef = useRef(selectedKey);
+  const [deletePending, setDeletePending] = useState(false);
   latestSelectedKeyRef.current = selectedKey;
   const items = useMemo(() => getSelectablePersonalizationItems(state), [state]);
   const customTextItems = getCustomTextItems(state.overrides);
@@ -61,6 +63,20 @@ export function PersonalizePanel({
     const focusTarget = nextRow?.querySelector('.personalize-element-select') ?? listRef.current;
     focusTarget?.focus();
   }, [items]);
+
+  useEffect(() => {
+    const pending = pendingDeleteFocusRef.current;
+    if (deletePending || !pending?.failed || typeof document === 'undefined') return;
+    pendingDeleteFocusRef.current = null;
+    const activeElement = document.activeElement;
+    if (
+      pending.hadFocus
+      && pending.trigger.isConnected
+      && (activeElement === pending.trigger || activeElement === document.body)
+    ) {
+      pending.trigger.focus();
+    }
+  }, [deletePending]);
 
   const addPlayerSet = async () => {
     const printItems = ensurePrintItems(getPrintItems(state.overrides));
@@ -93,8 +109,11 @@ export function PersonalizePanel({
 
   const removeItem = async (event, item) => {
     event.stopPropagation();
+    if (deleteInFlightRef.current) return;
     const patch = getPersonalizationRemovalPatch(state, item.key);
     if (!patch) return;
+    deleteInFlightRef.current = true;
+    setDeletePending(true);
     const trigger = event.currentTarget;
     const rows = Array.from(listRef.current?.children ?? []);
     const pendingFocus = {
@@ -105,11 +124,23 @@ export function PersonalizePanel({
       wasSelected: latestSelectedKeyRef.current === item.key,
     };
     pendingDeleteFocusRef.current = pendingFocus;
-    const result = await updateState(patch);
+    let result;
+    try {
+      result = await updateState(patch);
+    } catch (error) {
+      pendingFocus.failed = true;
+      deleteInFlightRef.current = false;
+      setDeletePending(false);
+      throw error;
+    }
     if (result?.ok === false) {
-      if (pendingDeleteFocusRef.current === pendingFocus) pendingDeleteFocusRef.current = null;
+      pendingFocus.failed = true;
+      deleteInFlightRef.current = false;
+      setDeletePending(false);
       return;
     }
+    deleteInFlightRef.current = false;
+    setDeletePending(false);
     if (latestSelectedKeyRef.current === item.key) onSelect(null);
   };
 
@@ -148,6 +179,7 @@ export function PersonalizePanel({
             <button
               aria-label={personalizationDeleteLabel(item)}
               className="personalize-element-delete"
+              disabled={deletePending}
               onClick={(event) => removeItem(event, item)}
               type="button"
             >

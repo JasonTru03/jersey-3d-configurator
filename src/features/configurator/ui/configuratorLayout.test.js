@@ -87,5 +87,7 @@ describe('wide configurator viewport layout', () => {
     );
     expect(ruleBody(css, '.personalize-element-row .personalize-element-delete'))
       .toContain('place-items: center');
+    expect(ruleBody(css, '.personalize-elements .personalize-element-delete:disabled'))
+      .toContain('cursor: not-allowed');
   });
 });

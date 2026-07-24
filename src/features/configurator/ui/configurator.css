@@ -747,6 +747,11 @@
   color: var(--muted);
 }
 
+.personalize-elements .personalize-element-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .personalize-elements .personalize-element-select:focus-visible,
 .personalize-elements .personalize-element-delete:focus-visible,
 .font-options button:focus-visible,

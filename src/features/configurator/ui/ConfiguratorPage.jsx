@@ -184,7 +184,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           <ProductStage
             artworkFocusId={artworkFocusId}
             onBakeProvider={(provider) => { bakeProviderRef.current = provider; }}
-            onEditPrint={(id) => {
+            onEditPersonalization={(id) => {
               setEditingPrintId(id);
               setSection('lighting');
               requestAnimationFrame(() => nameInputRef.current?.focus());

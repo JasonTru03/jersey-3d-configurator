@@ -76,13 +76,13 @@ describe('ProductStage print toolbar', () => {
   it('only shows controls after a print is selected and hides them after blank-stage selection clears', () => {
     render(<ProductStage onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
 
-    expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    expect(screen.getByRole('group', { name: 'Selected print controls' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Selected personalization controls' })).toBeInTheDocument();
 
     act(() => rendererHarness.options.onPrintSelectionChange(null));
-    expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
   });
 
   it('stores a clockwise forty-five-degree rotation from one button click', () => {
@@ -90,7 +90,7 @@ describe('ProductStage print toolbar', () => {
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate print 45 degrees' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate personalization 45 degrees' }));
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({
@@ -104,7 +104,7 @@ describe('ProductStage print toolbar', () => {
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete print' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({ printItems: [] }),
@@ -116,7 +116,7 @@ describe('ProductStage print toolbar', () => {
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', placement: { x: 0, y: 0.36, z: 0.5 } }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Duplicate print' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate personalization' }));
 
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({ printItems: expect.arrayContaining([expect.objectContaining({ id: 'print-2' })]) }),
@@ -128,13 +128,13 @@ describe('ProductStage print toolbar', () => {
   });
 
   it('forwards edit to the page with the active print id', () => {
-    const onEditPrint = vi.fn();
-    render(<ProductStage onEditPrint={onEditPrint} onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
+    const onEditPersonalization = vi.fn();
+    render(<ProductStage onEditPersonalization={onEditPersonalization} onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16' }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Edit print' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit personalization' }));
 
-    expect(onEditPrint).toHaveBeenCalledWith('print-1');
+    expect(onEditPersonalization).toHaveBeenCalledWith('print-1');
   });
 
   it('updates the active print scale from the resize handle', () => {
@@ -142,7 +142,7 @@ describe('ProductStage print toolbar', () => {
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    const handle = screen.getByRole('button', { name: 'Resize print' });
+    const handle = screen.getByRole('button', { name: 'Resize personalization' });
     fireEvent.pointerDown(handle, { clientX: 10, clientY: 10 });
     fireEvent.pointerMove(handle, { clientX: 50, clientY: 10 });
 
@@ -156,13 +156,113 @@ describe('ProductStage print toolbar', () => {
 
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
     await waitFor(() => {
-      expect(screen.getByRole('group', { name: 'Selected print controls' })).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Selected personalization controls' })).toBeInTheDocument();
     });
 
     act(() => rendererHarness.options.onPrintAnchorChange({ visible: false }));
-    expect(screen.queryByRole('group', { name: 'Selected print controls' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
 
     act(() => rendererHarness.options.onPrintAnchorChange({ visible: true, left: 300, top: 80, width: 96, height: 54 }));
-    expect(screen.getByRole('group', { name: 'Selected print controls' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Selected personalization controls' })).toBeInTheDocument();
+  });
+
+  it('rotates a custom text personalization by forty-five degrees', () => {
+    const onStatePatch = vi.fn();
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'custom-id', text: 'MASON', rotation: 0 }] },
+    }} />);
+
+    act(() => rendererHarness.options.onPrintSelectionChange('custom-id'));
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate personalization 45 degrees' }));
+
+    expect(onStatePatch).toHaveBeenCalledWith({
+      overrides: {
+        customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 45 })],
+      },
+    });
+  });
+
+  it('duplicates custom text away from every personalization placement and selects the copy', async () => {
+    const onStatePatch = vi.fn();
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{ id: 'player-id', name: 'PLAYER', number: '16', placement: { x: 0.3, y: 0.36, z: 0.5 } }],
+        customTextItems: [{ id: 'custom-id', text: 'MASON', placement: { x: 0, y: 0.36, z: 0.5 } }],
+      },
+    }} />);
+
+    act(() => rendererHarness.options.onPrintSelectionChange('custom-id'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate personalization' }));
+
+    expect(onStatePatch).toHaveBeenCalledWith({
+      overrides: {
+        customTextItems: expect.arrayContaining([
+          expect.objectContaining({ id: 'text-2', placement: { x: -0.3, y: 0.36, z: 0.5 } }),
+        ]),
+      },
+    });
+    await waitFor(() => expect(rendererHarness.activePrintId).toBe('text-2'));
+  });
+
+  it('deletes custom text without mutating the player collection', () => {
+    const onStatePatch = vi.fn();
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{ id: 'player-id', name: 'PLAYER', number: '16' }],
+        customTextItems: [{ id: 'custom-id', text: 'MASON' }],
+      },
+    }} />);
+
+    act(() => rendererHarness.options.onPrintSelectionChange('custom-id'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
+
+    expect(onStatePatch).toHaveBeenCalledWith({ overrides: { customTextItems: [] } });
+  });
+
+  it('notifies the parent when the renderer selection changes', () => {
+    const onPersonalizationSelect = vi.fn();
+    render(<ProductStage onPersonalizationSelect={onPersonalizationSelect} onStatePatch={vi.fn()} product={product} selected={selected} state={{
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'custom-id', text: 'MASON' }] },
+    }} />);
+
+    act(() => rendererHarness.options.onPrintSelectionChange('custom-id'));
+    act(() => rendererHarness.options.onPrintSelectionChange(null));
+
+    expect(onPersonalizationSelect).toHaveBeenNthCalledWith(1, 'custom-id');
+    expect(onPersonalizationSelect).toHaveBeenNthCalledWith(2, null);
+  });
+
+  it('focuses a valid external personalization id and clears a deleted focus', async () => {
+    const onPersonalizationSelect = vi.fn();
+    const { rerender } = render(<ProductStage
+      onPersonalizationSelect={onPersonalizationSelect}
+      onStatePatch={vi.fn()}
+      personalizationFocusId="custom-id"
+      product={product}
+      selected={selected}
+      state={{ lighting: 'none', overrides: { customTextItems: [{ id: 'custom-id', text: 'MASON' }] } }}
+    />);
+
+    await waitFor(() => expect(rendererHarness.activePrintId).toBe('custom-id'));
+    expect(screen.getByRole('group', { name: 'Selected personalization controls' })).toBeInTheDocument();
+
+    rerender(<ProductStage
+      onPersonalizationSelect={onPersonalizationSelect}
+      onStatePatch={vi.fn()}
+      personalizationFocusId="custom-id"
+      product={product}
+      selected={selected}
+      state={{ lighting: 'none', overrides: { customTextItems: [] } }}
+    />);
+
+    await waitFor(() => {
+      expect(rendererHarness.activePrintId).toBeNull();
+      expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
+      expect(onPersonalizationSelect).toHaveBeenCalledWith(null);
+    });
   });
 });

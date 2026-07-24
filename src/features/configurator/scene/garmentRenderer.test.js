@@ -32,6 +32,7 @@ vi.stubGlobal('requestAnimationFrame', () => 1);
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { GarmentRenderer, getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes, shouldEnableOrbitControls } from './garmentRenderer.js';
+import { CUSTOM_TEXT_CANVAS_ASPECT } from './customTextTexture.js';
 
 function createPointerRenderer({ selectedDecorationId = null, printHit = null, decorationHit = false } = {}) {
   const host = document.createElement('div');
@@ -97,6 +98,17 @@ function makeDisposableModel() {
     materialDispose: vi.spyOn(material, 'dispose'),
     mapDispose: vi.spyOn(map, 'dispose'),
   };
+}
+
+function installTextCanvasContext() {
+  const context = {
+    clearRect: vi.fn(),
+    fillText: vi.fn(),
+    strokeText: vi.fn(),
+    measureText: vi.fn((text) => ({ width: String(text).length * 40 })),
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+  return context;
 }
 
 describe('garment decoration mesh selection', () => {
@@ -571,6 +583,176 @@ describe('garment decoration mesh selection', () => {
     expect(hasPrintSelectionRectChanged(selectionRect, selectionRect)).toBe(false);
     expect(hasPrintSelectionRectChanged(selectionRect, { ...selectionRect, width: 101 })).toBe(true);
     expect(hasPrintSelectionRectChanged(selectionRect, { visible: false })).toBe(true);
+  });
+
+  it('renders billable custom text layers and skips blank text', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [
+          { id: 'text-1', text: 'MASON' },
+          { id: 'text-2', text: '   ' },
+        ],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    expect([...renderer.printLayers.keys()]).toEqual(['text-1']);
+    const layer = renderer.printLayers.get('text-1');
+    expect(layer.plane.userData).toMatchObject({ printId: 'text-1', itemKind: 'text' });
+    expect(layer.plane.geometry.parameters).toMatchObject({
+      width: 1.05,
+      height: 1.05 / CUSTOM_TEXT_CANVAS_ASPECT,
+    });
+    renderer.dispose();
+  });
+
+  it('keeps player print geometry and marks its layer kind', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'name-number',
+      overrides: { printItems: [{ id: 'player-id', name: 'PLAYER', number: '16' }] },
+    };
+
+    renderer.updatePrintLayer();
+
+    const layer = renderer.printLayers.get('player-id');
+    expect(layer.plane.userData).toMatchObject({ printId: 'player-id', itemKind: 'player' });
+    expect(layer.plane.geometry.parameters).toMatchObject({ width: 1.05, height: 0.42 });
+    renderer.dispose();
+  });
+
+  it('keeps custom text canvas and texture stable while rasterizing only style changes', () => {
+    const context = installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          fontPreset: 'athletic',
+          fillColor: '#20242A',
+          outlineEnabled: true,
+          outlineColor: '#F7F5EF',
+          letterSpacing: 0,
+        }],
+      },
+    };
+    renderer.updatePrintLayer();
+    const layer = renderer.printLayers.get('text-1');
+    const canvas = layer.texture.image;
+    const texture = layer.texture;
+    const initialRenderKey = layer.renderKey;
+    const initialClearCount = context.clearRect.mock.calls.length;
+
+    renderer.state.overrides.customTextItems[0].placement = { x: 0.2, y: 0.4, z: 0.5 };
+    renderer.state.overrides.customTextItems[0].scale = 1.2;
+    renderer.state.overrides.customTextItems[0].rotation = 45;
+    renderer.updatePrintLayer();
+
+    expect(layer.texture).toBe(texture);
+    expect(layer.texture.image).toBe(canvas);
+    expect(layer.renderKey).toBe(initialRenderKey);
+    expect(context.clearRect).toHaveBeenCalledTimes(initialClearCount);
+
+    const stylePatches = [
+      { text: 'MASON 2' },
+      { fontPreset: 'block' },
+      { fillColor: '#CC0000' },
+      { outlineEnabled: false },
+      { outlineColor: '#00CC00' },
+      { letterSpacing: 4 },
+    ];
+    stylePatches.forEach((patch, index) => {
+      Object.assign(renderer.state.overrides.customTextItems[0], patch);
+      const previousRenderKey = layer.renderKey;
+      renderer.updatePrintLayer();
+
+      expect(layer.texture).toBe(texture);
+      expect(layer.texture.image).toBe(canvas);
+      expect(layer.renderKey).not.toBe(previousRenderKey);
+      expect(context.clearRect).toHaveBeenCalledTimes(initialClearCount + index + 1);
+    });
+    renderer.dispose();
+  });
+
+  it('emits placement patches to the custom text collection for a custom active id', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'custom-id', text: 'MASON' }] },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('custom-id');
+    renderer.printPlane.position.set(0.25, 0.5, 0.75);
+
+    renderer.emitPrintPlacement();
+
+    expect(onStatePatch).toHaveBeenCalledWith({
+      overrides: {
+        customTextItems: [expect.objectContaining({
+          id: 'custom-id',
+          placement: expect.objectContaining({ x: 0.25, y: 0.5, z: 0.75 }),
+        })],
+      },
+    });
+    renderer.dispose();
+  });
+
+  it('keeps custom text editable when player lighting is none', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'text-1', text: 'MASON' }] },
+    };
+    renderer.decorationMeshes = [new THREE.Mesh()];
+    renderer.updatePrintLayer();
+
+    expect(renderer.isPrintEditable()).toBe(true);
+    renderer.dispose();
+  });
+
+  it('disposes a custom text layer after its text becomes blank', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'text-1', text: 'MASON' }] },
+    };
+    renderer.updatePrintLayer();
+    const layer = renderer.printLayers.get('text-1');
+    const geometryDispose = vi.spyOn(layer.plane.geometry, 'dispose');
+    const materialDispose = vi.spyOn(layer.material, 'dispose');
+    const textureDispose = vi.spyOn(layer.texture, 'dispose');
+
+    renderer.state.overrides.customTextItems[0].text = '   ';
+    renderer.updatePrintLayer();
+
+    expect(renderer.printLayers.size).toBe(0);
+    expect(geometryDispose).toHaveBeenCalledOnce();
+    expect(materialDispose).toHaveBeenCalledOnce();
+    expect(textureDispose).toHaveBeenCalledOnce();
+    renderer.dispose();
   });
 
   it('clears selection instead of placing a print when a pointer misses a print and decoration', () => {

@@ -2,7 +2,14 @@ import { Rotate3D, SlidersHorizontal, ZoomIn } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GarmentRenderer } from './garmentRenderer.js';
 import { KeyboardRenderer } from './keyboardRenderer.js';
-import { PrintToolbarOverlay } from './PrintToolbarOverlay.jsx';
+import { PersonalizationToolbarOverlay } from './PersonalizationToolbarOverlay.jsx';
+import {
+  duplicateCustomTextItem,
+  getBillableCustomTextItems,
+  getCustomTextItems,
+  patchCustomTextItem,
+  removeCustomTextItem,
+} from '../config/customTextItems.js';
 import { duplicatePrintItem, getPrintItems, legacyFirstItemFields, patchPrintItem, removePrintItem } from '../config/printItems.js';
 import { getNextPrintPlacement } from './garmentRenderer.js';
 
@@ -17,11 +24,23 @@ const rendererRegistry = {
   keyboardRenderer: KeyboardRenderer,
 };
 
-export function ProductStage({ artworkFocusId, onBakeProvider, onEditPrint, onStatePatch, product, state, selected }) {
+export function ProductStage({
+  artworkFocusId,
+  onBakeProvider,
+  onEditPersonalization,
+  onPersonalizationSelect,
+  onStatePatch,
+  personalizationFocusId,
+  product,
+  state,
+  selected,
+}) {
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
   const [view, setView] = useState('orbit');
   const printItems = state?.lighting && state.lighting !== 'none' ? getPrintItems(state.overrides) : [];
+  const customTextItems = getCustomTextItems(state?.overrides);
+  const personalizationItems = [...printItems, ...getBillableCustomTextItems(customTextItems)];
   const [activePrintId, setActivePrintId] = useState(null);
   const [selectedPrintId, setSelectedPrintId] = useState(null);
   const [printAnchor, setPrintAnchor] = useState({ visible: false });
@@ -29,14 +48,38 @@ export function ProductStage({ artworkFocusId, onBakeProvider, onEditPrint, onSt
   const handlePrintSelectionChange = useCallback((id) => {
     setActivePrintId(id);
     setSelectedPrintId(id);
-  }, []);
+    onPersonalizationSelect?.(id);
+  }, [onPersonalizationSelect]);
 
   useEffect(() => {
-    setActivePrintId((current) => printItems.some((item) => item.id === current) ? current : printItems[0]?.id ?? null);
-    setSelectedPrintId((current) => printItems.some((item) => item.id === current) ? current : null);
-  }, [state]);
+    if (personalizationFocusId && personalizationItems.some((item) => item.id === personalizationFocusId)) {
+      setActivePrintId(personalizationFocusId);
+      setSelectedPrintId(personalizationFocusId);
+      return;
+    }
+
+    setActivePrintId((current) => (
+      personalizationItems.some((item) => item.id === current)
+        ? current
+        : personalizationItems[0]?.id ?? null
+    ));
+    setSelectedPrintId((current) => {
+      if (personalizationItems.some((item) => item.id === current)) return current;
+      if (current || personalizationFocusId) onPersonalizationSelect?.(null);
+      return null;
+    });
+    setPrintAnchor((current) => (
+      selectedPrintId && !personalizationItems.some((item) => item.id === selectedPrintId)
+        ? { visible: false }
+        : current
+    ));
+  }, [state, personalizationFocusId]);
 
   const patchPrint = (id, patch) => {
+    if (customTextItems.some((item) => item.id === id)) {
+      onStatePatch({ overrides: { customTextItems: patchCustomTextItem(customTextItems, id, patch) } });
+      return;
+    }
     const nextItems = patchPrintItem(printItems, id, patch);
     onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
   };
@@ -124,26 +167,42 @@ export function ProductStage({ artworkFocusId, onBakeProvider, onEditPrint, onSt
         <div className="stage-fallback">
           <BoxIcon />
         </div>
-        <PrintToolbarOverlay
+        <PersonalizationToolbarOverlay
           anchor={selectedPrintId === activePrintId ? printAnchor : { visible: false }}
-          item={printItems.find((item) => item.id === selectedPrintId)}
+          item={personalizationItems.find((item) => item.id === selectedPrintId)}
           onCopy={(id) => {
-            const placement = getNextPrintPlacement(printCopyCandidates, printItems.map((item) => item.placement).filter(Boolean));
-            const copy = duplicatePrintItem(printItems, id, placement);
+            const placement = getNextPrintPlacement(
+              printCopyCandidates,
+              personalizationItems.map((item) => item.placement).filter(Boolean),
+            );
+            const isCustomText = customTextItems.some((item) => item.id === id);
+            const copy = isCustomText
+              ? duplicateCustomTextItem(customTextItems, id, placement)
+              : duplicatePrintItem(printItems, id, placement);
             if (!copy) return;
-            const nextItems = [...printItems, copy];
-            onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+            if (isCustomText) {
+              onStatePatch({ overrides: { customTextItems: [...customTextItems, copy] } });
+            } else {
+              const nextItems = [...printItems, copy];
+              onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+            }
             setActivePrintId(copy.id);
             setSelectedPrintId(copy.id);
+            onPersonalizationSelect?.(copy.id);
           }}
           onDelete={(id) => {
-            const nextItems = removePrintItem(printItems, id);
             setActivePrintId(null);
             setSelectedPrintId(null);
             setPrintAnchor({ visible: false });
-            onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+            onPersonalizationSelect?.(null);
+            if (customTextItems.some((item) => item.id === id)) {
+              onStatePatch({ overrides: { customTextItems: removeCustomTextItem(customTextItems, id) } });
+            } else {
+              const nextItems = removePrintItem(printItems, id);
+              onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+            }
           }}
-          onEdit={(id) => onEditPrint?.(id)}
+          onEdit={(id) => onEditPersonalization?.(id)}
           onRotate={(id, rotation) => patchPrint(id, { rotation })}
           onScale={(id, scale) => patchPrint(id, { scale })}
         />

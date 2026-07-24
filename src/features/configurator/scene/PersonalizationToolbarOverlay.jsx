@@ -19,7 +19,7 @@ function normalizePrintRotation(degrees) {
   return ((degrees % 360) + 360) % 360;
 }
 
-export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
+export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
   const resizeStart = useRef(null);
   if (!item || !anchor?.visible) return null;
 
@@ -51,7 +51,7 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
 
   return (
     <div
-      aria-label="Selected print controls"
+      aria-label="Selected personalization controls"
       className="print-toolbar-overlay"
       role="group"
       style={{
@@ -62,17 +62,17 @@ export function PrintToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, on
       }}
     >
       <div className="print-selection-frame" data-testid="print-selection-frame" />
-      <button aria-label="Edit print" className="print-control print-control--edit" onClick={() => onEdit(item.id)} type="button"><Pencil size={15} /></button>
+      <button aria-label="Edit personalization" className="print-control print-control--edit" onClick={() => onEdit(item.id)} type="button"><Pencil size={15} /></button>
       <button
-        aria-label="Rotate print 45 degrees"
+        aria-label="Rotate personalization 45 degrees"
         className="print-control print-control--rotate"
         onClick={() => onRotate?.(item.id, normalizePrintRotation((item.rotation ?? 0) + PRINT_ROTATION_STEP))}
         type="button"
       ><RotateCw size={15} /></button>
-      <button aria-label="Delete print" className="print-control print-control--delete" onClick={() => onDelete(item.id)} type="button"><Trash2 size={15} /></button>
-      <button aria-label="Duplicate print" className="print-control print-control--duplicate" onClick={() => onCopy(item.id)} type="button">×2</button>
+      <button aria-label="Delete personalization" className="print-control print-control--delete" onClick={() => onDelete(item.id)} type="button"><Trash2 size={15} /></button>
+      <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" onClick={() => onCopy(item.id)} type="button">×2</button>
       <button
-        aria-label="Resize print"
+        aria-label="Resize personalization"
         className="print-control print-control--resize"
         onLostPointerCapture={clearResize}
         onPointerCancel={clearResize}

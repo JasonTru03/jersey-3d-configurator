@@ -302,7 +302,7 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit print' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit personalization' }));
 
     await waitFor(() => {
       expect(screen.getByLabelText('Name')).toHaveFocus();
@@ -316,15 +316,15 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
     act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete print' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete personalization' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Edit print' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Edit personalization' })).not.toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
 
-    expect(screen.queryByRole('button', { name: 'Edit print' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit personalization' })).not.toBeInTheDocument();
   });
 });
 

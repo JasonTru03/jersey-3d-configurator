@@ -4,8 +4,10 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DecorationEditor } from './decorationEditor.js';
 import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
+import { getBillableCustomTextItems, getCustomTextItems, patchCustomTextItem } from '../config/customTextItems.js';
 import { createGarmentAppearanceCanvas } from './garmentAppearanceTexture.js';
 import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
+import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTexture.js';
 import { selectGarmentPatternMeshes } from './modelProjection.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
@@ -544,9 +546,7 @@ export class GarmentRenderer {
   }
 
   updatePrintLayer() {
-    const printItems = this.state?.lighting && this.state.lighting !== 'none'
-      ? getPrintItems(this.state?.overrides)
-      : [];
+    const printItems = this.getRenderablePrintItems();
     if (!printItems.length) {
       this.disposePrintLayer();
       return;
@@ -563,24 +563,66 @@ export class GarmentRenderer {
 
   updatePrintLayerEntry(item) {
     let layer = this.printLayers.get(item.id);
+    if (layer && layer.itemKind !== item.itemKind) {
+      this.disposePrintLayerEntry(layer);
+      this.printLayers.delete(item.id);
+      layer = null;
+    }
+    const renderKey = this.getPrintRenderKey(item);
     if (!layer) {
-      const texture = new THREE.CanvasTexture(makePrintCanvas(this.getPrintOptions(item)));
+      const canvas = item.itemKind === 'text'
+        ? makeCustomTextCanvas(item)
+        : makePrintCanvas(this.getPrintOptions(item));
+      const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
       const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide });
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.42), material);
+      const planeHeight = item.itemKind === 'text' ? 1.05 / CUSTOM_TEXT_CANVAS_ASPECT : 0.42;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, planeHeight), material);
       plane.renderOrder = 4;
       plane.userData.printId = item.id;
+      plane.userData.itemKind = item.itemKind;
       this.scene.add(plane);
-      layer = { material, plane, texture };
+      layer = { itemKind: item.itemKind, material, plane, renderKey, texture };
       this.printLayers.set(item.id, layer);
+    } else if (layer.renderKey !== renderKey) {
+      if (item.itemKind === 'text') {
+        makeCustomTextCanvas(item, layer.texture.image);
+      } else {
+        makePrintCanvas(this.getPrintOptions(item), layer.texture.image);
+      }
+      layer.renderKey = renderKey;
+      layer.texture.needsUpdate = true;
     }
-    layer.texture.image = makePrintCanvas(this.getPrintOptions(item));
-    layer.texture.needsUpdate = true;
     this.applyStoredPrintPlacement(layer.plane, item);
   }
 
   redrawPrintTexture() {
-    getPrintItems(this.state?.overrides).forEach((item) => this.updatePrintLayerEntry(item));
+    this.getRenderablePrintItems().forEach((item) => this.updatePrintLayerEntry(item));
+  }
+
+  getRenderablePrintItems() {
+    const playerItems = this.state?.lighting && this.state.lighting !== 'none'
+      ? getPrintItems(this.state?.overrides).map((item) => ({ ...item, itemKind: 'player' }))
+      : [];
+    const textItems = getBillableCustomTextItems(
+      getCustomTextItems(this.state?.overrides),
+    ).map((item) => ({ ...item, itemKind: 'text' }));
+    return [...playerItems, ...textItems];
+  }
+
+  getPrintRenderKey(item) {
+    if (item.itemKind === 'text') {
+      return JSON.stringify([
+        item.text,
+        item.fontPreset,
+        item.fillColor,
+        item.outlineEnabled,
+        item.outlineColor,
+        item.letterSpacing,
+      ]);
+    }
+    const options = this.getPrintOptions(item);
+    return JSON.stringify([options.name, options.number, options.color, options.raised]);
   }
 
   getPrintOptions(item) {
@@ -708,7 +750,7 @@ export class GarmentRenderer {
   };
 
   isPrintEditable() {
-    return this.state?.lighting && this.state.lighting !== 'none' && this.decorationMeshes.length > 0;
+    return this.getRenderablePrintItems().length > 0 && this.decorationMeshes.length > 0;
   }
 
   pickJersey(event) {
@@ -760,8 +802,17 @@ export class GarmentRenderer {
         z: roundPlacement(normal.z),
       },
     };
+    const customTextItems = getCustomTextItems(this.state?.overrides);
+    const activePrintId = this.activePrintId ?? this.getRenderablePrintItems()[0]?.id;
+    if (activePrintId && customTextItems.some((item) => item.id === activePrintId)) {
+      this.onStatePatch({
+        overrides: {
+          customTextItems: patchCustomTextItem(customTextItems, activePrintId, { placement }),
+        },
+      });
+      return;
+    }
     const printItems = getPrintItems(this.state?.overrides);
-    const activePrintId = this.activePrintId ?? printItems[0]?.id;
     const nextItems = activePrintId
       ? patchPrintItem(printItems, activePrintId, { placement })
       : printItems;
@@ -829,8 +880,7 @@ function disposeMaterials(material) {
   material.dispose();
 }
 
-function makePrintCanvas({ color, name, number, raised }) {
-  const canvas = document.createElement('canvas');
+function makePrintCanvas({ color, name, number, raised }, canvas = document.createElement('canvas')) {
   canvas.width = 1024;
   canvas.height = 420;
   const ctx = canvas.getContext('2d');

@@ -1,4 +1,4 @@
-﻿export const CUSTOM_TEXT_PRICE = 8;
+export const CUSTOM_TEXT_PRICE = 8;
 export const MAX_CUSTOM_TEXT_ITEMS = 8;
 export const CUSTOM_TEXT_FONT_PRESETS = [
   { id: 'athletic', label: 'Athletic', family: 'Arial Black, Arial, sans-serif' },
@@ -26,14 +26,14 @@ export function createCustomTextItem({
 } = {}) {
   return {
     id: String(id),
-    text: String(text).slice(0, 24),
+    text: typeof text === 'string' ? text.slice(0, 24) : '',
     fontPreset: FONT_IDS.has(fontPreset) ? fontPreset : CUSTOM_TEXT_FONT_PRESETS[0].id,
     fillColor: normalizeColor(fillColor, '#20242A'),
     outlineEnabled: Boolean(outlineEnabled),
     outlineColor: normalizeColor(outlineColor, '#F7F5EF'),
-    letterSpacing: clamp(letterSpacing, 0, 20),
+    letterSpacing: clamp(letterSpacing, 0, 20, 0),
     placement,
-    scale: clamp(scale, MIN_SCALE, MAX_SCALE),
+    scale: clamp(scale, MIN_SCALE, MAX_SCALE, 1),
     rotation: normalizeRotation(rotation),
   };
 }
@@ -43,12 +43,21 @@ export function getCustomTextItems(overrides = {}) {
   if (!Array.isArray(overrides.customTextItems)) {
     throw new TypeError('Custom text items must be an array.');
   }
-  return overrides.customTextItems
-    .slice(0, MAX_CUSTOM_TEXT_ITEMS)
-    .map((item, index) => createCustomTextItem({
-      ...item,
-      id: item?.id ?? `text-${index + 1}`,
-    }));
+
+  const sourceItems = overrides.customTextItems.slice(0, MAX_CUSTOM_TEXT_ITEMS);
+  const reservedIds = new Set(sourceItems
+    .filter((item) => item?.id !== undefined && item?.id !== null)
+    .map((item) => String(item.id)));
+  const usedIds = new Set();
+
+  return sourceItems.map((item, index) => {
+    const explicitId = item?.id === undefined || item?.id === null ? null : String(item.id);
+    const id = explicitId && !usedIds.has(explicitId)
+      ? explicitId
+      : nextAvailableTextId(usedIds, reservedIds, index + 1);
+    usedIds.add(id);
+    return createCustomTextItem({ ...item, id });
+  });
 }
 
 export function getBillableCustomTextItems(items) {
@@ -57,7 +66,7 @@ export function getBillableCustomTextItems(items) {
 
 export function patchCustomTextItem(items, id, patch) {
   return items.map((item) => (
-    item.id === id ? createCustomTextItem({ ...item, ...patch }) : item
+    item.id === id ? createCustomTextItem({ ...item, ...patch, id: item.id }) : item
   ));
 }
 
@@ -82,6 +91,12 @@ export function nextTextId(items) {
   return `text-${number}`;
 }
 
+function nextAvailableTextId(usedIds, reservedIds, startNumber) {
+  let number = startNumber;
+  while (usedIds.has(`text-${number}`) || reservedIds.has(`text-${number}`)) number += 1;
+  return `text-${number}`;
+}
+
 function normalizeColor(value, fallback) {
   const color = String(value).toUpperCase();
   return HEX_COLOR.test(color) ? color : fallback;
@@ -93,7 +108,8 @@ function normalizeRotation(value) {
   return ((rotation % 360) + 360) % 360;
 }
 
-function clamp(value, minimum, maximum) {
+function clamp(value, minimum, maximum, fallback) {
   const number = Number(value);
-  return Math.min(maximum, Math.max(minimum, Number.isFinite(number) ? number : minimum));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(maximum, Math.max(minimum, number));
 }

@@ -78,6 +78,19 @@ describe('custom text items', () => {
     });
   });
 
+  it('keeps non-string text editable but excludes it from billing', () => {
+    const items = getCustomTextItems({
+      customTextItems: [
+        { id: 'text-1', text: null },
+        { id: 'text-2', text: undefined },
+        { id: 'text-3', text: { value: 'GO' } },
+        { id: 'text-4', text: ['GO'] },
+      ],
+    });
+
+    expect(items.map((item) => item.text)).toEqual(['', '', '', '']);
+    expect(getBillableCustomTextItems(items)).toEqual([]);
+  });
   it('returns no items when custom text data is missing and rejects non-array data', () => {
     expect(getCustomTextItems({})).toEqual([]);
     expect(() => getCustomTextItems({ customTextItems: 'nope' }))
@@ -95,6 +108,23 @@ describe('custom text items', () => {
     ]);
   });
 
+  it('generates missing ids without colliding with later explicit ids', () => {
+    const items = getCustomTextItems({
+      customTextItems: [{ text: 'FIRST' }, { id: 'text-1', text: 'SECOND' }],
+    });
+
+    expect(items.map((item) => item.id)).toEqual(['text-2', 'text-1']);
+    expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+  });
+
+  it('replaces duplicate explicit ids with generated unique ids', () => {
+    const items = getCustomTextItems({
+      customTextItems: [{ id: 'text-1', text: 'FIRST' }, { id: 'text-1', text: 'SECOND' }],
+    });
+
+    expect(items.map((item) => item.id)).toEqual(['text-1', 'text-2']);
+    expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+  });
   it('keeps blank items editable while billing only trimmed non-empty text', () => {
     const items = getCustomTextItems({
       customTextItems: [{ id: 'text-1', text: '   ' }, { id: 'text-2', text: ' GO ' }],
@@ -104,13 +134,17 @@ describe('custom text items', () => {
     expect(getBillableCustomTextItems(items)).toEqual([items[1]]);
   });
 
+  it('falls back non-finite letter spacing and scale values to their defaults', () => {
+    expect(createCustomTextItem({ letterSpacing: Number.NaN, scale: Infinity }))
+      .toMatchObject({ letterSpacing: 0, scale: 1 });
+  });
   it('patches and removes matching items without changing the other entries', () => {
     const items = [
       createCustomTextItem({ id: 'text-1', text: 'ONE' }),
       createCustomTextItem({ id: 'text-2', text: 'TWO' }),
     ];
 
-    expect(patchCustomTextItem(items, 'text-1', { text: 'UPDATED', rotation: 361 })[0])
+    expect(patchCustomTextItem(items, 'text-1', { id: 'text-99', text: 'UPDATED', rotation: 361 })[0])
       .toMatchObject({ id: 'text-1', text: 'UPDATED', rotation: 1 });
     expect(removeCustomTextItem(items, 'text-1')).toEqual([items[1]]);
   });

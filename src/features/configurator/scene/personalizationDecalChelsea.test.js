@@ -112,6 +112,38 @@ describe('Chelsea personalization decal coverage', () => {
     expect(shouldUsePersonalizationDecal(fit.geometry, textAlphaMask)).toBe(true);
     fit.geometry.dispose();
   });
+
+  it('returns the tighter legal scale when the real Chelsea decal rotates to fifteen degrees', () => {
+    const atZero = fitPersonalizationDecalToSurface({
+      alphaMask: textAlphaMask,
+      height: TEXT_HEIGHT,
+      meshes: garmentMeshes,
+      minimumCoverage: 0.985,
+      minimumScale: 0.55,
+      placement: DEFAULT_PLACEMENT,
+      rotation: 0,
+      scale: 1.8,
+      width: TEXT_WIDTH,
+    });
+    const atFifteen = fitPersonalizationDecalToSurface({
+      alphaMask: textAlphaMask,
+      height: TEXT_HEIGHT,
+      meshes: garmentMeshes,
+      minimumCoverage: 0.985,
+      minimumScale: 0.55,
+      placement: DEFAULT_PLACEMENT,
+      rotation: 15,
+      scale: atZero.scale,
+      width: TEXT_WIDTH,
+    });
+
+    expect(atZero.scale).toBeCloseTo(1.0676, 3);
+    expect(atFifteen.scale).toBeCloseTo(1.0271, 3);
+    expect(atFifteen.scale).toBeLessThan(atZero.scale);
+    expect(atFifteen.coverage).toBeGreaterThanOrEqual(0.985);
+    atZero.geometry.dispose();
+    atFifteen.geometry.dispose();
+  });
 });
 
 function makeTextAlphaMask() {

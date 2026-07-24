@@ -944,8 +944,8 @@ describe('garment decoration mesh selection', () => {
     installTextCanvasContext();
     const host = document.createElement('div');
     document.body.append(host);
-    const onStatePatch = vi.fn();
-    const renderer = new GarmentRenderer(host, { onStatePatch });
+    const onStateNormalize = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStateNormalize });
     const jersey = new THREE.Mesh(
       new THREE.PlaneGeometry(0.8, 2),
       new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
@@ -981,12 +981,52 @@ describe('garment decoration mesh selection', () => {
     expect(layer.decal.visible).toBe(true);
     expect(layer.plane.material.opacity).toBe(0);
     expect(layer.plane.scale.x).toBeLessThan(1.8);
-    expect(onStatePatch).toHaveBeenCalledOnce();
-    expect(onStatePatch.mock.calls[0][0].overrides.customTextItems[0].scale)
+    expect(onStateNormalize).toHaveBeenCalledOnce();
+    expect(onStateNormalize.mock.calls[0][0].overrides.customTextItems[0].scale)
       .toBeCloseTo(layer.plane.scale.x, 6);
 
     renderer.updatePrintLayer();
-    expect(onStatePatch).toHaveBeenCalledOnce();
+    expect(onStateNormalize).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
+  it('normalizes an invalid legacy placement to the default front and keeps the decal visible', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStateNormalize = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStateNormalize });
+    const jersey = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    jersey.position.z = 0.5;
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'legacy',
+          text: 'MASON',
+          placement: { x: 99, y: 99, z: 99 },
+          rotation: 0,
+          scale: 1.8,
+        }],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    const layer = renderer.printLayers.get('text:legacy');
+    expect(layer.decal.visible || layer.plane.material.opacity > 0).toBe(true);
+    expect(onStateNormalize).toHaveBeenCalledOnce();
+    expect(onStateNormalize.mock.calls[0][0].overrides.customTextItems[0]).toEqual(
+      expect.objectContaining({
+        placement: expect.objectContaining({ x: 0, y: 0.36, z: 0.5 }),
+        scale: expect.any(Number),
+      }),
+    );
     renderer.dispose();
   });
 

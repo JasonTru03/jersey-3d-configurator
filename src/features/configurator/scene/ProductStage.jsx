@@ -143,6 +143,7 @@ export function ProductStage({
         onPrintAnchorChange: setPrintAnchor,
         onPrintSelectionChange: handlePrintSelectionChange,
         onStatePatch,
+        onStateNormalize: (patch) => onStatePatch(patch, { quote: false, recordHistory: false }),
       });
       rendererRef.current.update(product, state, selected);
     } catch (error) {
@@ -174,6 +175,9 @@ export function ProductStage({
   useEffect(() => {
     if (rendererRef.current) {
       rendererRef.current.onStatePatch = onStatePatch;
+      rendererRef.current.onStateNormalize = (patch) => (
+        onStatePatch(patch, { quote: false, recordHistory: false })
+      );
       rendererRef.current.onPrintAnchorChange = setPrintAnchor;
       rendererRef.current.onPrintSelectionChange = handlePrintSelectionChange;
     }
@@ -249,7 +253,13 @@ export function ProductStage({
           }}
           onDelete={onDeletePersonalization}
           onEdit={(id) => onEditPersonalization?.(id)}
-          onRotate={(id, rotation) => patchPrint(id, { rotation })}
+          onRotate={(id, rotation) => {
+            const finalItem = rendererRef.current?.constrainPersonalizationItem?.(
+              id,
+              { rotation },
+            );
+            patchPrint(id, personalizationTransformPatch(finalItem, { rotation }));
+          }}
           onRotationPreview={(id, rotation) => {
             rendererRef.current?.previewPersonalizationRotation?.(id, rotation);
           }}
@@ -257,13 +267,26 @@ export function ProductStage({
             rendererRef.current?.cancelPersonalizationRotationPreview?.();
           }}
           onRotationGestureEnd={(id, rotation) => {
-            rendererRef.current?.endPersonalizationRotation?.(id, rotation);
-            patchPrint(id, { rotation });
+            const finalItem = rendererRef.current?.endPersonalizationRotation?.(id, rotation);
+            patchPrint(id, personalizationTransformPatch(finalItem, { rotation }));
           }}
           onRotationGestureStart={(id) => {
             rendererRef.current?.beginPersonalizationRotation?.(id);
           }}
+          onResizeGestureCancel={(id) => {
+            rendererRef.current?.cancelPersonalizationResizePreview?.(id);
+          }}
+          onResizeGestureEnd={(id, scale) => {
+            const finalItem = rendererRef.current?.endPersonalizationResize?.(id, scale);
+            patchPrint(id, personalizationTransformPatch(finalItem, { scale }));
+          }}
+          onResizeGestureStart={(id) => {
+            rendererRef.current?.beginPersonalizationResize?.(id);
+          }}
           onScale={(id, scale) => patchPrint(id, { scale })}
+          onScalePreview={(id, scale) => {
+            rendererRef.current?.previewPersonalizationScale?.(id, scale);
+          }}
         />
       </div>
       <div className="stage-caption">
@@ -272,6 +295,15 @@ export function ProductStage({
       </div>
     </section>
   );
+}
+
+function personalizationTransformPatch(item, fallback) {
+  if (!item) return fallback;
+  return {
+    placement: item.placement,
+    rotation: item.rotation,
+    scale: item.scale,
+  };
 }
 
 function BoxIcon() {

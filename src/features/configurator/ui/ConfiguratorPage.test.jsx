@@ -7,6 +7,7 @@ const rendererHarness = vi.hoisted(() => ({
   focusedDecorationId: null,
   options: null,
   updateStates: [],
+  finalRotationItem: null,
 }));
 let downloadClick;
 
@@ -39,8 +40,12 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       setActivePrintId() {}
       beginPersonalizationRotation() {}
       previewPersonalizationRotation() {}
-      endPersonalizationRotation() {}
+      endPersonalizationRotation() { return rendererHarness.finalRotationItem; }
       cancelPersonalizationRotationPreview() {}
+      beginPersonalizationResize() {}
+      previewPersonalizationScale() {}
+      endPersonalizationResize() {}
+      cancelPersonalizationResizePreview() {}
 
       setView() {}
 
@@ -82,6 +87,7 @@ beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.updateStates = [];
+  rendererHarness.finalRotationItem = null;
   rendererHarness.configurationError = '';
   downloadClick.mockClear();
   URL.createObjectURL.mockClear();
@@ -177,6 +183,11 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
+    rendererHarness.finalRotationItem = {
+      placement: { x: 0, y: 0.36, z: 0.5 },
+      rotation: 15,
+      scale: 1.0271,
+    };
     act(() => rendererHarness.options.onPrintSelectionChange('text:text-1'));
     const handle = await screen.findByRole('button', { name: 'Drag to rotate personalization' });
 
@@ -195,16 +206,19 @@ describe('ConfiguratorPage', () => {
     ).not.toBe(0));
     const finalRotation = rendererHarness.updateStates.at(-1)
       .overrides.customTextItems[0].rotation;
+    expect(rendererHarness.updateStates.at(-1).overrides.customTextItems[0].scale).toBe(1.0271);
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     await waitFor(() => expect(
       rendererHarness.updateStates.at(-1).overrides.customTextItems[0].rotation,
     ).toBe(0));
+    expect(rendererHarness.updateStates.at(-1).overrides.customTextItems[0].scale).toBe(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
     await waitFor(() => expect(
       rendererHarness.updateStates.at(-1).overrides.customTextItems[0].rotation,
     ).toBe(finalRotation));
+    expect(rendererHarness.updateStates.at(-1).overrides.customTextItems[0].scale).toBe(1.0271);
   });
 
   it('shows the active design and fabric in the stage caption', async () => {

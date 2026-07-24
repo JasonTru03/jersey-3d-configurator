@@ -90,6 +90,7 @@ export class GarmentRenderer {
   constructor(host, options = {}) {
     this.host = host;
     this.onStatePatch = options.onStatePatch;
+    this.onStateNormalize = options.onStateNormalize;
     this.onPrintAnchorChange = options.onPrintAnchorChange;
     this.onPrintSelectionChange = options.onPrintSelectionChange;
     this.scene = new THREE.Scene();
@@ -736,6 +737,7 @@ export class GarmentRenderer {
     item,
     placement = item.placement ?? DEFAULT_PRINT_POSITION,
     preferredSurface = null,
+    options = {},
   ) {
     if (!layer || !item) return false;
     const requestedScale = item.scale ?? 1;
@@ -749,6 +751,24 @@ export class GarmentRenderer {
           width: layer.width,
         });
     if (!surface) {
+      if (options.allowDefault !== false && !placementsEqual(placement, DEFAULT_PRINT_POSITION)) {
+        const defaultItem = {
+          ...item,
+          placement: structuredClone(DEFAULT_PRINT_POSITION),
+        };
+        this.applyStoredPrintPlacement(layer.plane, defaultItem);
+        return this.syncPersonalizationDecal(
+          layer,
+          defaultItem,
+          DEFAULT_PRINT_POSITION,
+          null,
+          {
+            ...options,
+            allowDefault: false,
+            normalizationSource: options.normalizationSource ?? item,
+          },
+        );
+      }
       layer.plane.material.opacity = 1;
       layer.decal.visible = false;
       layer.decalKey = null;
@@ -773,24 +793,54 @@ export class GarmentRenderer {
         previous.scale !== requestedScale
         || JSON.stringify(previous.placement) !== JSON.stringify(placement)
       )) {
-        this.publishPersonalizationConstraint(item, previous);
         this.applyStoredPrintPlacement(layer.plane, previous);
         return this.syncPersonalizationDecal(
           layer,
           previous,
           previous.placement ?? DEFAULT_PRINT_POSITION,
+          null,
+          {
+            ...options,
+            allowDefault: false,
+            normalizationSource: options.normalizationSource ?? item,
+          },
         );
       }
-      layer.plane.material.opacity = 0;
+      if (options.allowDefault !== false && !placementsEqual(placement, DEFAULT_PRINT_POSITION)) {
+        const defaultItem = {
+          ...item,
+          placement: structuredClone(DEFAULT_PRINT_POSITION),
+        };
+        this.applyStoredPrintPlacement(layer.plane, defaultItem);
+        return this.syncPersonalizationDecal(
+          layer,
+          defaultItem,
+          DEFAULT_PRINT_POSITION,
+          null,
+          {
+            ...options,
+            allowDefault: false,
+            normalizationSource: options.normalizationSource ?? item,
+          },
+        );
+      }
+      layer.plane.material.opacity = 1;
       layer.decal.visible = false;
-      layer.decalFallback = false;
+      layer.decalFallback = true;
       return false;
     }
     const constrainedItem = fit.scale < requestedScale - 0.000001
       ? { ...item, scale: fit.scale }
       : item;
-    if (constrainedItem !== item) {
-      this.publishPersonalizationConstraint(item, constrainedItem);
+    const normalizationSource = options.normalizationSource ?? item;
+    const needsNormalization = (
+      constrainedItem.scale !== normalizationSource.scale
+      || !placementsEqual(constrainedItem.placement, normalizationSource.placement)
+    );
+    if (needsNormalization) {
+      if (options.normalize !== false) {
+        this.publishPersonalizationConstraint(normalizationSource, constrainedItem);
+      }
       this.applyStoredPrintPlacement(layer.plane, constrainedItem);
     } else {
       this.clearSatisfiedPersonalizationConstraint(item);
@@ -849,11 +899,11 @@ export class GarmentRenderer {
         item.sourceId,
         patch,
       );
-      this.onStatePatch?.({ overrides: { customTextItems: items } });
+      this.onStateNormalize?.({ overrides: { customTextItems: items } });
       return;
     }
     const items = patchPrintItem(getPrintItems(this.state?.overrides), item.sourceId, patch);
-    this.onStatePatch?.({
+    this.onStateNormalize?.({
       overrides: { printItems: items, ...legacyFirstItemFields(items) },
     });
   }
@@ -926,7 +976,6 @@ export class GarmentRenderer {
   endPersonalizationRotation(key, rotation) {
     if (this.rotationPreviewKey !== key) return false;
     this.rotationPreviewKey = null;
-    this.pendingPersonalizationConstraints.clear();
     const layer = this.printLayers.get(key);
     const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
     if (!layer || !item) return false;
@@ -934,8 +983,7 @@ export class GarmentRenderer {
     const finalItem = Number.isFinite(finalRotation)
       ? { ...item, rotation: ((finalRotation % 360) + 360) % 360 }
       : item;
-    this.applyStoredPrintPlacement(layer.plane, finalItem);
-    return this.syncPersonalizationDecal(layer, finalItem);
+    return this.constrainPersonalizationItem(key, finalItem);
   }
 
   cancelPersonalizationRotationPreview() {
@@ -945,13 +993,79 @@ export class GarmentRenderer {
     return this.restorePrintLayerFromState(this.printLayers.get(key));
   }
 
+  beginPersonalizationResize(key) {
+    if (this.personalizationMutationDisabled) return false;
+    const layer = this.printLayers.get(key);
+    if (!layer) return false;
+    layer.plane.material.opacity = 1;
+    layer.decal.visible = false;
+    return true;
+  }
+
+  previewPersonalizationScale(key, scale) {
+    const layer = this.printLayers.get(key);
+    const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
+    const previewScale = Number(scale);
+    if (!layer || !item || !Number.isFinite(previewScale)) return false;
+    this.applyStoredPrintPlacement(layer.plane, { ...item, scale: previewScale });
+    this.syncPrintAnchor();
+    return true;
+  }
+
+  endPersonalizationResize(key, scale) {
+    const layer = this.printLayers.get(key);
+    const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
+    const finalScale = Number(scale);
+    if (!layer || !item || !Number.isFinite(finalScale)) return null;
+    return this.constrainPersonalizationItem(key, { ...item, scale: finalScale });
+  }
+
+  cancelPersonalizationResizePreview(key) {
+    return this.restorePrintLayerFromState(this.printLayers.get(key));
+  }
+
+  constrainPersonalizationItem(key, patch, preferredSurface = null) {
+    const layer = this.printLayers.get(key);
+    const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
+    if (!layer || !item) return null;
+    return this.finalizePersonalizationItem(
+      layer,
+      { ...item, ...patch },
+      preferredSurface,
+    );
+  }
+
+  finalizePersonalizationItem(layer, item, preferredSurface = null) {
+    if (!layer || !item) return null;
+    this.applyStoredPrintPlacement(layer.plane, item);
+    this.syncPersonalizationDecal(
+      layer,
+      item,
+      item.placement ?? DEFAULT_PRINT_POSITION,
+      preferredSurface,
+      { normalize: false },
+    );
+    return layer.lastValidItem
+      ? {
+          ...layer.lastValidItem,
+          placement: layer.lastValidItem.placement
+            ? structuredClone(layer.lastValidItem.placement)
+            : null,
+        }
+      : item;
+  }
+
   getPrintPlanePlacement(plane) {
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion).normalize();
     return {
-      x: plane.position.x,
-      y: plane.position.y,
-      z: plane.position.z,
-      normal: { x: normal.x, y: normal.y, z: normal.z },
+      x: roundPlacement(plane.position.x),
+      y: roundPlacement(plane.position.y),
+      z: roundPlacement(plane.position.z),
+      normal: {
+        x: roundPlacement(normal.x),
+        y: roundPlacement(normal.y),
+        z: roundPlacement(normal.z),
+      },
     };
   }
 
@@ -1064,8 +1178,19 @@ export class GarmentRenderer {
       this.activePrintDrag?.latestSurface,
       activeLayer?.plane.position,
     );
-    this.setPrintLayerDragging(activeLayer, false, finalSurface);
-    this.emitPrintPlacement();
+    const activeItem = findPersonalizationItem(
+      getSelectablePersonalizationItems(this.state),
+      this.activePrintId,
+    );
+    const placement = activeLayer ? this.getPrintPlanePlacement(activeLayer.plane) : null;
+    const finalItem = activeItem && placement
+      ? this.finalizePersonalizationItem(
+          activeLayer,
+          { ...activeItem, placement },
+          finalSurface,
+        )
+      : null;
+    if (finalItem) this.emitPersonalizationItem(finalItem);
     this.activePrintDrag = null;
   };
 
@@ -1134,43 +1259,46 @@ export class GarmentRenderer {
     this.printPlane.quaternion.copy(nextQuaternion);
   }
 
-  emitPrintPlacement() {
+  emitPersonalizationItem(activeItem) {
     if (this.personalizationMutationDisabled) return;
-    const printPlane = this.printPlane;
-    if (!printPlane || !this.onStatePatch) return;
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(printPlane.quaternion).normalize();
-    const placement = {
-      x: roundPlacement(printPlane.position.x),
-      y: roundPlacement(printPlane.position.y),
-      z: roundPlacement(printPlane.position.z),
-      normal: {
-        x: roundPlacement(normal.x),
-        y: roundPlacement(normal.y),
-        z: roundPlacement(normal.z),
-      },
+    if (!activeItem || !this.onStatePatch) return;
+    const patch = {
+      placement: activeItem.placement,
+      rotation: activeItem.rotation,
+      scale: activeItem.scale,
     };
-    const selectableItems = getSelectablePersonalizationItems(this.state);
-    const activeItem = this.activePrintId === null
-      ? this.getRenderablePrintItems()[0] ?? null
-      : findPersonalizationItem(selectableItems, this.activePrintId);
-    if (!activeItem) return;
     if (activeItem.itemKind === 'text') {
       const customTextItems = getCustomTextItems(this.state?.overrides);
       this.onStatePatch({
         overrides: {
-          customTextItems: patchCustomTextItem(customTextItems, activeItem.sourceId, { placement }),
+          customTextItems: patchCustomTextItem(customTextItems, activeItem.sourceId, patch),
         },
       });
       return;
     }
     const printItems = getPrintItems(this.state?.overrides);
-    const nextItems = patchPrintItem(printItems, activeItem.sourceId, { placement });
+    const nextItems = patchPrintItem(printItems, activeItem.sourceId, patch);
     this.onStatePatch({
       overrides: {
         printItems: nextItems,
         ...legacyFirstItemFields(nextItems),
       },
     });
+  }
+
+  emitPrintPlacement() {
+    if (this.personalizationMutationDisabled) return;
+    const layer = this.printLayers.get(this.activePrintId);
+    const activeItem = findPersonalizationItem(
+      getSelectablePersonalizationItems(this.state),
+      this.activePrintId,
+    );
+    if (!layer || !activeItem) return;
+    const finalItem = this.finalizePersonalizationItem(layer, {
+      ...activeItem,
+      placement: this.getPrintPlanePlacement(layer.plane),
+    });
+    if (finalItem) this.emitPersonalizationItem(finalItem);
   }
 
   patchSelectedDecoration(patch) {
@@ -1255,6 +1383,10 @@ function sanitizePrintText(value) {
 
 function roundPlacement(value) {
   return Math.round(value * 10000) / 10000;
+}
+
+function placementsEqual(first, second) {
+  return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
 }
 
 function getPlaneProjectedCorners(plane, camera) {

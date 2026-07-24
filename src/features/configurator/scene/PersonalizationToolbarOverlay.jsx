@@ -59,7 +59,11 @@ export function PersonalizationToolbarOverlay({
   onRotationGestureCancel,
   onRotationGestureEnd,
   onRotationGestureStart,
+  onResizeGestureCancel,
+  onResizeGestureEnd,
+  onResizeGestureStart,
   onScale,
+  onScalePreview,
   personalizationMutationDisabled,
 }) {
   const mutationDisabled = personalizationMutationDisabled ?? deleteDisabled;
@@ -69,8 +73,10 @@ export function PersonalizationToolbarOverlay({
   const rotationStart = useRef(null);
   const rotationGestureEndRef = useRef(onRotationGestureEnd);
   const rotationGestureCancelRef = useRef(onRotationGestureCancel);
+  const resizeGestureCancelRef = useRef(onResizeGestureCancel);
   rotationGestureEndRef.current = onRotationGestureEnd;
   rotationGestureCancelRef.current = onRotationGestureCancel;
+  resizeGestureCancelRef.current = onResizeGestureCancel;
   const [stageArea, setStageArea] = useState(null);
   const [frozenDockLayout, setFrozenDockLayout] = useState(null);
   const [isRotating, setIsRotating] = useState(false);
@@ -84,6 +90,9 @@ export function PersonalizationToolbarOverlay({
     resizeStart.current = null;
     if (rotation) {
       rotationGestureCancelRef.current?.(rotation.itemKey);
+    }
+    if (resizeGesture) {
+      resizeGestureCancelRef.current?.(resizeGesture.itemKey);
     }
     releaseGesturePointer(rotation);
     releaseGesturePointer(resizeGesture);
@@ -136,15 +145,30 @@ export function PersonalizationToolbarOverlay({
   const dockLayout = frozenDockLayout
     ?? getPersonalizationDockLayout(dockPosition, anchor, stageArea);
 
-  const clearResize = (event) => {
+  const finishResize = (event, mode) => {
     const start = resizeStart.current;
     if (!start || start.pointerId !== event.pointerId) return;
+    let finalStart = start;
+    if (mode === 'commit') {
+      const scale = getResizeScale(start, event.clientX, event.clientY);
+      finalStart = {
+        ...start,
+        hasMoved: start.hasMoved || Math.abs(scale - start.scale) > 0.000001,
+        latestScale: scale,
+      };
+      if (finalStart.hasMoved) onScalePreview?.(start.itemKey, scale);
+    }
     resizeStart.current = null;
-    releaseGesturePointer(start);
+    releaseGesturePointer(finalStart);
+    if (mode === 'commit' && finalStart.hasMoved) {
+      onResizeGestureEnd?.(finalStart.itemKey, finalStart.latestScale);
+    } else {
+      onResizeGestureCancel?.(finalStart.itemKey);
+    }
   };
 
   const startResize = (event) => {
-    if (mutationDisabled || !onScale || resizeStart.current || rotationStart.current) return;
+    if (mutationDisabled || (!onScalePreview && !onScale) || resizeStart.current || rotationStart.current) return;
     const { centerX, centerY } = getAnchorCenter(anchor);
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -156,14 +180,29 @@ export function PersonalizationToolbarOverlay({
       centerX,
       centerY,
       distance: getDistanceFromCenter(centerX, centerY, event.clientX, event.clientY),
+      hasMoved: false,
+      latestScale: item.scale ?? 1,
     };
+    onResizeGestureStart?.(itemKey);
   };
 
   const resize = (event) => {
     const start = resizeStart.current;
-    if (mutationDisabled || !start || start.pointerId !== event.pointerId || start.itemKey !== itemKey || !onScale) return;
+    if (
+      mutationDisabled
+      || !start
+      || start.pointerId !== event.pointerId
+      || start.itemKey !== itemKey
+      || (!onScalePreview && !onScale)
+    ) return;
     event.preventDefault();
-    onScale(start.itemKey, getResizeScale(start, event.clientX, event.clientY));
+    const scale = getResizeScale(start, event.clientX, event.clientY);
+    resizeStart.current = {
+      ...start,
+      hasMoved: start.hasMoved || Math.abs(scale - start.scale) > 0.000001,
+      latestScale: scale,
+    };
+    (onScalePreview ?? onScale)?.(start.itemKey, scale);
   };
 
   const applyRotationPoint = (event) => {
@@ -332,11 +371,11 @@ export function PersonalizationToolbarOverlay({
         aria-label="Resize personalization"
         className="print-control print-control--resize"
         disabled={mutationDisabled}
-        onLostPointerCapture={clearResize}
-        onPointerCancel={clearResize}
+        onLostPointerCapture={(event) => finishResize(event, 'cancel')}
+        onPointerCancel={(event) => finishResize(event, 'cancel')}
         onPointerDown={startResize}
         onPointerMove={resize}
-        onPointerUp={clearResize}
+        onPointerUp={(event) => finishResize(event, 'commit')}
         type="button"
       ><Maximize2 size={15} /></button>
     </div>

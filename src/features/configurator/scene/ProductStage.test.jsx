@@ -9,6 +9,9 @@ const rendererHarness = vi.hoisted(() => ({
   rotationGestureStarts: [],
   rotationPreviews: [],
   rotationCancels: [],
+  finalRotationItem: null,
+  finalResizeItem: null,
+  resizePreviews: [],
   focusedDecorationId: null,
   options: null,
   personalizationMutationDisabled: null,
@@ -42,6 +45,7 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
 
       endPersonalizationRotation(id, rotation) {
         rendererHarness.rotationGestureEnds.push([id, rotation]);
+        return rendererHarness.finalRotationItem;
       }
 
       previewPersonalizationRotation(id, rotation) {
@@ -51,6 +55,18 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
       cancelPersonalizationRotationPreview() {
         rendererHarness.rotationCancels.push(true);
       }
+
+      beginPersonalizationResize() {}
+
+      previewPersonalizationScale(id, scale) {
+        rendererHarness.resizePreviews.push([id, scale]);
+      }
+
+      endPersonalizationResize() {
+        return rendererHarness.finalResizeItem;
+      }
+
+      cancelPersonalizationResizePreview() {}
 
       setPersonalizationMutationDisabled(disabled) {
         rendererHarness.personalizationMutationDisabled = disabled;
@@ -82,6 +98,9 @@ beforeEach(() => {
   rendererHarness.rotationGestureStarts = [];
   rendererHarness.rotationPreviews = [];
   rendererHarness.rotationCancels = [];
+  rendererHarness.finalRotationItem = null;
+  rendererHarness.finalResizeItem = null;
+  rendererHarness.resizePreviews = [];
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
@@ -170,6 +189,45 @@ describe('ProductStage print toolbar', () => {
     expect(onStatePatch).toHaveBeenCalledOnce();
   });
 
+  it('commits the constrained rotation, scale, and placement atomically on release', () => {
+    const onStatePatch = vi.fn();
+    rendererHarness.finalRotationItem = {
+      placement: { x: 0, y: 0.36, z: 0.5 },
+      rotation: 15,
+      scale: 1.0261,
+    };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'custom-id',
+          text: 'MASON',
+          placement: { x: 0, y: 0.36, z: 0.5 },
+          rotation: 0,
+          scale: 1.0676,
+        }],
+      },
+    }} />);
+    act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
+    const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+
+    fireEvent.pointerDown(handle, { pointerId: 81, clientX: 228, clientY: 190 });
+    fireEvent.pointerMove(handle, { pointerId: 81, clientX: 280, clientY: 247 });
+    expect(onStatePatch).not.toHaveBeenCalled();
+    fireEvent.pointerUp(handle, { pointerId: 81, clientX: 280, clientY: 247 });
+
+    expect(onStatePatch).toHaveBeenCalledOnce();
+    expect(onStatePatch).toHaveBeenCalledWith({
+      overrides: {
+        customTextItems: [expect.objectContaining({
+          placement: { x: 0, y: 0.36, z: 0.5 },
+          rotation: 15,
+          scale: 1.0261,
+        })],
+      },
+    });
+  });
+
   it('routes active print deletion through the shared executor', () => {
     const onDeletePersonalization = vi.fn();
     render(<ProductStage onDeletePersonalization={onDeletePersonalization} onStatePatch={vi.fn()} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
@@ -209,17 +267,28 @@ describe('ProductStage print toolbar', () => {
     expect(onEditPersonalization).toHaveBeenCalledWith('player:print-1');
   });
 
-  it('updates the active print scale from the resize handle', () => {
+  it('previews resize moves and commits the constrained scale once on release', () => {
     const onStatePatch = vi.fn();
+    rendererHarness.finalResizeItem = {
+      placement: { x: 0, y: 0.36, z: 0.5 },
+      rotation: 0,
+      scale: 1.0676,
+    };
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     const handle = screen.getByRole('button', { name: 'Resize personalization' });
-    fireEvent.pointerDown(handle, { clientX: 10, clientY: 10 });
-    fireEvent.pointerMove(handle, { clientX: 50, clientY: 10 });
+    fireEvent.pointerDown(handle, { pointerId: 83, clientX: 10, clientY: 10 });
+    for (let index = 0; index < 60; index += 1) {
+      fireEvent.pointerMove(handle, { pointerId: 83, clientX: 50 + index, clientY: 10 });
+    }
+    expect(onStatePatch).not.toHaveBeenCalled();
+    expect(rendererHarness.resizePreviews).toHaveLength(60);
+    fireEvent.pointerUp(handle, { pointerId: 83, clientX: 109, clientY: 10 });
 
+    expect(onStatePatch).toHaveBeenCalledOnce();
     expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
-      overrides: expect.objectContaining({ printItems: [expect.objectContaining({ id: 'print-1', scale: expect.any(Number) })] }),
+      overrides: expect.objectContaining({ printItems: [expect.objectContaining({ id: 'print-1', scale: 1.0676 })] }),
     }));
   });
 

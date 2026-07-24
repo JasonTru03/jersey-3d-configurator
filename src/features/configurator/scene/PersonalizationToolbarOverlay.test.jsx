@@ -88,6 +88,83 @@ describe('PersonalizationToolbarOverlay', () => {
     expect(dock).toHaveStyle({ '--print-dock-left': '175px', '--print-dock-top': '128px' });
   });
 
+  it('clears a hidden anchor gesture before showing the latest unfrozen dock', () => {
+    const { callbacks, rerender } = renderToolbar();
+    const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+    handle.hasPointerCapture = vi.fn(() => true);
+    handle.releasePointerCapture = vi.fn();
+
+    fireEvent.pointerDown(handle, { pointerId: 10, clientX: 150, clientY: 50 });
+    expect(handle).toHaveClass('is-dragging');
+
+    rerender(
+      <PersonalizationToolbarOverlay
+        anchor={{ visible: false }}
+        item={{ id: 'print-1', rotation: 0, scale: 1 }}
+        {...callbacks}
+      />,
+    );
+    expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
+
+    rerender(
+      <PersonalizationToolbarOverlay
+        anchor={{ visible: true, left: 20, top: 200, width: 80, height: 40 }}
+        item={{ id: 'print-1', rotation: 0, scale: 1 }}
+        {...callbacks}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Drag to rotate personalization' })).not.toHaveClass('is-dragging');
+    expect(screen.getByTestId('print-control-dock')).toHaveStyle({
+      '--print-dock-left': '60px',
+      '--print-dock-top': '148px',
+    });
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(10);
+  });
+
+  it('does not let an old pointer gesture rotate a newly selected item', () => {
+    const { callbacks, rerender } = renderToolbar();
+    const oldHandle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+    oldHandle.hasPointerCapture = vi.fn(() => true);
+    oldHandle.releasePointerCapture = vi.fn();
+
+    fireEvent.pointerDown(oldHandle, { pointerId: 11, clientX: 150, clientY: 50 });
+    rerender(
+      <PersonalizationToolbarOverlay
+        anchor={anchor}
+        item={{ id: 'print-2', rotation: 90, scale: 1 }}
+        {...callbacks}
+      />,
+    );
+    fireEvent.pointerMove(oldHandle, { pointerId: 11, clientX: 250, clientY: 130 });
+
+    expect(callbacks.onRotate).not.toHaveBeenCalled();
+    expect(oldHandle.releasePointerCapture).toHaveBeenCalledWith(11);
+  });
+
+  it('releases a captured rotation pointer when the overlay unmounts', () => {
+    const { unmount } = renderToolbar();
+    const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+    handle.hasPointerCapture = vi.fn(() => true);
+    handle.releasePointerCapture = vi.fn();
+
+    fireEvent.pointerDown(handle, { pointerId: 12, clientX: 150, clientY: 50 });
+    unmount();
+
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(12);
+  });
+
+  it('releases a captured resize pointer when the overlay unmounts', () => {
+    const { unmount } = renderToolbar();
+    const handle = screen.getByRole('button', { name: 'Resize personalization' });
+    handle.hasPointerCapture = vi.fn(() => true);
+    handle.releasePointerCapture = vi.fn();
+
+    fireEvent.pointerDown(handle, { pointerId: 19, clientX: 200, clientY: 160 });
+    unmount();
+
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(19);
+  });
+
   it.each(['pointerCancel', 'lostPointerCapture'])('clears a rotation gesture after %s', (eventName) => {
     const { callbacks } = renderToolbar();
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
@@ -98,6 +175,52 @@ describe('PersonalizationToolbarOverlay', () => {
 
     expect(callbacks.onRotate).not.toHaveBeenCalled();
     expect(screen.getByTestId('print-control-dock')).toHaveStyle({ '--print-dock-left': '150px', '--print-dock-top': '48px' });
+  });
+
+  it('consumes a distinct pointer-up position once and does not duplicate the last move', () => {
+    const first = renderToolbar();
+    const firstHandle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+    firstHandle.hasPointerCapture = vi.fn(() => true);
+    firstHandle.releasePointerCapture = vi.fn();
+
+    fireEvent.pointerDown(firstHandle, { pointerId: 13, clientX: 150, clientY: 50 });
+    fireEvent.pointerMove(firstHandle, { pointerId: 13, clientX: 250, clientY: 130 });
+    fireEvent.pointerUp(firstHandle, { pointerId: 13, clientX: 150, clientY: 230 });
+    expect(first.callbacks.onRotate).toHaveBeenCalledTimes(2);
+    expect(first.callbacks.onRotate).toHaveBeenLastCalledWith('print-1', 180);
+    expect(firstHandle.releasePointerCapture).toHaveBeenCalledWith(13);
+    first.unmount();
+
+    const second = renderToolbar();
+    const secondHandle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+    fireEvent.pointerDown(secondHandle, { pointerId: 14, clientX: 150, clientY: 50 });
+    fireEvent.pointerMove(secondHandle, { pointerId: 14, clientX: 250, clientY: 130 });
+    fireEvent.pointerUp(secondHandle, { pointerId: 14, clientX: 250, clientY: 130 });
+
+    expect(second.callbacks.onRotate).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps rotation and resize gestures mutually exclusive across pointer ids', () => {
+    const { callbacks } = renderToolbar();
+    const rotateHandle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+    const resizeHandle = screen.getByRole('button', { name: 'Resize personalization' });
+    resizeHandle.setPointerCapture = vi.fn();
+    rotateHandle.setPointerCapture = vi.fn();
+
+    fireEvent.pointerDown(rotateHandle, { pointerId: 15, clientX: 150, clientY: 50 });
+    fireEvent.pointerDown(resizeHandle, { pointerId: 16, clientX: 200, clientY: 160 });
+    fireEvent.pointerMove(resizeHandle, { pointerId: 16, clientX: 240, clientY: 200 });
+    expect(resizeHandle.setPointerCapture).not.toHaveBeenCalled();
+    expect(callbacks.onScale).not.toHaveBeenCalled();
+
+    fireEvent.pointerCancel(rotateHandle, { pointerId: 15 });
+    fireEvent.pointerDown(resizeHandle, { pointerId: 17, clientX: 200, clientY: 160 });
+    fireEvent.pointerDown(rotateHandle, { pointerId: 18, clientX: 150, clientY: 50 });
+    fireEvent.pointerMove(rotateHandle, { pointerId: 18, clientX: 250, clientY: 130 });
+
+    expect(resizeHandle.setPointerCapture).toHaveBeenCalledWith(17);
+    expect(rotateHandle.setPointerCapture).toHaveBeenCalledTimes(1);
+    expect(callbacks.onRotate).not.toHaveBeenCalled();
   });
 
   it('rotates by five degrees with arrow keys in the same visual direction as the drag helper', () => {

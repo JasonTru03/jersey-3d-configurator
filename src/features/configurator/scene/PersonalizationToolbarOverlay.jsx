@@ -1,5 +1,5 @@
 import { Maximize2, Pencil, RotateCw, Trash2 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   beginRotationGesture,
   normalizeRotation,
@@ -35,26 +35,51 @@ function getDockPosition(anchor) {
   };
 }
 
+function releaseGesturePointer(start) {
+  const target = start?.target;
+  if (!target?.releasePointerCapture) return;
+  if (target.hasPointerCapture && !target.hasPointerCapture(start.pointerId)) return;
+  target.releasePointerCapture(start.pointerId);
+}
+
 export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, onEdit, onRotate, onScale }) {
   const resizeStart = useRef(null);
   const rotationStart = useRef(null);
   const [frozenDock, setFrozenDock] = useState(null);
   const [isRotating, setIsRotating] = useState(false);
-  if (!item || !anchor?.visible) return null;
-  const itemKey = item.key ?? item.id;
+  const itemKey = item?.key ?? item?.id ?? null;
+  const anchorVisible = Boolean(anchor?.visible);
+
+  useEffect(() => () => {
+    const rotation = rotationStart.current;
+    const resizeGesture = resizeStart.current;
+    rotationStart.current = null;
+    resizeStart.current = null;
+    releaseGesturePointer(rotation);
+    releaseGesturePointer(resizeGesture);
+    setFrozenDock(null);
+    setIsRotating(false);
+  }, [anchorVisible, itemKey]);
+
+  if (!item || !anchorVisible) return null;
   const dockPosition = frozenDock ?? getDockPosition(anchor);
 
   const clearResize = (event) => {
-    if (!resizeStart.current || resizeStart.current.pointerId === event.pointerId) resizeStart.current = null;
+    const start = resizeStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    resizeStart.current = null;
+    releaseGesturePointer(start);
   };
 
   const startResize = (event) => {
-    if (!onScale) return;
+    if (!onScale || resizeStart.current || rotationStart.current) return;
     const { centerX, centerY } = getAnchorCenter(anchor);
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     resizeStart.current = {
+      itemKey,
       pointerId: event.pointerId,
+      target: event.currentTarget,
       scale: item.scale ?? 1,
       centerX,
       centerY,
@@ -64,27 +89,68 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
 
   const resize = (event) => {
     const start = resizeStart.current;
-    if (!start || start.pointerId !== event.pointerId || !onScale) return;
+    if (!start || start.pointerId !== event.pointerId || start.itemKey !== itemKey || !onScale) return;
     event.preventDefault();
-    onScale(itemKey, getResizeScale(start, event.clientX, event.clientY));
+    onScale(start.itemKey, getResizeScale(start, event.clientX, event.clientY));
   };
 
-  const clearRotation = (event) => {
+  const applyRotationPoint = (event) => {
+    const start = rotationStart.current;
+    if (
+      !start
+      || start.pointerId !== event.pointerId
+      || start.itemKey !== itemKey
+      || (start.lastClientX === event.clientX && start.lastClientY === event.clientY)
+    ) return;
+
+    event.preventDefault();
+    const hasMoved = start.hasMoved || Math.hypot(
+      event.clientX - start.startClientX,
+      event.clientY - start.startClientY,
+    ) >= ROTATION_DRAG_THRESHOLD;
+    const nextStart = {
+      ...start,
+      hasMoved,
+      lastClientX: event.clientX,
+      lastClientY: event.clientY,
+    };
+    if (!hasMoved) {
+      rotationStart.current = nextStart;
+      return;
+    }
+
+    const gesture = updateRotationGesture(start.gesture, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    rotationStart.current = { ...nextStart, gesture };
+    onRotate?.(start.itemKey, gesture.rotation);
+  };
+
+  const finishRotation = (event, consumeFinalPosition) => {
     const start = rotationStart.current;
     if (!start || start.pointerId !== event.pointerId) return;
+    if (consumeFinalPosition) applyRotationPoint(event);
+    const finalStart = rotationStart.current ?? start;
     rotationStart.current = null;
+    releaseGesturePointer(finalStart);
     setFrozenDock(null);
     setIsRotating(false);
   };
 
   const startRotation = (event) => {
+    if (rotationStart.current || resizeStart.current) return;
     const { centerX, centerY } = getAnchorCenter(anchor);
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     rotationStart.current = {
+      itemKey,
       pointerId: event.pointerId,
+      target: event.currentTarget,
       startClientX: event.clientX,
       startClientY: event.clientY,
+      lastClientX: event.clientX,
+      lastClientY: event.clientY,
       gesture: beginRotationGesture({
         centerX,
         centerY,
@@ -99,21 +165,7 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
   };
 
   const rotate = (event) => {
-    const start = rotationStart.current;
-    if (!start || start.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    const hasMoved = start.hasMoved || Math.hypot(
-      event.clientX - start.startClientX,
-      event.clientY - start.startClientY,
-    ) >= ROTATION_DRAG_THRESHOLD;
-    if (!hasMoved) return;
-
-    const gesture = updateRotationGesture(start.gesture, {
-      clientX: event.clientX,
-      clientY: event.clientY,
-    });
-    rotationStart.current = { ...start, gesture, hasMoved };
-    onRotate?.(itemKey, gesture.rotation);
+    applyRotationPoint(event);
   };
 
   const rotateWithKeyboard = (event) => {
@@ -144,11 +196,11 @@ export function PersonalizationToolbarOverlay({ anchor, item, onCopy, onDelete, 
           aria-label="Drag to rotate personalization"
           className={`print-control print-control--rotate${isRotating ? ' is-dragging' : ''}`}
           onKeyDown={rotateWithKeyboard}
-          onLostPointerCapture={clearRotation}
-          onPointerCancel={clearRotation}
+          onLostPointerCapture={(event) => finishRotation(event, false)}
+          onPointerCancel={(event) => finishRotation(event, false)}
           onPointerDown={startRotation}
           onPointerMove={rotate}
-          onPointerUp={clearRotation}
+          onPointerUp={(event) => finishRotation(event, true)}
           type="button"
         ><RotateCw size={15} /></button>
         <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" onClick={() => onCopy?.(itemKey)} type="button">×2</button>

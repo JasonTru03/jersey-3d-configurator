@@ -262,8 +262,8 @@
 
 .print-control-dock {
   position: absolute;
-  top: var(--print-dock-top);
-  left: var(--print-dock-left);
+  top: max(8px, var(--print-dock-top));
+  left: clamp(94px, var(--print-dock-left), calc(100% - 94px));
   display: flex;
   gap: 4px;
   transform: translateX(-50%);

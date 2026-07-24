@@ -351,6 +351,28 @@ describe('ConfiguratorPage', () => {
     ));
   });
 
+  it('shows expired launch pricing in Review and does not navigate to the cart', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2210%22%3A%2249000000000010%22%7D&variantId=48039101923479',
+    );
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
+    await waitFor(() => expect(screen.getAllByText('$107').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
+    );
+    expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
   it('blocks the cart after the saved patterned design changes', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
     const navigateToCart = vi.fn();

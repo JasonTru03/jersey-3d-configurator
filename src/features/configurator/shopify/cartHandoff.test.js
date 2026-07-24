@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createCartUrl, parseShopifyLaunch } from './cartHandoff.js';
+import {
+  createCartUrl,
+  findSurchargeCombination,
+  parseShopifyLaunch,
+} from './cartHandoff.js';
 
 function decodeProperties(url) {
   const encoded = new URL(url).searchParams.get('properties');
@@ -29,6 +33,11 @@ describe('cart handoff', () => {
           },
           printName: 'PLAYER',
           printNumber: '10',
+          customTextItems: [
+            { id: 'text-1', text: '  CHELSEA FC  ' },
+            { id: 'text-2', text: '   ' },
+            { id: 'text-3', text: 'LONDON' },
+          ],
           decorations: [],
           bottomPattern: { enabled: true },
         },
@@ -47,6 +56,7 @@ describe('cart handoff', () => {
       Template: 'solid',
       Colors: JSON.stringify({ body: '#fff', sleeves: '#fff', shoulderSide: '#111', collar: '#111', pattern: '#d8c17a', number: '#111' }),
       Print: 'PLAYER #10',
+      'Custom Text': 'CHELSEA FC | LONDON',
       Extras: '',
       Artwork: '',
       'Production Files': 'Local ZIP download',
@@ -76,14 +86,103 @@ describe('cart handoff', () => {
     expect(() => createCartUrl({ context, quote: { customizationTotal: 0, total: 89 }, state })).toThrow('Local production files are not ready.');
   });
 
-  it('requires an exact surcharge variant for a positive customization total', () => {
-    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%7D');
+  it('keeps one exact surcharge line when the amount is mapped', () => {
+    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%2C%2212%22%3A%2249000000000012%22%7D');
+
+    const url = createCartUrl({
+      context,
+      quote: { customizationTotal: 18, merchandisePrice: 89, total: 107 },
+      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    });
+
+    expect(url).toContain('/cart/48039101923479:1,49000000000018:1');
+  });
+
+  it('composes 62 dollars from 50 and 12 when the exact amount is absent', () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com'
+      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
+      + '&surchargeVariantMap=%7B%2250%22%3A%2249000000000050%22%2C%2212%22%3A%2249000000000012%22%2C%228%22%3A%2249000000000008%22%7D',
+    );
+
+    const url = createCartUrl({
+      context,
+      quote: { customizationTotal: 62, merchandisePrice: 89, total: 151 },
+      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    });
+
+    expect(url).toContain('/cart/48039101923479:1,49000000000050:1,49000000000012:1');
+  });
+
+  it('uses quantity when repeating one surcharge variant is optimal', () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com'
+      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
+      + '&surchargeVariantMap=%7B%228%22%3A%2249000000000008%22%7D',
+    );
+
+    const url = createCartUrl({
+      context,
+      quote: { customizationTotal: 24, merchandisePrice: 89, total: 113 },
+      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
+    });
+
+    expect(url).toContain('/cart/48039101923479:1,49000000000008:3');
+  });
+
+  it('chooses the fewest units, then kinds, then larger amounts deterministically', () => {
+    expect(findSurchargeCombination({
+      8: '4900000000000008',
+      7: '4900000000000007',
+      6: '4900000000000006',
+      5: '4900000000000005',
+      4: '4900000000000004',
+    }, 12)).toEqual([
+      { amount: 6, quantity: 2, variantId: '4900000000000006' },
+    ]);
+
+    expect(findSurchargeCombination({
+      7: '4900000000000007',
+      6: '4900000000000006',
+      4: '4900000000000004',
+      3: '4900000000000003',
+    }, 10)).toEqual([
+      { amount: 7, quantity: 1, variantId: '4900000000000007' },
+      { amount: 3, quantity: 1, variantId: '4900000000000003' },
+    ]);
+  });
+
+  it('handles zero, invalid targets, and invalid map entries', () => {
+    expect(findSurchargeCombination({ invalid: 'bad' }, 0)).toEqual([]);
+    expect(findSurchargeCombination({ 8: '4900000000000008' }, -1)).toBeNull();
+    expect(findSurchargeCombination({ 8: '4900000000000008' }, 1.5)).toBeNull();
+    expect(findSurchargeCombination({ 8: '4900000000000008' }, Number.MAX_SAFE_INTEGER + 1)).toBeNull();
+    expect(findSurchargeCombination({
+      0: '4900000000000000',
+      '-4': '4900000000000004',
+      8: 'bad',
+      12: '4900000000000012',
+      13: '4900000000000013',
+      99: '4900000000000099',
+    }, 12)).toEqual([
+      { amount: 12, quantity: 1, variantId: '4900000000000012' },
+    ]);
+  });
+
+  it('reports expired pricing before cart navigation when no exact sum exists', () => {
+    const context = parseShopifyLaunch(
+      '?shop=testcsj.myshopify.com'
+      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
+      + '&surchargeVariantMap=%7B%2210%22%3A%2249000000000010%22%7D',
+    );
 
     expect(() => createCartUrl({
       context,
-      quote: { customizationTotal: 26, merchandisePrice: 89, total: 115 },
+      quote: { customizationTotal: 23, merchandisePrice: 89, total: 112 },
       state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    })).toThrow('No Shopify surcharge variant exists for the $26 customization.');
+    })).toThrow(
+      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
+    );
   });
 
   it('rejects an invalid shop host, malformed maps, and missing selected-size variants', () => {

@@ -11,6 +11,7 @@ import {
   patchCustomTextItem,
   removeCustomTextItem,
 } from './customTextItems.js';
+import { jerseyProduct } from './productDefinitions.js';
 
 describe('custom text items', () => {
   it('exposes the configured price, capacity, and four font presets', () => {
@@ -50,6 +51,14 @@ describe('custom text items', () => {
     });
   });
 
+  it('falls back to default colors when values are not six-digit hex colors', () => {
+    expect(createCustomTextItem({ fillColor: '#BAD', outlineColor: 'red' }))
+      .toMatchObject({ fillColor: '#20242A', outlineColor: '#F7F5EF' });
+  });
+
+  it('starts the product state with an empty custom text collection', () => {
+    expect(jerseyProduct.defaultState.overrides.customTextItems).toEqual([]);
+  });
   it('uses the documented defaults and lower bounds', () => {
     expect(createCustomTextItem({
       letterSpacing: -4,

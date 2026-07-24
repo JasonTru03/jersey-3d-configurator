@@ -5,7 +5,8 @@
 - Date: `2026-07-24`
 - Branch: `codex/continuous-bottom-pattern`
 - Deployed code commit: `8734e08d7e324524cca57633676814bdadea1114`
-- Deployment documentation commit: created after this handoff is staged
+- Handoff content commit: `da5349f5c49fd86fb5ffb99dd051697a545f6bcd`
+- Final branch head: use the verified local/origin/backup hashes in the final delivery report
 - Merge status: not merged to `main`
 - Working-tree companion: `.superpowers/` remains untracked and excluded
 
@@ -146,9 +147,11 @@ Verified before navigation:
 - `Custom Text: "CHELSEA FC"`;
 - one base line and one `$8` surcharge line.
 
-Browser line-item readback status: pending. The public cart permalink redirected
-to `/password`, and the Chrome navigation rendered Shopify's
-`There was a problem loading this website`.
+Browser line-item readback status: pending. A single navigation from the same
+pre-existing readable cart tab landed on
+`https://testcsj.myshopify.com/password`. The DOM showed the Shopify storefront
+password form. Back navigation restored the readable `$151` cart, and this path
+was not repeated.
 
 ## 7. Composed-map `$151` cart
 
@@ -177,7 +180,10 @@ Verified generated properties:
 - `Extras: "giftBox, matchPatch"`.
 
 Verified generated surcharge lines are `$50` plus `$12`, one unit each.
-Browser line-item readback remains pending under the same storefront limitation.
+One composed-cart navigation was then made from that same restored cart tab. It
+also landed on the Shopify storefront password form. Back navigation restored
+the original cart again. Browser line-item readback remains pending, and no
+further composed-cart navigation was attempted.
 
 ## 8. Real Shopify cart evidence available in this session
 
@@ -197,7 +203,21 @@ the new `$50 + $12` composed path and does not include `CHELSEA FC`.
 No checkout was entered, no order was created, and no customer, address, or
 payment data was read.
 
-## 9. Remaining acceptance
+## 9. Production Open design evidence
+
+- Save design on the production Worker generated and downloaded
+  `C:\Users\Administrator\Downloads\fn8788-jersey-design (3).json`.
+- The file is 1,662 bytes, `jersey-design` v3, with layout M.
+- Open design raised a single-file chooser; `isMultiple()` returned false.
+- The one `setFiles` call returned `Not allowed`.
+- The result matches the Chrome extension file URL permission boundary recorded
+  earlier, so the chooser path was stopped after this attempt.
+
+To complete this check, open Chrome extensions, select Details for the ChatGPT
+Chrome Extension, enable `Allow access to file URLs`, and then select the saved
+v3 file once.
+
+## 10. Remaining acceptance
 
 Use a storefront session that has passed the password page and is stable:
 
@@ -206,7 +226,7 @@ Use a storefront session that has passed the password page and is stable:
    plus surcharge `$8`, including `Custom Text: CHELSEA FC` and empty Print;
 3. launch with `$62` omitted but `$50` and `$12` present, recreate the four
    `$62` options, and read back three cart lines totaling `$151`;
-4. repeat Open design with Chrome file URL access enabled;
+4. repeat Open design after enabling Chrome file URL access;
 5. manually read back the native color control.
 
 These browser items are the only outstanding production acceptance. Cloudflare

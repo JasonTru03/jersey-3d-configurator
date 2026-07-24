@@ -323,5 +323,16 @@ Admin GraphQL 读回：
 - 新建 Chrome storefront/product 与 cart 标签显示 Shopify 的 `There was a problem loading this website`。
 - 一个任务开始前已打开的真实 Shopify cart 可读回：M `$89` + exact `$62` surcharge，2 lines、每行 quantity 1、总计 `$151.00 USD`，且 `Print: PLAYER #16`、`Extras: giftBox, matchPatch`。
 - 上述已打开 cart 使用 exact `$62` variant，不是本轮要求的 `$50 + $12` composed cart，也不含 `CHELSEA FC`；它只证明真实 Shopify 的 M `$89` + surcharge `$62` 总计 `$151`。
+- 在上述同一真实 cart 标签中，`$97` exact cart URL 只导航一次，落到 `https://testcsj.myshopify.com/password`；DOM 显示 Shopify 法语 storefront 密码页。随后 Back 恢复原 `$151` cart。
+- 同一标签中的 `$50 + $12` composed cart URL 也只导航一次，结果同样落到 storefront 密码页；随后 Back 再次恢复原 cart。本轮未继续重复这两个受限路径。
 - 因此本轮 `$97` exact cart 与 `$50 + $12` composed cart 已完成真实 variant/theme/URL/properties 读回，但浏览器 line-item 验收仍标记为待补。
 - checkout 未进入，未创建订单，未读取客户、支付或地址数据。
+
+### Production Open design 最终补验
+
+- 在生产 Worker 点击 Save design，真实下载
+  `C:\Users\Administrator\Downloads\fn8788-jersey-design (3).json`。
+- 文件为 1,662 bytes，`jersey-design` v3，layout 为 M。
+- 生产 Open design 成功触发单文件 chooser，`isMultiple()` 为 false。
+- 唯一一次 `setFiles` 调用返回 `Not allowed`，与此前 Chrome 扩展权限限制一致；本轮停止该路径。
+- 后续补验需在 Chrome 扩展 Details 中启用 `Allow access to file URLs`，再选取同一 v3 文件。

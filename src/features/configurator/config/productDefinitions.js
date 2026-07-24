@@ -72,6 +72,7 @@ export const jerseyProduct = {
           rotation: 0,
         },
       ],
+      customTextItems: [],
       decorations: [],
       appearance: normalizeAppearance(undefined, homeSwatches),
       bottomPattern: createDefaultBottomPattern(),

@@ -35,6 +35,7 @@ import {
 } from '../designs/localProductionReceipt.js';
 import { createProductionBundle } from '../designs/productionBundle.js';
 import './configurator.css';
+import '../scene/personalization-controls.css';
 
 const sectionDefaults = [
   { id: 'layout', label: 'Size', icon: Shirt },

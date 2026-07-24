@@ -1,0 +1,94 @@
+.stage {
+  container-name: stage;
+  container-type: inline-size;
+}
+
+.print-toolbar-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.print-selection-frame {
+  position: absolute;
+  top: var(--print-top);
+  left: var(--print-left);
+  width: var(--print-width);
+  height: var(--print-height);
+  border: 2px solid #ef5d43;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.print-control {
+  position: absolute;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--pc3d-line, var(--line));
+  border-radius: 4px;
+  background: var(--pc3d-panel, var(--panel));
+  color: var(--pc3d-ink, var(--text));
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.print-control-dock {
+  position: absolute;
+  top: var(--print-dock-position-top);
+  left: var(--print-dock-position-left);
+  display: grid;
+  grid-template-columns: repeat(var(--print-dock-columns), 44px);
+  gap: 4px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.print-control--edit,
+.print-control--rotate,
+.print-control--duplicate,
+.print-control--delete {
+  position: relative;
+  inset: auto;
+}
+
+.print-control--rotate {
+  cursor: grab;
+  touch-action: none;
+}
+
+.print-control--rotate.is-dragging {
+  cursor: grabbing;
+}
+
+.print-control--duplicate {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.print-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.print-control--resize {
+  top: calc(var(--print-top) + var(--print-height) - 22px);
+  left: calc(var(--print-left) + var(--print-width) - 22px);
+  touch-action: none;
+}
+
+.print-control:hover,
+.print-control:focus-visible {
+  border-color: var(--pc3d-accent, var(--accent));
+  color: var(--pc3d-accent, var(--accent));
+  outline: none;
+}
+
+@container stage (max-width: 360px) {
+  .print-control-dock {
+    gap: 2px;
+  }
+}

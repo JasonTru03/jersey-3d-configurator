@@ -68,6 +68,10 @@ export function ProductStage({
     setSelectedPrintId(id);
     onPersonalizationSelect?.(id);
   }, [onPersonalizationSelect]);
+  const handleStateNormalize = useCallback(
+    (patch) => onStatePatch(patch, { quote: false, recordHistory: false }),
+    [onStatePatch],
+  );
 
   useEffect(() => {
     const previousInput = reconciliationInputRef.current;
@@ -143,7 +147,7 @@ export function ProductStage({
         onPrintAnchorChange: setPrintAnchor,
         onPrintSelectionChange: handlePrintSelectionChange,
         onStatePatch,
-        onStateNormalize: (patch) => onStatePatch(patch, { quote: false, recordHistory: false }),
+        onStateNormalize: handleStateNormalize,
       });
       rendererRef.current.update(product, state, selected);
     } catch (error) {
@@ -157,8 +161,21 @@ export function ProductStage({
   }, [product.renderer]);
 
   useEffect(() => {
-    rendererRef.current?.update(product, state, selected);
-  }, [product, selected, state]);
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.onStatePatch = onStatePatch;
+    renderer.onStateNormalize = handleStateNormalize;
+    renderer.onPrintAnchorChange = setPrintAnchor;
+    renderer.onPrintSelectionChange = handlePrintSelectionChange;
+    renderer.update(product, state, selected);
+  }, [
+    handlePrintSelectionChange,
+    handleStateNormalize,
+    onStatePatch,
+    product,
+    selected,
+    state,
+  ]);
 
   useEffect(() => {
     if (artworkFocusId) rendererRef.current?.focusDecoration(artworkFocusId);
@@ -171,17 +188,6 @@ export function ProductStage({
   useEffect(() => {
     rendererRef.current?.setPersonalizationMutationDisabled?.(personalizationMutationDisabled);
   }, [personalizationMutationDisabled]);
-
-  useEffect(() => {
-    if (rendererRef.current) {
-      rendererRef.current.onStatePatch = onStatePatch;
-      rendererRef.current.onStateNormalize = (patch) => (
-        onStatePatch(patch, { quote: false, recordHistory: false })
-      );
-      rendererRef.current.onPrintAnchorChange = setPrintAnchor;
-      rendererRef.current.onPrintSelectionChange = handlePrintSelectionChange;
-    }
-  }, [handlePrintSelectionChange, onStatePatch]);
 
   useEffect(() => {
     rendererRef.current?.setView(view);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { productApi } from '../api/productApi.js';
 import { mergeConfiguratorState } from '../config/state.js';
 import { usePersonalizationDeletion } from '../hooks/usePersonalizationDeletion.js';
@@ -124,6 +124,8 @@ function useShopifyConfigurator(settings) {
   const [state, setState] = useState(null);
   const [quote, setQuote] = useState(null);
   const [configurationError, setConfigurationError] = useState('');
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
     let active = true;
@@ -144,6 +146,7 @@ function useShopifyConfigurator(settings) {
 
       if (!active) return;
       setProduct(definition);
+      stateRef.current = initialState;
       setState(initialState);
       setQuote(initialQuote);
     }
@@ -164,17 +167,25 @@ function useShopifyConfigurator(settings) {
     patch,
     { quote: shouldQuote = true, transactional = false } = {},
   ) => {
-    if (!product || !state) return { message: 'The configurator is still loading.', ok: false };
-    const nextState = mergeConfiguratorState(state, patch);
+    const currentState = stateRef.current;
+    if (!product || !currentState) return { message: 'The configurator is still loading.', ok: false };
+    const nextState = mergeConfiguratorState(currentState, patch);
     if (!shouldQuote) {
+      stateRef.current = nextState;
       setState(nextState);
       setConfigurationError('');
       return { ok: true };
     }
     try {
-      if (!transactional) setState(nextState);
+      if (!transactional) {
+        stateRef.current = nextState;
+        setState(nextState);
+      }
       const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
-      if (transactional) setState(nextState);
+      if (transactional) {
+        stateRef.current = nextState;
+        setState(nextState);
+      }
       setQuote(nextQuote);
       setConfigurationError('');
       return { ok: true };

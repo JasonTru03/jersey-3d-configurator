@@ -149,6 +149,7 @@ export class GarmentRenderer {
     this.activePrintDrag = null;
     this.rotationPreviewKey = null;
     this.pendingPersonalizationConstraints = new Map();
+    this.personalizationNormalizationBatch = null;
     this.personalizationMutationDisabled = false;
     this.pendingDecorationDeselect = null;
     this.printColor = '#20242a';
@@ -604,7 +605,9 @@ export class GarmentRenderer {
       this.pendingPersonalizationConstraints.delete(key);
       if (this.rotationPreviewKey === key) this.rotationPreviewKey = null;
     });
+    this.personalizationNormalizationBatch = new Map();
     printItems.forEach((item) => this.updatePrintLayerEntry(item));
+    this.flushPersonalizationNormalizationBatch();
     if (activeLayerWasRemoved || !printItems.length) {
       this.isDraggingPrint = false;
       this.pendingPrintDrag = null;
@@ -883,28 +886,50 @@ export class GarmentRenderer {
   }
 
   publishPersonalizationConstraint(item, constrainedItem) {
-    const signature = JSON.stringify([
-      constrainedItem.scale,
-      constrainedItem.placement ?? null,
-    ]);
-    if (this.pendingPersonalizationConstraints.get(item.key) === signature) return;
-    this.pendingPersonalizationConstraints.set(item.key, signature);
-    const patch = {
-      placement: constrainedItem.placement,
-      scale: constrainedItem.scale,
-    };
-    if (item.itemKind === 'text') {
-      const items = patchCustomTextItem(
-        getCustomTextItems(this.state?.overrides),
-        item.sourceId,
-        patch,
-      );
-      this.onStateNormalize?.({ overrides: { customTextItems: items } });
+    if (!this.personalizationNormalizationBatch) {
+      this.personalizationNormalizationBatch = new Map();
+      this.personalizationNormalizationBatch.set(item.key, { constrainedItem, item });
+      this.flushPersonalizationNormalizationBatch();
       return;
     }
-    const items = patchPrintItem(getPrintItems(this.state?.overrides), item.sourceId, patch);
-    this.onStateNormalize?.({
-      overrides: { printItems: items, ...legacyFirstItemFields(items) },
+    this.personalizationNormalizationBatch.set(item.key, { constrainedItem, item });
+  }
+
+  flushPersonalizationNormalizationBatch() {
+    const batch = this.personalizationNormalizationBatch;
+    this.personalizationNormalizationBatch = null;
+    if (!batch?.size || !this.onStateNormalize) return;
+
+    let customTextItems = getCustomTextItems(this.state?.overrides);
+    let printItems = getPrintItems(this.state?.overrides);
+    let hasCustomText = false;
+    let hasPrint = false;
+    batch.forEach(({ constrainedItem, item }) => {
+      const patch = {
+        placement: constrainedItem.placement,
+        scale: constrainedItem.scale,
+      };
+      if (item.itemKind === 'text') {
+        customTextItems = patchCustomTextItem(customTextItems, item.sourceId, patch);
+        hasCustomText = true;
+      } else {
+        printItems = patchPrintItem(printItems, item.sourceId, patch);
+        hasPrint = true;
+      }
+    });
+
+    const overrides = {};
+    if (hasCustomText) overrides.customTextItems = customTextItems;
+    if (hasPrint) Object.assign(overrides, {
+      printItems,
+      ...legacyFirstItemFields(printItems),
+    });
+    this.onStateNormalize({ overrides });
+    batch.forEach(({ constrainedItem, item }) => {
+      this.pendingPersonalizationConstraints.set(item.key, JSON.stringify([
+        constrainedItem.scale,
+        constrainedItem.placement ?? null,
+      ]));
     });
   }
 

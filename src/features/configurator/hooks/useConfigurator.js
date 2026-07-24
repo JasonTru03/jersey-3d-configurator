@@ -55,16 +55,27 @@ export function useConfigurator(initialStateOverride) {
 
   const updateState = useCallback(
     async (patch, { quote: shouldQuote = true, recordHistory = true } = {}) => {
-      const currentState = getCurrentDesignState(history);
-      if (!product || !currentState) {
+      if (!product) {
         return { message: 'The configurator is still loading.', ok: false };
       }
-      const nextState = mergeConfiguratorState(currentState, patch);
       if (!recordHistory && !shouldQuote) {
-        setHistory((currentHistory) => replaceCurrentDesignState(currentHistory, nextState));
+        setHistory((currentHistory) => {
+          const latestState = getCurrentDesignState(currentHistory);
+          return latestState
+            ? replaceCurrentDesignState(
+                currentHistory,
+                mergeConfiguratorState(latestState, patch),
+              )
+            : currentHistory;
+        });
         setConfigurationError('');
         return { ok: true };
       }
+      const currentState = getCurrentDesignState(history);
+      if (!currentState) {
+        return { message: 'The configurator is still loading.', ok: false };
+      }
+      const nextState = mergeConfiguratorState(currentState, patch);
       try {
         const nextQuote = shouldQuote
           ? await productApi.quoteConfiguration(product.id, nextState)

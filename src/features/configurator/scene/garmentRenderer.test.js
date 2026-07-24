@@ -985,8 +985,13 @@ describe('garment decoration mesh selection', () => {
     expect(onStateNormalize.mock.calls[0][0].overrides.customTextItems[0].scale)
       .toBeCloseTo(layer.plane.scale.x, 6);
 
+    renderer.state = {
+      ...renderer.state,
+      overrides: onStateNormalize.mock.calls[0][0].overrides,
+    };
     renderer.updatePrintLayer();
     expect(onStateNormalize).toHaveBeenCalledOnce();
+    expect(renderer.pendingPersonalizationConstraints.size).toBe(0);
     renderer.dispose();
   });
 
@@ -1027,6 +1032,60 @@ describe('garment decoration mesh selection', () => {
         scale: expect.any(Number),
       }),
     );
+    renderer.dispose();
+  });
+
+  it('batches every invalid player and text item from one render pass into one patch', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStateNormalize = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStateNormalize });
+    const jersey = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    jersey.position.z = 0.5;
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    const invalidPlacement = { x: 99, y: 99, z: 99 };
+    renderer.state = {
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{
+          id: 'player',
+          name: 'PLAYER',
+          number: '16',
+          placement: invalidPlacement,
+          scale: 1.8,
+          rotation: 0,
+        }],
+        customTextItems: [
+          { id: 'first', text: 'FIRST', placement: invalidPlacement, scale: 1.8 },
+          { id: 'second', text: 'SECOND', placement: invalidPlacement, scale: 1.8 },
+        ],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    expect(onStateNormalize).toHaveBeenCalledOnce();
+    const { overrides } = onStateNormalize.mock.calls[0][0];
+    expect(overrides.customTextItems).toHaveLength(2);
+    expect(overrides.customTextItems.every((item) => (
+      item.placement.x === 0 && item.placement.y === 0.36 && item.placement.z === 0.5
+    ))).toBe(true);
+    expect(overrides.printItems).toHaveLength(1);
+    expect(overrides.printItems[0].placement).toEqual(
+      expect.objectContaining({ x: 0, y: 0.36, z: 0.5 }),
+    );
+    expect(overrides.printPlacement).toEqual(overrides.printItems[0].placement);
+    expect(renderer.pendingPersonalizationConstraints.size).toBe(3);
+
+    renderer.state = { ...renderer.state, overrides };
+    renderer.updatePrintLayer();
+    expect(onStateNormalize).toHaveBeenCalledOnce();
+    expect(renderer.pendingPersonalizationConstraints.size).toBe(0);
     renderer.dispose();
   });
 

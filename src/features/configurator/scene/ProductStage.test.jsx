@@ -15,6 +15,7 @@ const rendererHarness = vi.hoisted(() => ({
   focusedDecorationId: null,
   options: null,
   personalizationMutationDisabled: null,
+  normalizationForUpdate: null,
   updateArgs: null,
 }));
 
@@ -26,10 +27,13 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
       constructor(host, options) {
         rendererHarness.options = options;
         this.onPrintAnchorChange = options.onPrintAnchorChange;
+        this.onStateNormalize = options.onStateNormalize;
       }
 
       update(...args) {
         rendererHarness.updateArgs = args;
+        const normalization = rendererHarness.normalizationForUpdate?.(args[1]);
+        if (normalization) this.onStateNormalize?.(normalization);
         this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
       }
 
@@ -104,6 +108,7 @@ beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
+  rendererHarness.normalizationForUpdate = null;
   rendererHarness.updateArgs = null;
 });
 
@@ -522,6 +527,82 @@ describe('ProductStage print toolbar', () => {
       'player:same-id',
       expect.objectContaining({ onFailure: expect.any(Function), onStart: expect.any(Function) }),
     );
+  });
+
+  it('uses the current render callback when renderer update normalizes a newly loaded state', async () => {
+    let latestState;
+    rendererHarness.normalizationForUpdate = (state) => {
+      const legacy = state.overrides.customTextItems?.find((item) => item.id === 'legacy');
+      if (!legacy || legacy.scale !== 1.8) return null;
+      return {
+        overrides: {
+          customTextItems: state.overrides.customTextItems.map((item) => (
+            item.id === 'legacy'
+              ? { ...item, placement: { x: 0, y: 0.36, z: 0.5 }, scale: 1.0271 }
+              : item
+          )),
+        },
+      };
+    };
+
+    function StatefulStage() {
+      const [stageState, setStageState] = useState({
+        colorway: 'home',
+        layout: 'm',
+        lighting: 'none',
+        overrides: { customTextItems: [{ id: 'existing', text: 'KEEP ME', scale: 1 }] },
+      });
+      latestState = stageState;
+      const onStatePatch = (patch) => setStageState({
+        ...stageState,
+        overrides: { ...stageState.overrides, ...patch.overrides },
+      });
+      return <>
+        <button
+          onClick={() => setStageState({
+            colorway: 'third',
+            layout: 'xl',
+            lighting: 'none',
+            overrides: {
+              customTextItems: [
+                { id: 'existing', text: 'KEEP ME', scale: 1 },
+                {
+                  id: 'legacy',
+                  text: 'MASON',
+                  placement: { x: 99, y: 99, z: 99 },
+                  scale: 1.8,
+                },
+              ],
+            },
+          })}
+          type="button"
+        >
+          Load legacy state
+        </button>
+        <ProductStage
+          onStatePatch={onStatePatch}
+          product={product}
+          selected={selected}
+          state={stageState}
+        />
+      </>;
+    }
+
+    render(<StatefulStage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Load legacy state' }));
+
+    await waitFor(() => {
+      expect(latestState.colorway).toBe('third');
+      expect(latestState.layout).toBe('xl');
+      expect(latestState.overrides.customTextItems).toEqual([
+        expect.objectContaining({ id: 'existing', text: 'KEEP ME' }),
+        expect.objectContaining({
+          id: 'legacy',
+          placement: { x: 0, y: 0.36, z: 0.5 },
+          scale: 1.0271,
+        }),
+      ]);
+    });
   });
 
   it('reports a deleted selection once in StrictMode without render-phase updates', async () => {

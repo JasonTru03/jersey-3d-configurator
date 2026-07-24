@@ -129,9 +129,22 @@ describe('useConfigurator design files', () => {
   });
 
   it('roundtrips an opened legacy design after non-historical placement normalization', async () => {
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration');
     const { result } = renderHook(() => useConfigurator());
     await waitFor(() => expect(result.current.status).toBe('ready'));
+    const normalizeFromRenderer = result.current.updateState;
     const original = JSON.parse(await result.current.saveDesignFile().blob.text());
+    original.state.layout = 'xl';
+    original.state.colorway = 'third';
+    original.state.lighting = 'name-number';
+    original.state.overrides.printItems = [{
+      id: 'player',
+      name: 'KEEP',
+      number: '77',
+      placement: { x: 0.25, y: 0.36, z: 0.5 },
+      rotation: 0,
+      scale: 1,
+    }];
     original.state.overrides.customTextItems = [{
       id: 'legacy',
       text: 'MASON',
@@ -146,11 +159,12 @@ describe('useConfigurator design files', () => {
     );
 
     await act(async () => result.current.loadDesignFile(file));
-    await act(async () => result.current.updateState(
+    const quoteCallsAfterLoad = quoteSpy.mock.calls.length;
+    await act(async () => normalizeFromRenderer(
       {
         overrides: {
           customTextItems: [{
-            ...result.current.state.overrides.customTextItems[0],
+            ...original.state.overrides.customTextItems[0],
             placement: { x: 0, y: 0.36, z: 0.5 },
             scale: 1.0271,
           }],
@@ -160,11 +174,18 @@ describe('useConfigurator design files', () => {
     ));
 
     expect(result.current.canUndo).toBe(false);
+    expect(quoteSpy).toHaveBeenCalledTimes(quoteCallsAfterLoad);
+    expect(result.current.state.layout).toBe('xl');
+    expect(result.current.state.colorway).toBe('third');
+    expect(result.current.state.overrides.printItems).toEqual([
+      expect.objectContaining({ id: 'player', name: 'KEEP', number: '77' }),
+    ]);
     const roundtrip = JSON.parse(await result.current.saveDesignFile().blob.text());
     expect(roundtrip.state.overrides.customTextItems[0]).toEqual(expect.objectContaining({
       placement: { x: 0, y: 0.36, z: 0.5 },
       rotation: 15,
       scale: 1.0271,
     }));
+    quoteSpy.mockRestore();
   });
 });

@@ -250,8 +250,15 @@ export function ProductStage({
           onDelete={onDeletePersonalization}
           onEdit={(id) => onEditPersonalization?.(id)}
           onRotate={(id, rotation) => patchPrint(id, { rotation })}
+          onRotationPreview={(id, rotation) => {
+            rendererRef.current?.previewPersonalizationRotation?.(id, rotation);
+          }}
+          onRotationGestureCancel={() => {
+            rendererRef.current?.cancelPersonalizationRotationPreview?.();
+          }}
           onRotationGestureEnd={(id, rotation) => {
             rendererRef.current?.endPersonalizationRotation?.(id, rotation);
+            patchPrint(id, { rotation });
           }}
           onRotationGestureStart={(id) => {
             rendererRef.current?.beginPersonalizationRotation?.(id);

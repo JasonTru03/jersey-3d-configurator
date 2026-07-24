@@ -909,6 +909,20 @@ export class GarmentRenderer {
     return true;
   }
 
+  previewPersonalizationRotation(key, rotation) {
+    if (this.rotationPreviewKey !== key) return false;
+    const layer = this.printLayers.get(key);
+    const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
+    const previewRotation = Number(rotation);
+    if (!layer || !item || !Number.isFinite(previewRotation)) return false;
+    this.applyStoredPrintPlacement(layer.plane, {
+      ...item,
+      rotation: ((previewRotation % 360) + 360) % 360,
+    });
+    this.syncPrintAnchor();
+    return true;
+  }
+
   endPersonalizationRotation(key, rotation) {
     if (this.rotationPreviewKey !== key) return false;
     this.rotationPreviewKey = null;

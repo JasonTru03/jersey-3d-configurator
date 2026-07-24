@@ -7,6 +7,8 @@ const rendererHarness = vi.hoisted(() => ({
   activePrintId: null,
   rotationGestureEnds: [],
   rotationGestureStarts: [],
+  rotationPreviews: [],
+  rotationCancels: [],
   focusedDecorationId: null,
   options: null,
   personalizationMutationDisabled: null,
@@ -42,6 +44,14 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
         rendererHarness.rotationGestureEnds.push([id, rotation]);
       }
 
+      previewPersonalizationRotation(id, rotation) {
+        rendererHarness.rotationPreviews.push([id, rotation]);
+      }
+
+      cancelPersonalizationRotationPreview() {
+        rendererHarness.rotationCancels.push(true);
+      }
+
       setPersonalizationMutationDisabled(disabled) {
         rendererHarness.personalizationMutationDisabled = disabled;
       }
@@ -70,6 +80,8 @@ beforeEach(() => {
   rendererHarness.activePrintId = null;
   rendererHarness.rotationGestureEnds = [];
   rendererHarness.rotationGestureStarts = [];
+  rendererHarness.rotationPreviews = [];
+  rendererHarness.rotationCancels = [];
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
@@ -123,7 +135,7 @@ describe('ProductStage print toolbar', () => {
     }));
   });
 
-  it('forwards drag rotation preview lifecycle and its final angle to the renderer', () => {
+  it('previews 60 drag moves transiently and commits the final rotation once', () => {
     const onStatePatch = vi.fn();
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
       lighting: 'none',
@@ -141,12 +153,21 @@ describe('ProductStage print toolbar', () => {
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
 
     fireEvent.pointerDown(handle, { pointerId: 29, clientX: 228, clientY: 190 });
-    fireEvent.pointerMove(handle, { pointerId: 29, clientX: 280, clientY: 247 });
+    for (let index = 0; index < 60; index += 1) {
+      fireEvent.pointerMove(handle, {
+        pointerId: 29,
+        clientX: 280 + index,
+        clientY: 247 + (index % 7),
+      });
+    }
+    expect(onStatePatch).not.toHaveBeenCalled();
+    expect(rendererHarness.rotationPreviews).toHaveLength(60);
     fireEvent.pointerUp(handle, { pointerId: 29, clientX: 280, clientY: 247 });
 
     const finalRotation = onStatePatch.mock.calls.at(-1)[0].overrides.customTextItems[0].rotation;
     expect(rendererHarness.rotationGestureStarts).toEqual(['text:custom-id']);
     expect(rendererHarness.rotationGestureEnds).toEqual([['text:custom-id', finalRotation]]);
+    expect(onStatePatch).toHaveBeenCalledOnce();
   });
 
   it('routes active print deletion through the shared executor', () => {

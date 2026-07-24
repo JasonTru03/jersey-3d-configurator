@@ -18,6 +18,10 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
         this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
       }
       setActivePrintId() {}
+      beginPersonalizationRotation() {}
+      previewPersonalizationRotation() {}
+      endPersonalizationRotation() {}
+      cancelPersonalizationRotationPreview() {}
       setView() {}
       focusDecoration(id) { rendererHarness.focusedDecorationId = id; }
       dispose() {}
@@ -158,5 +162,37 @@ describe('ShopifyConfiguratorSection', () => {
     expect(submittedState).toEqual(quotedState);
     expect(within(screen.getByRole('heading', { name: 'Configuration summary' }).closest('section'))
       .getByText(`$${quotedResult.total}`)).toBeVisible();
+  });
+
+  it('quotes and syncs the Shopify form once after a many-move rotation gesture', async () => {
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration');
+    document.body.innerHTML = '<form action="/cart/add" method="post"><input name="id" value="47824466051223"></form><div id="mount"></div>';
+    render(
+      <ShopifyConfiguratorSection settings={{ defaultLighting: 'name-number' }} />,
+      { container: document.getElementById('mount') },
+    );
+    await screen.findByText('Customize your match jersey');
+    act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
+    const handle = await screen.findByRole('button', { name: 'Drag to rotate personalization' });
+    quoteSpy.mockClear();
+
+    fireEvent.pointerDown(handle, { pointerId: 72, clientX: 228, clientY: 190 });
+    for (let index = 0; index < 60; index += 1) {
+      fireEvent.pointerMove(handle, {
+        pointerId: 72,
+        clientX: 280 + index,
+        clientY: 247 + (index % 7),
+      });
+    }
+    expect(quoteSpy).not.toHaveBeenCalled();
+    fireEvent.pointerUp(handle, { pointerId: 72, clientX: 339, clientY: 250 });
+
+    await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+    const quotedState = quoteSpy.mock.calls[0][1];
+    const submittedState = JSON.parse(
+      document.querySelector('input[name="properties[_3D Config JSON]"]').value,
+    ).state;
+    expect(quotedState.overrides.printItems[0].rotation).not.toBe(0);
+    expect(submittedState).toEqual(quotedState);
   });
 });

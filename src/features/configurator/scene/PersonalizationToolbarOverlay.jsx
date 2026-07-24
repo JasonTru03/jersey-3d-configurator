@@ -55,6 +55,8 @@ export function PersonalizationToolbarOverlay({
   onDelete,
   onEdit,
   onRotate,
+  onRotationPreview,
+  onRotationGestureCancel,
   onRotationGestureEnd,
   onRotationGestureStart,
   onScale,
@@ -66,7 +68,9 @@ export function PersonalizationToolbarOverlay({
   const resizeStart = useRef(null);
   const rotationStart = useRef(null);
   const rotationGestureEndRef = useRef(onRotationGestureEnd);
+  const rotationGestureCancelRef = useRef(onRotationGestureCancel);
   rotationGestureEndRef.current = onRotationGestureEnd;
+  rotationGestureCancelRef.current = onRotationGestureCancel;
   const [stageArea, setStageArea] = useState(null);
   const [frozenDockLayout, setFrozenDockLayout] = useState(null);
   const [isRotating, setIsRotating] = useState(false);
@@ -79,7 +83,7 @@ export function PersonalizationToolbarOverlay({
     rotationStart.current = null;
     resizeStart.current = null;
     if (rotation) {
-      rotationGestureEndRef.current?.(rotation.itemKey, rotation.gesture.rotation);
+      rotationGestureCancelRef.current?.(rotation.itemKey);
     }
     releaseGesturePointer(rotation);
     releaseGesturePointer(resizeGesture);
@@ -193,17 +197,21 @@ export function PersonalizationToolbarOverlay({
       clientY: event.clientY,
     });
     rotationStart.current = { ...nextStart, gesture };
-    onRotate?.(start.itemKey, gesture.rotation);
+    (onRotationPreview ?? onRotate)?.(start.itemKey, gesture.rotation);
   };
 
-  const finishRotation = (event, consumeFinalPosition) => {
+  const finishRotation = (event, mode) => {
     const start = rotationStart.current;
     if (!start || start.pointerId !== event.pointerId) return;
-    if (consumeFinalPosition) applyRotationPoint(event);
+    if (mode === 'commit') applyRotationPoint(event);
     const finalStart = rotationStart.current ?? start;
     rotationStart.current = null;
     releaseGesturePointer(finalStart);
-    onRotationGestureEnd?.(finalStart.itemKey, finalStart.gesture.rotation);
+    if (mode === 'commit' && finalStart.hasMoved) {
+      onRotationGestureEnd?.(finalStart.itemKey, finalStart.gesture.rotation);
+    } else {
+      onRotationGestureCancel?.(finalStart.itemKey);
+    }
     setFrozenDockLayout(null);
     setIsRotating(false);
   };
@@ -310,11 +318,11 @@ export function PersonalizationToolbarOverlay({
           className={`print-control print-control--rotate${isRotating ? ' is-dragging' : ''}`}
           disabled={mutationDisabled}
           onKeyDown={rotateWithKeyboard}
-          onLostPointerCapture={(event) => finishRotation(event, false)}
-          onPointerCancel={(event) => finishRotation(event, false)}
+          onLostPointerCapture={(event) => finishRotation(event, 'cancel')}
+          onPointerCancel={(event) => finishRotation(event, 'cancel')}
           onPointerDown={startRotation}
           onPointerMove={rotate}
-          onPointerUp={(event) => finishRotation(event, true)}
+          onPointerUp={(event) => finishRotation(event, 'commit')}
           type="button"
         ><RotateCw size={15} /></button>
         <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" disabled={mutationDisabled} onClick={() => onCopy?.(itemKey)} type="button">×2</button>

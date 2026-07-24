@@ -315,14 +315,14 @@ describe('PersonalizationToolbarOverlay', () => {
 
   it('clears a hidden anchor gesture before showing the latest unfrozen dock', () => {
     const onRotationGestureEnd = vi.fn();
-    const { callbacks, rerender } = renderToolbar({ onRotationGestureEnd });
+    const onRotationGestureCancel = vi.fn();
+    const { callbacks, rerender } = renderToolbar({ onRotationGestureCancel, onRotationGestureEnd });
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
     handle.hasPointerCapture = vi.fn(() => true);
     handle.releasePointerCapture = vi.fn();
 
     fireEvent.pointerDown(handle, { pointerId: 10, clientX: 150, clientY: 50 });
     fireEvent.pointerMove(handle, { pointerId: 10, clientX: 200, clientY: 100 });
-    const finalRotation = callbacks.onRotate.mock.calls.at(-1)[1];
     expect(handle).toHaveClass('is-dragging');
 
     rerender(
@@ -347,20 +347,21 @@ describe('PersonalizationToolbarOverlay', () => {
       '--print-dock-position-top': '148px',
     });
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(10);
-    expect(onRotationGestureEnd).toHaveBeenCalledOnce();
-    expect(onRotationGestureEnd).toHaveBeenCalledWith('print-1', finalRotation);
+    expect(onRotationGestureEnd).not.toHaveBeenCalled();
+    expect(onRotationGestureCancel).toHaveBeenCalledOnce();
+    expect(onRotationGestureCancel).toHaveBeenCalledWith('print-1');
   });
 
   it('does not let an old pointer gesture rotate a newly selected item', () => {
     const onRotationGestureEnd = vi.fn();
-    const { callbacks, rerender } = renderToolbar({ onRotationGestureEnd });
+    const onRotationGestureCancel = vi.fn();
+    const { callbacks, rerender } = renderToolbar({ onRotationGestureCancel, onRotationGestureEnd });
     const oldHandle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
     oldHandle.hasPointerCapture = vi.fn(() => true);
     oldHandle.releasePointerCapture = vi.fn();
 
     fireEvent.pointerDown(oldHandle, { pointerId: 11, clientX: 150, clientY: 50 });
     fireEvent.pointerMove(oldHandle, { pointerId: 11, clientX: 200, clientY: 100 });
-    const finalRotation = callbacks.onRotate.mock.calls.at(-1)[1];
     callbacks.onRotate.mockClear();
     rerender(
       <PersonalizationToolbarOverlay
@@ -373,30 +374,31 @@ describe('PersonalizationToolbarOverlay', () => {
 
     expect(callbacks.onRotate).not.toHaveBeenCalled();
     expect(oldHandle.releasePointerCapture).toHaveBeenCalledWith(11);
-    expect(onRotationGestureEnd).toHaveBeenCalledOnce();
-    expect(onRotationGestureEnd).toHaveBeenCalledWith('print-1', finalRotation);
+    expect(onRotationGestureEnd).not.toHaveBeenCalled();
+    expect(onRotationGestureCancel).toHaveBeenCalledWith('print-1');
   });
 
   it('releases a captured rotation pointer when the overlay unmounts', () => {
     const onRotationGestureEnd = vi.fn();
-    const { callbacks, unmount } = renderToolbar({ onRotationGestureEnd });
+    const onRotationGestureCancel = vi.fn();
+    const { unmount } = renderToolbar({ onRotationGestureCancel, onRotationGestureEnd });
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
     handle.hasPointerCapture = vi.fn(() => true);
     handle.releasePointerCapture = vi.fn();
 
     fireEvent.pointerDown(handle, { pointerId: 12, clientX: 150, clientY: 50 });
     fireEvent.pointerMove(handle, { pointerId: 12, clientX: 200, clientY: 100 });
-    const finalRotation = callbacks.onRotate.mock.calls.at(-1)[1];
     unmount();
 
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(12);
-    expect(onRotationGestureEnd).toHaveBeenCalledOnce();
-    expect(onRotationGestureEnd).toHaveBeenCalledWith('print-1', finalRotation);
+    expect(onRotationGestureEnd).not.toHaveBeenCalled();
+    expect(onRotationGestureCancel).toHaveBeenCalledWith('print-1');
   });
 
-  it('ends an active rotation once when personalization mutations become locked', () => {
+  it('cancels an active rotation when personalization mutations become locked', () => {
     const onRotationGestureEnd = vi.fn();
-    const { callbacks, rerender } = renderToolbar({ onRotationGestureEnd });
+    const onRotationGestureCancel = vi.fn();
+    const { callbacks, rerender } = renderToolbar({ onRotationGestureCancel, onRotationGestureEnd });
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
     handle.hasPointerCapture = vi.fn(() => true);
     handle.releasePointerCapture = vi.fn();
@@ -414,8 +416,8 @@ describe('PersonalizationToolbarOverlay', () => {
     );
 
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(28);
-    expect(onRotationGestureEnd).toHaveBeenCalledOnce();
-    expect(onRotationGestureEnd).toHaveBeenCalledWith('print-1', finalRotation);
+    expect(onRotationGestureEnd).not.toHaveBeenCalled();
+    expect(onRotationGestureCancel).toHaveBeenCalledWith('print-1');
   });
 
   it('releases a captured resize pointer when the overlay unmounts', () => {
@@ -432,19 +434,19 @@ describe('PersonalizationToolbarOverlay', () => {
 
   it.each(['pointerCancel', 'lostPointerCapture'])('clears a rotation gesture after %s', (eventName) => {
     const onRotationGestureEnd = vi.fn();
-    const { callbacks } = renderToolbar({ onRotationGestureEnd });
+    const onRotationGestureCancel = vi.fn();
+    const { callbacks } = renderToolbar({ onRotationGestureCancel, onRotationGestureEnd });
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
 
     fireEvent.pointerDown(handle, { pointerId: 5, clientX: 150, clientY: 50 });
     fireEvent.pointerMove(handle, { pointerId: 5, clientX: 200, clientY: 100 });
-    const finalRotation = callbacks.onRotate.mock.calls.at(-1)[1];
     fireEvent[eventName](handle, { pointerId: 5 });
     callbacks.onRotate.mockClear();
     fireEvent.pointerMove(handle, { pointerId: 5, clientX: 200, clientY: 100 });
 
     expect(callbacks.onRotate).not.toHaveBeenCalled();
-    expect(onRotationGestureEnd).toHaveBeenCalledOnce();
-    expect(onRotationGestureEnd).toHaveBeenCalledWith('print-1', finalRotation);
+    expect(onRotationGestureEnd).not.toHaveBeenCalled();
+    expect(onRotationGestureCancel).toHaveBeenCalledWith('print-1');
     expect(screen.getByTestId('print-control-dock')).toHaveStyle({
       '--print-dock-position-left': '150px',
       '--print-dock-position-top': '48px',

@@ -1068,10 +1068,11 @@ describe('garment decoration mesh selection', () => {
 
     renderer.beginPersonalizationRotation('text:text-1');
     for (const rotation of [15, 30, 45]) {
-      renderer.state = makeState(rotation);
-      renderer.updatePrintLayer();
+      renderer.previewPersonalizationRotation('text:text-1', rotation);
     }
 
+    expect(renderer.state.overrides.customTextItems[0].rotation).toBe(0);
+    expect(layer.plane.userData.rotation).toBe(45);
     expect(layer.decal.geometry).toBe(initialGeometry);
     expect(initialDispose).not.toHaveBeenCalled();
     expect(layer.plane.material.opacity).toBe(1);

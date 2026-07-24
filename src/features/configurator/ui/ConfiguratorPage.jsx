@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ensurePrintItems, getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
+import { findPersonalizationItem, getSelectablePersonalizationItems } from '../config/personalizationItems.js';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
 import { DecorationPanel } from './DecorationPanel.jsx';
@@ -185,7 +186,8 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             artworkFocusId={artworkFocusId}
             onBakeProvider={(provider) => { bakeProviderRef.current = provider; }}
             onEditPersonalization={(id) => {
-              setEditingPrintId(id);
+              const item = findPersonalizationItem(getSelectablePersonalizationItems(state), id);
+              setEditingPrintId(item?.sourceId ?? null);
               setSection('lighting');
               requestAnimationFrame(() => nameInputRef.current?.focus());
             }}

@@ -1,23 +1,23 @@
 import { Rotate3D, SlidersHorizontal, ZoomIn } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GarmentRenderer } from './garmentRenderer.js';
 import { KeyboardRenderer } from './keyboardRenderer.js';
 import { PersonalizationToolbarOverlay } from './PersonalizationToolbarOverlay.jsx';
 import {
   duplicateCustomTextItem,
-  getBillableCustomTextItems,
   getCustomTextItems,
   patchCustomTextItem,
   removeCustomTextItem,
 } from '../config/customTextItems.js';
 import { duplicatePrintItem, getPrintItems, legacyFirstItemFields, patchPrintItem, removePrintItem } from '../config/printItems.js';
+import {
+  findPersonalizationItem,
+  getRenderablePersonalizationItems,
+  getSelectablePersonalizationItems,
+  makePersonalizationKey,
+  PERSONALIZATION_COPY_CANDIDATES,
+} from '../config/personalizationItems.js';
 import { getNextPrintPlacement } from './garmentRenderer.js';
-
-const printCopyCandidates = [
-  { x: 0.3, y: 0.36, z: 0.5 },
-  { x: -0.3, y: 0.36, z: 0.5 },
-  { x: 0, y: 0.08, z: 0.5 },
-];
 
 const rendererRegistry = {
   garmentRenderer: GarmentRenderer,
@@ -37,50 +37,79 @@ export function ProductStage({
 }) {
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
+  const reportedNullSelectionRef = useRef(null);
+  const reconciliationInputRef = useRef({ focusId: Symbol('initial-focus'), keys: null });
   const [view, setView] = useState('orbit');
   const printItems = state?.lighting && state.lighting !== 'none' ? getPrintItems(state.overrides) : [];
   const customTextItems = getCustomTextItems(state?.overrides);
-  const personalizationItems = [...printItems, ...getBillableCustomTextItems(customTextItems)];
+  const selectablePersonalizationItems = useMemo(
+    () => getSelectablePersonalizationItems(state),
+    [state],
+  );
+  const renderablePersonalizationItems = useMemo(
+    () => getRenderablePersonalizationItems(state),
+    [state],
+  );
+  const selectableKeys = useMemo(
+    () => new Set(selectablePersonalizationItems.map((item) => item.key)),
+    [selectablePersonalizationItems],
+  );
   const [activePrintId, setActivePrintId] = useState(null);
   const [selectedPrintId, setSelectedPrintId] = useState(null);
   const [printAnchor, setPrintAnchor] = useState({ visible: false });
 
   const handlePrintSelectionChange = useCallback((id) => {
+    reportedNullSelectionRef.current = id === null ? reportedNullSelectionRef.current : null;
     setActivePrintId(id);
     setSelectedPrintId(id);
     onPersonalizationSelect?.(id);
   }, [onPersonalizationSelect]);
 
   useEffect(() => {
-    if (personalizationFocusId && personalizationItems.some((item) => item.id === personalizationFocusId)) {
-      setActivePrintId(personalizationFocusId);
-      setSelectedPrintId(personalizationFocusId);
+    const previousInput = reconciliationInputRef.current;
+    if (previousInput.keys === selectableKeys && previousInput.focusId === personalizationFocusId) return;
+    reconciliationInputRef.current = { focusId: personalizationFocusId, keys: selectableKeys };
+
+    const focusIsValid = personalizationFocusId && selectableKeys.has(personalizationFocusId);
+    const nextActiveId = focusIsValid
+      ? personalizationFocusId
+      : (selectableKeys.has(activePrintId)
+          ? activePrintId
+          : selectablePersonalizationItems[0]?.key ?? null);
+    const nextSelectedId = focusIsValid
+      ? personalizationFocusId
+      : (selectableKeys.has(selectedPrintId) ? selectedPrintId : null);
+
+    if (nextActiveId !== activePrintId) setActivePrintId(nextActiveId);
+    if (nextSelectedId === selectedPrintId) return;
+
+    setSelectedPrintId(nextSelectedId);
+    if (nextSelectedId !== null) {
+      reportedNullSelectionRef.current = null;
       return;
     }
-
-    setActivePrintId((current) => (
-      personalizationItems.some((item) => item.id === current)
-        ? current
-        : personalizationItems[0]?.id ?? null
-    ));
-    setSelectedPrintId((current) => {
-      if (personalizationItems.some((item) => item.id === current)) return current;
-      if (current || personalizationFocusId) onPersonalizationSelect?.(null);
-      return null;
-    });
-    setPrintAnchor((current) => (
-      selectedPrintId && !personalizationItems.some((item) => item.id === selectedPrintId)
-        ? { visible: false }
-        : current
-    ));
-  }, [state, personalizationFocusId]);
+    setPrintAnchor({ visible: false });
+    if (selectedPrintId && reportedNullSelectionRef.current !== selectedPrintId) {
+      reportedNullSelectionRef.current = selectedPrintId;
+      onPersonalizationSelect?.(null);
+    }
+  }, [
+    activePrintId,
+    onPersonalizationSelect,
+    personalizationFocusId,
+    selectableKeys,
+    selectablePersonalizationItems,
+    selectedPrintId,
+  ]);
 
   const patchPrint = (id, patch) => {
-    if (customTextItems.some((item) => item.id === id)) {
-      onStatePatch({ overrides: { customTextItems: patchCustomTextItem(customTextItems, id, patch) } });
+    const item = findPersonalizationItem(selectablePersonalizationItems, id);
+    if (!item) return;
+    if (item.itemKind === 'text') {
+      onStatePatch({ overrides: { customTextItems: patchCustomTextItem(customTextItems, item.sourceId, patch) } });
       return;
     }
-    const nextItems = patchPrintItem(printItems, id, patch);
+    const nextItems = patchPrintItem(printItems, item.sourceId, patch);
     onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
   };
 
@@ -169,36 +198,41 @@ export function ProductStage({
         </div>
         <PersonalizationToolbarOverlay
           anchor={selectedPrintId === activePrintId ? printAnchor : { visible: false }}
-          item={personalizationItems.find((item) => item.id === selectedPrintId)}
+          item={findPersonalizationItem(renderablePersonalizationItems, selectedPrintId)}
           onCopy={(id) => {
+            const item = findPersonalizationItem(selectablePersonalizationItems, id);
+            if (!item) return;
             const placement = getNextPrintPlacement(
-              printCopyCandidates,
-              personalizationItems.map((item) => item.placement).filter(Boolean),
+              PERSONALIZATION_COPY_CANDIDATES,
+              selectablePersonalizationItems.map((entry) => entry.placement).filter(Boolean),
             );
-            const isCustomText = customTextItems.some((item) => item.id === id);
-            const copy = isCustomText
-              ? duplicateCustomTextItem(customTextItems, id, placement)
-              : duplicatePrintItem(printItems, id, placement);
+            const copy = item.itemKind === 'text'
+              ? duplicateCustomTextItem(customTextItems, item.sourceId, placement)
+              : duplicatePrintItem(printItems, item.sourceId, placement);
             if (!copy) return;
-            if (isCustomText) {
+            if (item.itemKind === 'text') {
               onStatePatch({ overrides: { customTextItems: [...customTextItems, copy] } });
             } else {
               const nextItems = [...printItems, copy];
               onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
             }
-            setActivePrintId(copy.id);
-            setSelectedPrintId(copy.id);
-            onPersonalizationSelect?.(copy.id);
+            const copyKey = makePersonalizationKey(item.itemKind, copy.id);
+            setActivePrintId(copyKey);
+            setSelectedPrintId(copyKey);
+            onPersonalizationSelect?.(copyKey);
           }}
           onDelete={(id) => {
+            const item = findPersonalizationItem(selectablePersonalizationItems, id);
+            if (!item) return;
+            reportedNullSelectionRef.current = id;
             setActivePrintId(null);
             setSelectedPrintId(null);
             setPrintAnchor({ visible: false });
             onPersonalizationSelect?.(null);
-            if (customTextItems.some((item) => item.id === id)) {
-              onStatePatch({ overrides: { customTextItems: removeCustomTextItem(customTextItems, id) } });
+            if (item.itemKind === 'text') {
+              onStatePatch({ overrides: { customTextItems: removeCustomTextItem(customTextItems, item.sourceId) } });
             } else {
-              const nextItems = removePrintItem(printItems, id);
+              const nextItems = removePrintItem(printItems, item.sourceId);
               onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
             }
           }}

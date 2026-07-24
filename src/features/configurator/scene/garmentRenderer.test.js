@@ -602,9 +602,9 @@ describe('garment decoration mesh selection', () => {
 
     renderer.updatePrintLayer();
 
-    expect([...renderer.printLayers.keys()]).toEqual(['text-1']);
-    const layer = renderer.printLayers.get('text-1');
-    expect(layer.plane.userData).toMatchObject({ printId: 'text-1', itemKind: 'text' });
+    expect([...renderer.printLayers.keys()]).toEqual(['text:text-1']);
+    const layer = renderer.printLayers.get('text:text-1');
+    expect(layer.plane.userData).toMatchObject({ printId: 'text:text-1', itemKind: 'text', sourceId: 'text-1' });
     expect(layer.plane.geometry.parameters).toMatchObject({
       width: 1.05,
       height: 1.05 / CUSTOM_TEXT_CANVAS_ASPECT,
@@ -624,8 +624,8 @@ describe('garment decoration mesh selection', () => {
 
     renderer.updatePrintLayer();
 
-    const layer = renderer.printLayers.get('player-id');
-    expect(layer.plane.userData).toMatchObject({ printId: 'player-id', itemKind: 'player' });
+    const layer = renderer.printLayers.get('player:player-id');
+    expect(layer.plane.userData).toMatchObject({ printId: 'player:player-id', itemKind: 'player', sourceId: 'player-id' });
     expect(layer.plane.geometry.parameters).toMatchObject({ width: 1.05, height: 0.42 });
     renderer.dispose();
   });
@@ -650,7 +650,7 @@ describe('garment decoration mesh selection', () => {
       },
     };
     renderer.updatePrintLayer();
-    const layer = renderer.printLayers.get('text-1');
+    const layer = renderer.printLayers.get('text:text-1');
     const canvas = layer.texture.image;
     const texture = layer.texture;
     const initialRenderKey = layer.renderKey;
@@ -698,7 +698,7 @@ describe('garment decoration mesh selection', () => {
       overrides: { customTextItems: [{ id: 'custom-id', text: 'MASON' }] },
     };
     renderer.updatePrintLayer();
-    renderer.setActivePrintId('custom-id');
+    renderer.setActivePrintId('text:custom-id');
     renderer.printPlane.position.set(0.25, 0.5, 0.75);
 
     renderer.emitPrintPlacement();
@@ -740,7 +740,7 @@ describe('garment decoration mesh selection', () => {
       overrides: { customTextItems: [{ id: 'text-1', text: 'MASON' }] },
     };
     renderer.updatePrintLayer();
-    const layer = renderer.printLayers.get('text-1');
+    const layer = renderer.printLayers.get('text:text-1');
     const geometryDispose = vi.spyOn(layer.plane.geometry, 'dispose');
     const materialDispose = vi.spyOn(layer.material, 'dispose');
     const textureDispose = vi.spyOn(layer.texture, 'dispose');
@@ -752,6 +752,134 @@ describe('garment decoration mesh selection', () => {
     expect(geometryDispose).toHaveBeenCalledOnce();
     expect(materialDispose).toHaveBeenCalledOnce();
     expect(textureDispose).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
+  it('renders player and text layers independently when their raw ids match', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{ id: 'same-id', name: 'PLAYER', number: '16' }],
+        customTextItems: [{ id: 'same-id', text: 'MASON' }],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    expect([...renderer.printLayers.keys()]).toEqual(['player:same-id', 'text:same-id']);
+    expect(renderer.printLayers.get('player:same-id').plane.userData)
+      .toMatchObject({ printId: 'player:same-id', itemKind: 'player', sourceId: 'same-id' });
+    expect(renderer.printLayers.get('text:same-id').plane.userData)
+      .toMatchObject({ printId: 'text:same-id', itemKind: 'text', sourceId: 'same-id' });
+    renderer.dispose();
+  });
+
+  it('emits placement to the exact composite-key source when raw ids match', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    renderer.state = {
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{ id: 'same-id', name: 'PLAYER', number: '16' }],
+        customTextItems: [{ id: 'same-id', text: 'MASON' }],
+      },
+    };
+    renderer.updatePrintLayer();
+
+    renderer.setActivePrintId('text:same-id');
+    renderer.printPlane.position.set(0.1, 0.2, 0.3);
+    renderer.emitPrintPlacement();
+    expect(onStatePatch).toHaveBeenLastCalledWith({
+      overrides: {
+        customTextItems: [expect.objectContaining({
+          id: 'same-id',
+          placement: expect.objectContaining({ x: 0.1, y: 0.2, z: 0.3 }),
+        })],
+      },
+    });
+
+    renderer.setActivePrintId('player:same-id');
+    renderer.printPlane.position.set(0.4, 0.5, 0.6);
+    renderer.emitPrintPlacement();
+    expect(onStatePatch).toHaveBeenLastCalledWith({
+      overrides: {
+        printItems: [expect.objectContaining({
+          id: 'same-id',
+          placement: expect.objectContaining({ x: 0.4, y: 0.5, z: 0.6 }),
+        })],
+        printName: 'PLAYER',
+        printNumber: '16',
+        printPlacement: expect.objectContaining({ x: 0.4, y: 0.5, z: 0.6 }),
+      },
+    });
+    renderer.dispose();
+  });
+
+  it('keeps a rotated edge grab under the pointer while dragging across surfaces', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const onPrintSelectionChange = vi.fn();
+    const renderer = new GarmentRenderer(host, { onPrintSelectionChange, onStatePatch });
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'custom-id',
+          text: 'MASON',
+          rotation: 45,
+          placement: { x: 0, y: 0.36, z: 0.5 },
+        }],
+      },
+    };
+    const jersey = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial());
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.updatePrintLayer();
+    const plane = renderer.printLayers.get('text:custom-id').plane;
+    plane.updateMatrixWorld(true);
+    const localGrab = new THREE.Vector3(0.4, 0.05, 0);
+    const worldGrab = plane.localToWorld(localGrab.clone());
+    renderer.pickPrint = vi.fn(() => ({ object: plane, point: worldGrab }));
+    const surfaceHit = {
+      object: jersey,
+      face: { normal: new THREE.Vector3(1, 0, 0) },
+      point: new THREE.Vector3(2, 3, 4),
+    };
+    renderer.pickJersey = vi.fn(() => surfaceHit);
+    renderer.syncPrintAnchor = vi.fn();
+
+    renderer.handlePointerDown(pointerEvent(100, 100));
+    renderer.handlePointerMove(pointerEvent(110, 100));
+
+    const normal = new THREE.Vector3(1, 0, 0);
+    const expectedQuaternion = new THREE.Quaternion()
+      .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), THREE.MathUtils.degToRad(45)));
+    const expectedGrabPoint = surfaceHit.point.clone().addScaledVector(normal, 0.018);
+    const expectedCenter = expectedGrabPoint.clone().sub(
+      localGrab.clone().multiply(plane.scale).applyQuaternion(expectedQuaternion),
+    );
+
+    expect(onPrintSelectionChange).toHaveBeenCalledWith('text:custom-id');
+    expect(plane.position.distanceTo(expectedCenter)).toBeLessThan(0.000001);
+    expect(Math.abs(plane.quaternion.dot(expectedQuaternion))).toBeCloseTo(1, 6);
+
+    renderer.handlePointerUp();
+
+    expect(onStatePatch).toHaveBeenLastCalledWith({
+      overrides: {
+        customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 45 })],
+      },
+    });
     renderer.dispose();
   });
 

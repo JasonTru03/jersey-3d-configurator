@@ -86,4 +86,23 @@ describe('PersonalizationToolbarOverlay', () => {
 
     expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
   });
+
+  it('treats every action callback as optional', () => {
+    render(<PersonalizationToolbarOverlay
+      anchor={{ visible: true, left: 100, top: 100, width: 100, height: 60 }}
+      item={{ id: 'player:print-1', rotation: 0, scale: 1 }}
+    />);
+
+    expect(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Edit personalization' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Rotate personalization 45 degrees' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Duplicate personalization' }));
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Resize personalization' }), {
+        pointerId: 9,
+        clientX: 100,
+        clientY: 100,
+      });
+    }).not.toThrow();
+  });
 });

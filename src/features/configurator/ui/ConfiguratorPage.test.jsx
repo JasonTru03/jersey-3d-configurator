@@ -301,7 +301,7 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
-    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
+    act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Edit personalization' }));
 
     await waitFor(() => {
@@ -315,7 +315,7 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
     fireEvent.click(screen.getByRole('button', { name: /Name set/i }));
-    act(() => rendererHarness.options.onPrintSelectionChange('print-1'));
+    act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete personalization' }));
 
     await waitFor(() => {

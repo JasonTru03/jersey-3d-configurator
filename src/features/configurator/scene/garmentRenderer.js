@@ -4,7 +4,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DecorationEditor } from './decorationEditor.js';
 import { getPrintItems, legacyFirstItemFields, patchPrintItem } from '../config/printItems.js';
-import { getBillableCustomTextItems, getCustomTextItems, patchCustomTextItem } from '../config/customTextItems.js';
+import { getCustomTextItems, patchCustomTextItem } from '../config/customTextItems.js';
+import {
+  findPersonalizationItem,
+  getRenderablePersonalizationItems,
+  getSelectablePersonalizationItems,
+} from '../config/personalizationItems.js';
 import { createGarmentAppearanceCanvas } from './garmentAppearanceTexture.js';
 import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
 import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTexture.js';
@@ -130,6 +135,7 @@ export class GarmentRenderer {
     this.lastPrintAnchor = null;
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
+    this.activePrintDrag = null;
     this.pendingDecorationDeselect = null;
     this.printColor = '#20242a';
     this.decorationEditor = new DecorationEditor({
@@ -547,27 +553,23 @@ export class GarmentRenderer {
 
   updatePrintLayer() {
     const printItems = this.getRenderablePrintItems();
-    if (!printItems.length) {
-      this.disposePrintLayer();
-      return;
-    }
-
-    const ids = new Set(printItems.map((item) => item.id));
-    this.printLayers.forEach((layer, id) => {
-      if (ids.has(id)) return;
+    const keys = new Set(printItems.map((item) => item.key));
+    this.printLayers.forEach((layer, key) => {
+      if (keys.has(key)) return;
       this.disposePrintLayerEntry(layer);
-      this.printLayers.delete(id);
+      this.printLayers.delete(key);
     });
     printItems.forEach((item) => this.updatePrintLayerEntry(item));
+    if (!printItems.length) {
+      this.isDraggingPrint = false;
+      this.pendingPrintDrag = null;
+      this.activePrintDrag = null;
+      this.syncPrintAnchor();
+    }
   }
 
   updatePrintLayerEntry(item) {
-    let layer = this.printLayers.get(item.id);
-    if (layer && layer.itemKind !== item.itemKind) {
-      this.disposePrintLayerEntry(layer);
-      this.printLayers.delete(item.id);
-      layer = null;
-    }
+    let layer = this.printLayers.get(item.key);
     const renderKey = this.getPrintRenderKey(item);
     if (!layer) {
       const canvas = item.itemKind === 'text'
@@ -579,11 +581,13 @@ export class GarmentRenderer {
       const planeHeight = item.itemKind === 'text' ? 1.05 / CUSTOM_TEXT_CANVAS_ASPECT : 0.42;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, planeHeight), material);
       plane.renderOrder = 4;
-      plane.userData.printId = item.id;
+      plane.userData.printId = item.key;
+      plane.userData.personalizationKey = item.key;
       plane.userData.itemKind = item.itemKind;
+      plane.userData.sourceId = item.sourceId;
       this.scene.add(plane);
       layer = { itemKind: item.itemKind, material, plane, renderKey, texture };
-      this.printLayers.set(item.id, layer);
+      this.printLayers.set(item.key, layer);
     } else if (layer.renderKey !== renderKey) {
       if (item.itemKind === 'text') {
         makeCustomTextCanvas(item, layer.texture.image);
@@ -601,13 +605,7 @@ export class GarmentRenderer {
   }
 
   getRenderablePrintItems() {
-    const playerItems = this.state?.lighting && this.state.lighting !== 'none'
-      ? getPrintItems(this.state?.overrides).map((item) => ({ ...item, itemKind: 'player' }))
-      : [];
-    const textItems = getBillableCustomTextItems(
-      getCustomTextItems(this.state?.overrides),
-    ).map((item) => ({ ...item, itemKind: 'text' }));
-    return [...playerItems, ...textItems];
+    return getRenderablePersonalizationItems(this.state);
   }
 
   getPrintRenderKey(item) {
@@ -647,6 +645,7 @@ export class GarmentRenderer {
     }
     plane.rotateZ(THREE.MathUtils.degToRad(item.rotation ?? 0));
     plane.scale.setScalar(item.scale ?? 1);
+    plane.userData.rotation = item.rotation ?? 0;
   }
 
   disposePrintLayer() {
@@ -655,6 +654,7 @@ export class GarmentRenderer {
     this.activePrintId = null;
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
+    this.activePrintDrag = null;
     this.pendingDecorationDeselect = null;
     this.syncPrintAnchor();
   }
@@ -676,7 +676,13 @@ export class GarmentRenderer {
       this.onPrintSelectionChange?.(this.activePrintId);
       this.syncPrintAnchor();
       if (this.isPrintEditable()) {
-        this.pendingPrintDrag = { x: event.clientX, y: event.clientY };
+        printHit.object.updateMatrixWorld(true);
+        this.pendingPrintDrag = {
+          x: event.clientX,
+          y: event.clientY,
+          grabOffset: printHit.object.worldToLocal(printHit.point.clone()),
+          rotation: printHit.object.userData.rotation ?? 0,
+        };
       }
       event.preventDefault();
       return;
@@ -688,6 +694,7 @@ export class GarmentRenderer {
       return;
     }
     this.pendingPrintDrag = null;
+    this.activePrintDrag = null;
     this.onPrintSelectionChange?.(null);
     this.pendingDecorationDeselect = this.decorationEditor?.selectedId
       ? { x: event.clientX, y: event.clientY }
@@ -708,6 +715,7 @@ export class GarmentRenderer {
     }
     if (!this.isDraggingPrint && this.pendingPrintDrag) {
       if (!hasExceededPrintDragThreshold(this.pendingPrintDrag, event)) return;
+      this.activePrintDrag = this.pendingPrintDrag;
       this.pendingPrintDrag = null;
       this.isDraggingPrint = true;
       this.controls.enabled = false;
@@ -736,12 +744,14 @@ export class GarmentRenderer {
     this.isDraggingPrint = false;
     this.controls.enabled = true;
     this.emitPrintPlacement();
+    this.activePrintDrag = null;
   };
 
   handlePointerCancel = () => {
     this.decorationEditor?.handlePointerUp();
     this.pendingDecorationDeselect = null;
     this.pendingPrintDrag = null;
+    this.activePrintDrag = null;
     this.isDraggingPrint = false;
     this.controls.enabled = shouldEnableOrbitControls({
       isDraggingDecoration: this.decorationEditor?.isEditing(),
@@ -772,8 +782,18 @@ export class GarmentRenderer {
   placePrintAtIntersection(hit, animate = false) {
     const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
     const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
-    const position = hit.point.clone().addScaledVector(normal, 0.018);
-    const nextQuaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    const targetGrabPoint = hit.point.clone().addScaledVector(normal, 0.018);
+    const rotation = this.activePrintDrag?.rotation ?? this.printPlane.userData.rotation ?? 0;
+    const nextQuaternion = new THREE.Quaternion()
+      .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 0, 1),
+        THREE.MathUtils.degToRad(rotation),
+      ));
+    const grabOffset = this.activePrintDrag?.grabOffset ?? new THREE.Vector3();
+    const position = targetGrabPoint.sub(
+      grabOffset.clone().multiply(this.printPlane.scale).applyQuaternion(nextQuaternion),
+    );
 
     if (animate) {
       gsap.to(this.printPlane.position, {
@@ -802,20 +822,22 @@ export class GarmentRenderer {
         z: roundPlacement(normal.z),
       },
     };
-    const customTextItems = getCustomTextItems(this.state?.overrides);
-    const activePrintId = this.activePrintId ?? this.getRenderablePrintItems()[0]?.id;
-    if (activePrintId && customTextItems.some((item) => item.id === activePrintId)) {
+    const selectableItems = getSelectablePersonalizationItems(this.state);
+    const activeItem = findPersonalizationItem(selectableItems, this.activePrintId)
+      ?? this.getRenderablePrintItems()[0]
+      ?? null;
+    if (!activeItem) return;
+    if (activeItem.itemKind === 'text') {
+      const customTextItems = getCustomTextItems(this.state?.overrides);
       this.onStatePatch({
         overrides: {
-          customTextItems: patchCustomTextItem(customTextItems, activePrintId, { placement }),
+          customTextItems: patchCustomTextItem(customTextItems, activeItem.sourceId, { placement }),
         },
       });
       return;
     }
     const printItems = getPrintItems(this.state?.overrides);
-    const nextItems = activePrintId
-      ? patchPrintItem(printItems, activePrintId, { placement })
-      : printItems;
+    const nextItems = patchPrintItem(printItems, activeItem.sourceId, { placement });
     this.onStatePatch({
       overrides: {
         printItems: nextItems,

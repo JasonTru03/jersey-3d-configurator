@@ -942,6 +942,111 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it('uses the proxy during continuous rotation and rebuilds one final decal', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    const makeState = (rotation) => ({
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'MASON',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.218,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+          rotation,
+          scale: 1,
+        }],
+      },
+    });
+    renderer.state = makeState(0);
+    renderer.updatePrintLayer();
+    const layer = renderer.printLayers.get('text:text-1');
+    const initialGeometry = layer.decal.geometry;
+    const initialDispose = vi.spyOn(initialGeometry, 'dispose');
+
+    renderer.beginPersonalizationRotation('text:text-1');
+    for (const rotation of [15, 30, 45]) {
+      renderer.state = makeState(rotation);
+      renderer.updatePrintLayer();
+    }
+
+    expect(layer.decal.geometry).toBe(initialGeometry);
+    expect(initialDispose).not.toHaveBeenCalled();
+    expect(layer.plane.material.opacity).toBe(1);
+    expect(layer.decal.visible).toBe(false);
+
+    renderer.endPersonalizationRotation('text:text-1', 70);
+
+    const finalGeometry = layer.decal.geometry;
+    expect(finalGeometry).not.toBe(initialGeometry);
+    expect(initialDispose).toHaveBeenCalledOnce();
+    expect(layer.plane.userData.rotation).toBe(70);
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(layer.decal.visible).toBe(true);
+
+    renderer.state = makeState(70);
+    renderer.updatePrintLayer();
+    expect(layer.decal.geometry).toBe(finalGeometry);
+    renderer.dispose();
+  });
+
+  it('rebuilds one decal for a discrete keyboard rotation update', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    const item = {
+      id: 'text-1',
+      text: 'MASON',
+      placement: {
+        x: 0,
+        y: 0,
+        z: 0.218,
+        normal: { x: 0, y: 0, z: 1 },
+      },
+      rotation: 0,
+      scale: 1,
+    };
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [item] },
+    };
+    renderer.updatePrintLayer();
+    const layer = renderer.printLayers.get('text:text-1');
+    const initialGeometry = layer.decal.geometry;
+    const dispose = vi.spyOn(initialGeometry, 'dispose');
+
+    renderer.state = {
+      ...renderer.state,
+      overrides: {
+        customTextItems: [{ ...item, rotation: 5 }],
+      },
+    };
+    renderer.updatePrintLayer();
+
+    expect(layer.decal.geometry).not.toBe(initialGeometry);
+    expect(dispose).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
   it('shows the proxy during drag and rebuilds the final decal before publishing placement', () => {
     installTextCanvasContext();
     const host = document.createElement('div');
@@ -1057,6 +1162,153 @@ describe('garment decoration mesh selection', () => {
     expect(positions.count).toBeGreaterThan(0);
     expect([...positions.array].every(Number.isFinite)).toBe(true);
     expect(onStatePatch).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
+  it('restores a center-miss decal after state writeback and a JSON design roundtrip', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    const jersey = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    jersey.updateMatrixWorld(true);
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'text-1',
+          text: 'A WIDE NAME',
+          placement: {
+            x: 0,
+            y: 0,
+            z: 0.018,
+            normal: { x: 0, y: 0, z: 1 },
+          },
+        }],
+      },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:text-1');
+    const layer = renderer.printLayers.get('text:text-1');
+    layer.plane.updateMatrixWorld(true);
+    renderer.pickPrint = vi.fn(() => ({
+      object: layer.plane,
+      point: layer.plane.localToWorld(new THREE.Vector3(-0.5, 0, 0)),
+    }));
+    renderer.pickJersey = vi.fn(() => ({
+      object: jersey,
+      face: { normal: new THREE.Vector3(0, 0, 1) },
+      point: new THREE.Vector3(0.2, 0, 0),
+    }));
+
+    renderer.handlePointerDown(pointerEvent(100, 100));
+    renderer.handlePointerMove(pointerEvent(110, 100));
+    renderer.handlePointerUp();
+    const savedItems = onStatePatch.mock.calls[0][0].overrides.customTextItems;
+    renderer.state = {
+      ...renderer.state,
+      overrides: { ...renderer.state.overrides, customTextItems: savedItems },
+    };
+    renderer.updatePrintLayer();
+
+    expect(savedItems[0].placement.x).toBeCloseTo(0.7, 6);
+    expect(layer.decal.visible).toBe(true);
+    expect(layer.decal.geometry.getAttribute('position').count).toBeGreaterThan(0);
+
+    const reopenedHost = document.createElement('div');
+    document.body.append(reopenedHost);
+    const reopened = new GarmentRenderer(reopenedHost);
+    reopened.decorationMeshes = [jersey];
+    reopened.state = JSON.parse(JSON.stringify(renderer.state));
+    reopened.updatePrintLayer();
+    const reopenedLayer = reopened.printLayers.get('text:text-1');
+    expect(reopenedLayer.decal.visible).toBe(true);
+    expect(reopenedLayer.decal.geometry.getAttribute('position').count).toBeGreaterThan(0);
+    reopened.dispose();
+    renderer.dispose();
+  });
+
+  it.each([
+    {
+      label: 'pointer cancellation',
+      interrupt(renderer) {
+        renderer.handlePointerCancel();
+      },
+    },
+    {
+      label: 'mutation lock',
+      interrupt(renderer) {
+        renderer.setPersonalizationMutationDisabled(true);
+      },
+    },
+  ])('rolls an interrupted drag back to state on $label without emitting', ({ interrupt }) => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const onStatePatch = vi.fn();
+    const renderer = new GarmentRenderer(host, { onStatePatch });
+    const jersey = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 0.4),
+      new THREE.MeshBasicMaterial(),
+    );
+    jersey.updateMatrixWorld(true);
+    const item = {
+      id: 'text-1',
+      text: 'MASON',
+      placement: {
+        x: 0.1,
+        y: 0.2,
+        z: 0.218,
+        normal: { x: 0, y: 0, z: 1 },
+      },
+      rotation: 30,
+      scale: 1.2,
+    };
+    renderer.decorationMeshes = [jersey];
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [item] },
+    };
+    renderer.updatePrintLayer();
+    renderer.setActivePrintId('text:text-1');
+    const layer = renderer.printLayers.get('text:text-1');
+    layer.plane.updateMatrixWorld(true);
+    renderer.pickPrint = vi.fn(() => ({
+      object: layer.plane,
+      point: layer.plane.localToWorld(new THREE.Vector3()),
+    }));
+    renderer.pickJersey = vi.fn(() => ({
+      object: jersey,
+      face: { normal: new THREE.Vector3(1, 0, 0) },
+      point: new THREE.Vector3(0.2, 0.8, 0.7),
+    }));
+
+    renderer.handlePointerDown(pointerEvent(100, 100));
+    renderer.handlePointerMove(pointerEvent(110, 100));
+    expect(layer.plane.position.distanceTo(new THREE.Vector3(
+      item.placement.x,
+      item.placement.y,
+      item.placement.z,
+    ))).toBeGreaterThan(0.5);
+
+    interrupt(renderer);
+
+    expect(layer.plane.position.toArray()).toEqual([
+      item.placement.x,
+      item.placement.y,
+      item.placement.z,
+    ]);
+    expect(layer.plane.scale.toArray()).toEqual([item.scale, item.scale, item.scale]);
+    expect(layer.plane.userData.rotation).toBe(item.rotation);
+    expect(layer.plane.material.opacity).toBe(0);
+    expect(layer.decal.visible).toBe(true);
+    expect(renderer.activePrintDrag).toBeNull();
+    expect(onStatePatch).not.toHaveBeenCalled();
     renderer.dispose();
   });
 

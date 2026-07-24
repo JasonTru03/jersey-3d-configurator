@@ -75,6 +75,53 @@ describe('personalization decal surface resolution', () => {
     expect(projected.point.toArray()).toEqual([0.7, 0.4, 0.2]);
     expect(projected.mesh).toBe(garment);
   });
+
+  it('resolves a surface from footprint samples when the proxy center misses', () => {
+    const garment = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    garment.updateMatrixWorld(true);
+
+    const surface = resolvePersonalizationSurface(
+      [garment],
+      {
+        x: 0.7,
+        y: 0,
+        z: 0.018,
+        normal: { x: 0, y: 0, z: 1 },
+      },
+      {
+        height: 0.25,
+        rotation: 0,
+        scale: 1,
+        width: 1.05,
+      },
+    );
+
+    expect(surface.mesh).toBe(garment);
+    expect(surface.sampleCount).toBeGreaterThan(0);
+    expect(surface.point.x).toBeCloseTo(0.7, 6);
+  });
+
+  it.each([
+    new THREE.SkinnedMesh(new THREE.BoxGeometry(2, 2, 0.4)),
+    Object.assign(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 0.4)), {
+      morphTargetInfluences: [0, 0.5],
+    }),
+  ])('uses fallback for an unsupported deformed garment mesh', (garment) => {
+    garment.updateMatrixWorld(true);
+    expect(resolvePersonalizationSurface([garment], {
+      x: 0,
+      y: 0,
+      z: 0.5,
+      normal: { x: 0, y: 0, z: 1 },
+    }, {
+      height: 0.25,
+      scale: 1,
+      width: 1,
+    })).toBeNull();
+  });
 });
 
 describe('personalization decal geometry', () => {
@@ -213,6 +260,36 @@ describe('personalization decal geometry', () => {
     expect(bounds.x).toBeGreaterThan(0.04);
     expect(bounds.z).toBeGreaterThan(0.5);
     expect(bounds.y).toBeGreaterThan(0.5);
+    expect(geometry.userData.projectionDepth).toBeGreaterThan(0.08);
+    geometry.dispose();
+  });
+
+  it('filters the opposite garment side when adaptive depth spans the body', () => {
+    const garment = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 0.4));
+    garment.updateMatrixWorld(true);
+    const surface = {
+      mesh: garment,
+      normal: new THREE.Vector3(0, 0, 1),
+      point: new THREE.Vector3(0, 0, 0.2),
+      depth: 1,
+    };
+    const geometry = createPersonalizationDecalGeometry({
+      depth: surface.depth,
+      height: 1,
+      mesh: surface.mesh,
+      normal: surface.normal,
+      position: surface.point,
+      rotation: 0,
+      scale: 1,
+      width: 1,
+    });
+    const positions = geometry.getAttribute('position');
+    const zValues = Array.from({ length: positions.count }, (_, index) => positions.getZ(index));
+
+    expect(positions.count).toBeGreaterThan(0);
+    expect(Math.min(...zValues)).toBeCloseTo(0.2, 5);
+    expect(Math.max(...zValues)).toBeCloseTo(0.2, 5);
+    expect(geometry.userData.projectionDepth).toBe(1);
     geometry.dispose();
   });
 

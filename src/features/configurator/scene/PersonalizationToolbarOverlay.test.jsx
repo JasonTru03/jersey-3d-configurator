@@ -238,6 +238,36 @@ describe('PersonalizationToolbarOverlay', () => {
     expect(callbacks.onRotate.mock.calls[1][1]).not.toBe(callbacks.onRotate.mock.calls[0][1]);
   });
 
+  it('signals rotation preview begin and end with the final emitted angle', () => {
+    const onRotationGestureStart = vi.fn();
+    const onRotationGestureEnd = vi.fn();
+    const { callbacks } = renderToolbar({ onRotationGestureEnd, onRotationGestureStart });
+    const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+
+    fireEvent.pointerDown(handle, { pointerId: 27, clientX: 150, clientY: 50 });
+    fireEvent.pointerMove(handle, { pointerId: 27, clientX: 200, clientY: 100 });
+    const finalRotation = callbacks.onRotate.mock.calls.at(-1)[1];
+    fireEvent.pointerUp(handle, { pointerId: 27, clientX: 200, clientY: 100 });
+
+    expect(onRotationGestureStart).toHaveBeenCalledOnce();
+    expect(onRotationGestureStart).toHaveBeenCalledWith('print-1');
+    expect(onRotationGestureEnd).toHaveBeenCalledOnce();
+    expect(onRotationGestureEnd).toHaveBeenCalledWith('print-1', finalRotation);
+  });
+
+  it('keeps keyboard rotation discrete without starting a drag preview', () => {
+    const onRotationGestureStart = vi.fn();
+    const onRotationGestureEnd = vi.fn();
+    const { callbacks } = renderToolbar({ onRotationGestureEnd, onRotationGestureStart });
+    const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+
+    expect(callbacks.onRotate).toHaveBeenCalledWith('print-1', 5);
+    expect(onRotationGestureStart).not.toHaveBeenCalled();
+    expect(onRotationGestureEnd).not.toHaveBeenCalled();
+  });
+
   it('does not change rotation for a click without a drag', () => {
     const { callbacks } = renderToolbar();
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });

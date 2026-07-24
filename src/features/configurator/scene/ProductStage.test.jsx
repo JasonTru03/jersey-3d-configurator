@@ -5,6 +5,8 @@ import { ProductStage } from './ProductStage.jsx';
 
 const rendererHarness = vi.hoisted(() => ({
   activePrintId: null,
+  rotationGestureEnds: [],
+  rotationGestureStarts: [],
   focusedDecorationId: null,
   options: null,
   personalizationMutationDisabled: null,
@@ -30,6 +32,14 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
 
       setActivePrintId(id) {
         rendererHarness.activePrintId = id;
+      }
+
+      beginPersonalizationRotation(id) {
+        rendererHarness.rotationGestureStarts.push(id);
+      }
+
+      endPersonalizationRotation(id, rotation) {
+        rendererHarness.rotationGestureEnds.push([id, rotation]);
       }
 
       setPersonalizationMutationDisabled(disabled) {
@@ -58,6 +68,8 @@ afterAll(() => {
 
 beforeEach(() => {
   rendererHarness.activePrintId = null;
+  rendererHarness.rotationGestureEnds = [];
+  rendererHarness.rotationGestureStarts = [];
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
@@ -109,6 +121,32 @@ describe('ProductStage print toolbar', () => {
         printItems: [expect.objectContaining({ id: 'print-1', rotation: 5 })],
       }),
     }));
+  });
+
+  it('forwards drag rotation preview lifecycle and its final angle to the renderer', () => {
+    const onStatePatch = vi.fn();
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{
+          id: 'custom-id',
+          text: 'MASON',
+          placement: { x: 0, y: 0.36, z: 0.5 },
+          rotation: 0,
+          scale: 1,
+        }],
+      },
+    }} />);
+    act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
+    const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+
+    fireEvent.pointerDown(handle, { pointerId: 29, clientX: 228, clientY: 190 });
+    fireEvent.pointerMove(handle, { pointerId: 29, clientX: 280, clientY: 247 });
+    fireEvent.pointerUp(handle, { pointerId: 29, clientX: 280, clientY: 247 });
+
+    const finalRotation = onStatePatch.mock.calls.at(-1)[0].overrides.customTextItems[0].rotation;
+    expect(rendererHarness.rotationGestureStarts).toEqual(['text:custom-id']);
+    expect(rendererHarness.rotationGestureEnds).toEqual([['text:custom-id', finalRotation]]);
   });
 
   it('routes active print deletion through the shared executor', () => {

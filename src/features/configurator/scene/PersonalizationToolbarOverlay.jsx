@@ -55,6 +55,8 @@ export function PersonalizationToolbarOverlay({
   onDelete,
   onEdit,
   onRotate,
+  onRotationGestureEnd,
+  onRotationGestureStart,
   onScale,
   personalizationMutationDisabled,
 }) {
@@ -63,6 +65,8 @@ export function PersonalizationToolbarOverlay({
   const deleteFocusRef = useRef(null);
   const resizeStart = useRef(null);
   const rotationStart = useRef(null);
+  const rotationGestureEndRef = useRef(onRotationGestureEnd);
+  rotationGestureEndRef.current = onRotationGestureEnd;
   const [stageArea, setStageArea] = useState(null);
   const [frozenDockLayout, setFrozenDockLayout] = useState(null);
   const [isRotating, setIsRotating] = useState(false);
@@ -74,6 +78,9 @@ export function PersonalizationToolbarOverlay({
     const resizeGesture = resizeStart.current;
     rotationStart.current = null;
     resizeStart.current = null;
+    if (rotation) {
+      rotationGestureEndRef.current?.(rotation.itemKey, rotation.gesture.rotation);
+    }
     releaseGesturePointer(rotation);
     releaseGesturePointer(resizeGesture);
     setFrozenDockLayout(null);
@@ -196,6 +203,7 @@ export function PersonalizationToolbarOverlay({
     const finalStart = rotationStart.current ?? start;
     rotationStart.current = null;
     releaseGesturePointer(finalStart);
+    onRotationGestureEnd?.(finalStart.itemKey, finalStart.gesture.rotation);
     setFrozenDockLayout(null);
     setIsRotating(false);
   };
@@ -222,6 +230,7 @@ export function PersonalizationToolbarOverlay({
       }),
       hasMoved: false,
     };
+    onRotationGestureStart?.(itemKey);
     setFrozenDockLayout(dockLayout);
     setIsRotating(true);
   };

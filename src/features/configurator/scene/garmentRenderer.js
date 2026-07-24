@@ -19,6 +19,7 @@ import {
   getPersonalizationSurfaceFromIntersection,
   projectPersonalizationCenterOntoSurface,
   resolvePersonalizationSurface,
+  supportsPersonalizationDecalMesh,
 } from './personalizationDecal.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
@@ -142,6 +143,7 @@ export class GarmentRenderer {
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
+    this.rotationPreviewKey = null;
     this.personalizationMutationDisabled = false;
     this.pendingDecorationDeselect = null;
     this.printColor = '#20242a';
@@ -286,8 +288,9 @@ export class GarmentRenderer {
   }
 
   async loadModel(modelUrl) {
+    this.cancelPersonalizationRotationPreview();
     if (this.isDraggingPrint) {
-      this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
+      this.restorePrintLayerFromState(this.printLayers.get(this.activePrintId));
     }
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
@@ -425,8 +428,9 @@ export class GarmentRenderer {
   setPersonalizationMutationDisabled(disabled) {
     this.personalizationMutationDisabled = Boolean(disabled);
     if (!this.personalizationMutationDisabled) return;
+    this.cancelPersonalizationRotationPreview();
     if (this.isDraggingPrint) {
-      this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
+      this.restorePrintLayerFromState(this.printLayers.get(this.activePrintId));
     }
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
@@ -592,6 +596,7 @@ export class GarmentRenderer {
       if (keys.has(key)) return;
       this.disposePrintLayerEntry(layer);
       this.printLayers.delete(key);
+      if (this.rotationPreviewKey === key) this.rotationPreviewKey = null;
     });
     printItems.forEach((item) => this.updatePrintLayerEntry(item));
     if (activeLayerWasRemoved || !printItems.length) {
@@ -662,6 +667,11 @@ export class GarmentRenderer {
       layer.texture.needsUpdate = true;
     }
     this.applyStoredPrintPlacement(layer.plane, item);
+    if (this.rotationPreviewKey === item.key) {
+      layer.plane.material.opacity = 1;
+      layer.decal.visible = false;
+      return;
+    }
     this.syncPersonalizationDecal(layer, item);
   }
 
@@ -720,8 +730,17 @@ export class GarmentRenderer {
     preferredSurface = null,
   ) {
     if (!layer || !item) return false;
-    const surface = preferredSurface
-      ?? resolvePersonalizationSurface(this.decorationMeshes, placement);
+    const scale = item.scale ?? 1;
+    const rotation = item.rotation ?? 0;
+    const footprint = {
+      height: layer.height,
+      rotation,
+      scale,
+      width: layer.width,
+    };
+    const surface = preferredSurface && supportsPersonalizationDecalMesh(preferredSurface.mesh)
+      ? preferredSurface
+      : resolvePersonalizationSurface(this.decorationMeshes, placement, footprint);
     if (!surface) {
       layer.plane.material.opacity = 1;
       layer.decal.visible = false;
@@ -729,8 +748,6 @@ export class GarmentRenderer {
       return false;
     }
 
-    const scale = item.scale ?? 1;
-    const rotation = item.rotation ?? 0;
     const decalKey = JSON.stringify([
       surface.mesh.uuid,
       surface.point.x,
@@ -743,9 +760,11 @@ export class GarmentRenderer {
       scale,
       layer.width,
       layer.height,
+      surface.depth ?? null,
     ]);
     if (layer.decalKey !== decalKey) {
       const geometry = createPersonalizationDecalGeometry({
+        depth: surface.depth,
         height: layer.height,
         mesh: surface.mesh,
         normal: surface.normal,
@@ -783,6 +802,51 @@ export class GarmentRenderer {
     );
   }
 
+  restorePrintLayerFromState(layer) {
+    if (!layer) return false;
+    const item = findPersonalizationItem(
+      getSelectablePersonalizationItems(this.state),
+      layer.plane.userData.personalizationKey,
+    );
+    if (!item) return false;
+    this.applyStoredPrintPlacement(layer.plane, item);
+    return this.syncPersonalizationDecal(layer, item);
+  }
+
+  beginPersonalizationRotation(key) {
+    if (this.personalizationMutationDisabled) return false;
+    if (this.rotationPreviewKey && this.rotationPreviewKey !== key) {
+      this.cancelPersonalizationRotationPreview();
+    }
+    const layer = this.printLayers.get(key);
+    if (!layer) return false;
+    this.rotationPreviewKey = key;
+    layer.plane.material.opacity = 1;
+    layer.decal.visible = false;
+    return true;
+  }
+
+  endPersonalizationRotation(key, rotation) {
+    if (this.rotationPreviewKey !== key) return false;
+    this.rotationPreviewKey = null;
+    const layer = this.printLayers.get(key);
+    const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
+    if (!layer || !item) return false;
+    const finalRotation = Number(rotation);
+    const finalItem = Number.isFinite(finalRotation)
+      ? { ...item, rotation: ((finalRotation % 360) + 360) % 360 }
+      : item;
+    this.applyStoredPrintPlacement(layer.plane, finalItem);
+    return this.syncPersonalizationDecal(layer, finalItem);
+  }
+
+  cancelPersonalizationRotationPreview() {
+    const key = this.rotationPreviewKey;
+    if (!key) return false;
+    this.rotationPreviewKey = null;
+    return this.restorePrintLayerFromState(this.printLayers.get(key));
+  }
+
   getPrintPlanePlacement(plane) {
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion).normalize();
     return {
@@ -800,6 +864,7 @@ export class GarmentRenderer {
     this.isDraggingPrint = false;
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
+    this.rotationPreviewKey = null;
     this.pendingDecorationDeselect = null;
     this.syncPrintAnchor();
   }
@@ -912,7 +977,7 @@ export class GarmentRenderer {
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
     this.isDraggingPrint = false;
-    this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), false);
+    this.restorePrintLayerFromState(this.printLayers.get(this.activePrintId));
     this.controls.enabled = shouldEnableOrbitControls({
       isDraggingDecoration: this.decorationEditor?.isEditing(),
       isDraggingPrint: this.isDraggingPrint,

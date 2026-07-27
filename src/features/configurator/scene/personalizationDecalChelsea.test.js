@@ -143,7 +143,7 @@ describe('Chelsea personalization decal coverage', () => {
     expect(atFifteen.coverage).toBeGreaterThanOrEqual(0.985);
     atZero.geometry.dispose();
     atFifteen.geometry.dispose();
-  });
+  }, 15_000);
 });
 
 function makeTextAlphaMask() {

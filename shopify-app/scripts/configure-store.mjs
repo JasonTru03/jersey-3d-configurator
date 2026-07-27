@@ -39,7 +39,7 @@ export async function configureStore({ input: rawInput, graphql, dryRun = false 
 
   try {
     const before = await discover(graphql);
-    const registrations = inspectDiscovery(before);
+    let registrations = inspectDiscovery(before);
     if (registrations.transform && registrations.transform.blockOnFailure !== true) {
       throw new Error(
         'Cart Transform registration has blockOnFailure disabled; the 2026-07 API has no '
@@ -47,22 +47,29 @@ export async function configureStore({ input: rawInput, graphql, dryRun = false 
       );
     }
 
-    if (registrations.transform) {
-      await updateTransformConfig(
-        graphql,
-        registrations.transform.id,
-        registrations.transform.config?.compareDigest ?? null,
-        input.storeConfig,
-      );
-    } else {
+    let createdRegistration = false;
+    if (!registrations.transform) {
       await createTransform(graphql, input.storeConfig);
+      createdRegistration = true;
     }
 
-    if (registrations.validation) {
-      await updateValidation(graphql, registrations.validation.id, input.storeConfig);
-    } else {
+    if (!registrations.validation) {
       await createValidation(graphql, input.storeConfig);
+      createdRegistration = true;
     }
+
+    if (createdRegistration) {
+      registrations = inspectDiscovery(await discover(graphql));
+    }
+    if (!registrations.transform || !registrations.validation) {
+      throw new Error('Secure jersey registrations are incomplete after creation.');
+    }
+    if (registrations.transform.blockOnFailure !== true) {
+      throw new Error('Cart Transform registration must block on failure.');
+    }
+
+    await updateOwnerConfigs(graphql, registrations, input.storeConfig);
+    await updateValidationSettings(graphql, registrations.validation.id);
 
     const after = await discover(graphql);
     return {
@@ -88,17 +95,28 @@ async function createTransform(graphql, storeConfig) {
   assertMutationResult(operationName, data?.cartTransformCreate, 'cartTransform');
 }
 
-async function updateTransformConfig(graphql, ownerId, compareDigest, storeConfig) {
+async function updateOwnerConfigs(graphql, registrations, storeConfig) {
   // Admin API 2026-07 exposes cartTransformCreate/Delete but no cartTransformUpdate.
-  // CartTransform is a metafield owner, so existing configuration is updated with metafieldsSet.
-  const operationName = 'UpdateSecureJerseyCartTransformConfig';
+  // Both registration owners are updated atomically with compare-and-set metafieldsSet.
+  const operationName = 'UpdateSecureJerseyOwnerConfigs';
   const data = await graphql(operationName, {
-    metafields: [createMetafield(storeConfig, ownerId, compareDigest)],
+    metafields: [
+      createMetafield(
+        storeConfig,
+        registrations.transform.id,
+        registrations.transform.config?.compareDigest ?? null,
+      ),
+      createMetafield(
+        storeConfig,
+        registrations.validation.id,
+        registrations.validation.config?.compareDigest ?? null,
+      ),
+    ],
   });
   const payload = data?.metafieldsSet;
   assertUserErrors(operationName, payload);
-  if (!Array.isArray(payload.metafields) || payload.metafields.length !== 1) {
-    throw new Error(`${operationName} returned no updated metafield.`);
+  if (!Array.isArray(payload.metafields) || payload.metafields.length !== 2) {
+    throw new Error(`${operationName} did not update both owner metafields.`);
   }
 }
 
@@ -116,7 +134,7 @@ async function createValidation(graphql, storeConfig) {
   assertMutationResult(operationName, data?.validationCreate, 'validation');
 }
 
-async function updateValidation(graphql, id, storeConfig) {
+async function updateValidationSettings(graphql, id) {
   const operationName = 'UpdateSecureJerseyValidation';
   const data = await graphql(operationName, {
     id,
@@ -124,7 +142,6 @@ async function updateValidation(graphql, id, storeConfig) {
       title: VALIDATION_TITLE,
       enable: true,
       blockOnFailure: true,
-      metafields: [createMetafield(storeConfig)],
     },
   });
   assertMutationResult(operationName, data?.validationUpdate, 'validation');

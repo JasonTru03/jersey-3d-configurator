@@ -80,8 +80,8 @@ export const OPERATIONS = Object.freeze({
       }
     }
   `,
-  UpdateSecureJerseyCartTransformConfig: `
-    mutation UpdateSecureJerseyCartTransformConfig($metafields: [MetafieldsSetInput!]!) {
+  UpdateSecureJerseyOwnerConfigs: `
+    mutation UpdateSecureJerseyOwnerConfigs($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
         metafields { id }
         userErrors { field message code }
@@ -454,6 +454,9 @@ function normalizeSurchargeVariants(value, jerseyIds) {
   const entries = Object.entries(value);
   if (entries.length === 0) {
     throw new TypeError('storeConfig.surchargeVariants must not be empty.');
+  }
+  if (entries.length > 64) {
+    throw new TypeError('storeConfig.surchargeVariants must contain at most 64 entries.');
   }
   const normalized = [];
   const used = new Set();

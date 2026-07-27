@@ -13,6 +13,12 @@ Shared test configuration:
 - currency: `USD`
 - complete jersey and surcharge variant maps
 
+The shared seven-field `StoreConfig` contract requires exactly the four jersey
+size entries and between 1 and 64 surcharge entries. Every variant ID is a
+canonical positive unsigned 64-bit decimal string; IDs are unique within each
+map and the jersey and surcharge maps are disjoint. The Node configuration
+script and both Rust Functions enforce the same limits before accepting config.
+
 `valid-two-component.json` therefore acts as the cross-language compatibility
 fixture for the exact header encoding, component ordering, compact JSON, and
 HMAC message bytes. The hostile fixtures each alter one cart invariant while

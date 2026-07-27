@@ -45,6 +45,15 @@ function configValue(overrides = {}) {
   return buildStoreConfig(input(overrides)).metafield.value;
 }
 
+function surchargeMap(count) {
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [
+      String(index + 1),
+      String(10_000 + index),
+    ]),
+  );
+}
+
 function discovery({
   transformId,
   validationId,
@@ -182,7 +191,7 @@ test('uses the 2026-07 handle mutations and both registration-owned metafields',
   assert.doesNotMatch(OPERATIONS.CreateSecureJerseyCartTransform, /functionId/u);
   assert.match(OPERATIONS.CreateSecureJerseyValidation, /validationCreate/u);
   assert.doesNotMatch(OPERATIONS.CreateSecureJerseyValidation, /cartValidationCreate/u);
-  assert.match(OPERATIONS.UpdateSecureJerseyCartTransformConfig, /metafieldsSet/u);
+  assert.match(OPERATIONS.UpdateSecureJerseyOwnerConfigs, /metafieldsSet/u);
   assert.match(OPERATIONS.DiscoverSecureJerseyRegistrations, /cartTransforms[\s\S]*metafield/u);
   assert.match(OPERATIONS.DiscoverSecureJerseyRegistrations, /validations[\s\S]*metafield/u);
 });
@@ -198,6 +207,7 @@ test('rejects malformed domains, tokens, IDs, maps, overlaps, and short secrets'
     [input({ jerseyVariants: { s: '1', m: '2', l: '3' } }), /jerseyVariants/i],
     [input({ jerseyVariants: { s: '1', m: '2', l: '3', xl: '2' } }), /reuses/i],
     [input({ surchargeVariants: { 0: '9' } }), /surchargeVariants/i],
+    [input({ surchargeVariants: surchargeMap(65) }), /at most 64/i],
     [input({
       jerseyVariants: { s: '1', m: '2', l: '3', xl: '4' },
       surchargeVariants: { 8: '1' },
@@ -250,6 +260,25 @@ test('creates both registrations with owner metafields, then verifies read-back'
       },
     },
     { operationName: 'DiscoverSecureJerseyRegistrations', data: after },
+    {
+      operationName: 'UpdateSecureJerseyOwnerConfigs',
+      data: {
+        metafieldsSet: {
+          metafields: [{ id: 'mf-transform' }, { id: 'mf-validation' }],
+          userErrors: [],
+        },
+      },
+    },
+    {
+      operationName: 'UpdateSecureJerseyValidation',
+      data: {
+        validationUpdate: {
+          validation: { id: 'gid://shopify/Validation/2' },
+          userErrors: [],
+        },
+      },
+    },
+    { operationName: 'DiscoverSecureJerseyRegistrations', data: after },
   ]);
 
   const result = await configureStore({ input: input(), graphql: mock.graphql });
@@ -263,6 +292,10 @@ test('creates both registrations with owner metafields, then verifies read-back'
   assert.equal(createValidation.functionHandle, VALIDATION_HANDLE);
   assert.equal(createValidation.enable, true);
   assert.equal(createValidation.metafields[0].value, configValue());
+  assert.equal(mock.calls[4].variables.metafields.length, 2);
+  assert.equal(mock.calls[4].variables.metafields[0].compareDigest, 'digest-transform');
+  assert.equal(mock.calls[4].variables.metafields[1].compareDigest, 'digest-validation');
+  assert.equal(Object.hasOwn(mock.calls[5].variables.validation, 'metafields'), false);
 });
 
 test('updates existing owners without creating duplicate registrations', async () => {
@@ -279,8 +312,13 @@ test('updates existing owners without creating duplicate registrations', async (
   const mock = operationMock([
     { operationName: 'DiscoverSecureJerseyRegistrations', data: before },
     {
-      operationName: 'UpdateSecureJerseyCartTransformConfig',
-      data: { metafieldsSet: { metafields: [{ id: 'mf-transform' }], userErrors: [] } },
+      operationName: 'UpdateSecureJerseyOwnerConfigs',
+      data: {
+        metafieldsSet: {
+          metafields: [{ id: 'mf-transform' }, { id: 'mf-validation' }],
+          userErrors: [],
+        },
+      },
     },
     {
       operationName: 'UpdateSecureJerseyValidation',
@@ -299,14 +337,18 @@ test('updates existing owners without creating duplicate registrations', async (
     mock.calls.map(({ operationName }) => operationName),
     [
       'DiscoverSecureJerseyRegistrations',
-      'UpdateSecureJerseyCartTransformConfig',
+      'UpdateSecureJerseyOwnerConfigs',
       'UpdateSecureJerseyValidation',
       'DiscoverSecureJerseyRegistrations',
     ],
   );
+  assert.equal(mock.calls[1].variables.metafields.length, 2);
   assert.equal(mock.calls[1].variables.metafields[0].ownerId, result.transform.registrationId);
   assert.equal(mock.calls[1].variables.metafields[0].compareDigest, 'digest-transform');
+  assert.equal(mock.calls[1].variables.metafields[1].ownerId, result.validation.registrationId);
+  assert.equal(mock.calls[1].variables.metafields[1].compareDigest, 'digest-validation');
   assert.equal(mock.calls[2].variables.id, result.validation.registrationId);
+  assert.equal(Object.hasOwn(mock.calls[2].variables.validation, 'metafields'), false);
 });
 
 test('is repeatable with stable IDs and performs no duplicate creates', async () => {
@@ -317,8 +359,13 @@ test('is repeatable with stable IDs and performs no duplicate creates', async ()
   const mock = operationMock([
     { operationName: 'DiscoverSecureJerseyRegistrations', data: configured },
     {
-      operationName: 'UpdateSecureJerseyCartTransformConfig',
-      data: { metafieldsSet: { metafields: [{ id: 'mf-transform' }], userErrors: [] } },
+      operationName: 'UpdateSecureJerseyOwnerConfigs',
+      data: {
+        metafieldsSet: {
+          metafields: [{ id: 'mf-transform' }, { id: 'mf-validation' }],
+          userErrors: [],
+        },
+      },
     },
     {
       operationName: 'UpdateSecureJerseyValidation',
@@ -335,6 +382,38 @@ test('is repeatable with stable IDs and performs no duplicate creates', async ()
   assert.equal(result.transform.registrationId, 'gid://shopify/CartTransform/1');
   assert.equal(result.validation.registrationId, 'gid://shopify/Validation/2');
   assert.ok(mock.calls.every(({ operationName }) => !operationName.includes('Create')));
+});
+
+test('aborts both owner config writes on a compare-and-set conflict', async () => {
+  const configured = discovery({
+    transformId: 'gid://shopify/CartTransform/1',
+    validationId: 'gid://shopify/Validation/2',
+  });
+  for (const conflictingOwnerIndex of [0, 1]) {
+    const mock = operationMock([
+      { operationName: 'DiscoverSecureJerseyRegistrations', data: configured },
+      {
+        operationName: 'UpdateSecureJerseyOwnerConfigs',
+        data: {
+          metafieldsSet: {
+            metafields: [],
+            userErrors: [{
+              field: ['metafields', String(conflictingOwnerIndex), 'compareDigest'],
+              message: 'The compare digest does not match.',
+            }],
+          },
+        },
+      },
+    ]);
+    await assert.rejects(
+      configureStore({ input: input(), graphql: mock.graphql }),
+      /compare digest/i,
+    );
+    assert.deepEqual(
+      mock.calls.map(({ operationName }) => operationName),
+      ['DiscoverSecureJerseyRegistrations', 'UpdateSecureJerseyOwnerConfigs'],
+    );
+  }
 });
 
 test('fails closed on partial mutation failure and conflicting owned records', async () => {

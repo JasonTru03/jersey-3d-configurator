@@ -56,7 +56,6 @@
 
         if (!variantId) return;
 
-        event.preventDefault();
         const variantMap = JSON.parse(launcher.dataset.variantMap);
         const workerUrl = new URL('https://jersey-3d-configurator.jason1064969838.workers.dev/');
         workerUrl.searchParams.set('shop', launcher.dataset.shop);
@@ -64,7 +63,7 @@
         workerUrl.searchParams.set('variantId', variantId);
         workerUrl.searchParams.set('variantMap', JSON.stringify(variantMap));
         workerUrl.searchParams.set('returnPath', launcher.dataset.returnPath);
-        window.location.assign(workerUrl.toString());
+        button.href = workerUrl.toString();
       });
     })();
   </script>

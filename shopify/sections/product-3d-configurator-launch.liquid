@@ -87,7 +87,6 @@
 
         if (!variantId) return;
 
-        event.preventDefault();
         const variantMap = JSON.parse(currentLauncher.dataset.variantMap);
         const surchargeVariantMap = JSON.parse(currentLauncher.dataset.surchargeVariantMap);
         const workerUrl = new URL('https://jersey-3d-configurator.jason1064969838.workers.dev/');
@@ -97,7 +96,7 @@
         workerUrl.searchParams.set('variantMap', JSON.stringify(variantMap));
         workerUrl.searchParams.set('surchargeVariantMap', JSON.stringify(surchargeVariantMap));
         workerUrl.searchParams.set('returnPath', currentLauncher.dataset.returnPath);
-        window.location.assign(workerUrl.toString());
+        button.href = workerUrl.toString();
       });
     })();
   </script>

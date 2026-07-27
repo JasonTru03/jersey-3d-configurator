@@ -89,6 +89,7 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  vi.useRealTimers();
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.updateStates = [];
@@ -575,6 +576,103 @@ describe('ConfiguratorPage', () => {
     resolveRequest(secureCartResponse());
     await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
+  });
+
+  it('cancels a pending handoff when Review closes and ignores its late response', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    let resolveRequest;
+    let requestSignal;
+    fetch.mockImplementationOnce((_endpoint, options) => {
+      requestSignal = options.signal;
+      return new Promise((resolve) => { resolveRequest = resolve; });
+    });
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close review' }));
+
+    expect(requestSignal).toHaveProperty('aborted', true);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    resolveRequest(secureCartResponse());
+    await act(async () => { await Promise.resolve(); });
+    expect(navigateToCart).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
+  });
+
+  it('cancels a pending handoff when the design state identity changes', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    let resolveRequest;
+    let requestSignal;
+    fetch.mockImplementationOnce((_endpoint, options) => {
+      requestSignal = options.signal;
+      return new Promise((resolve) => { resolveRequest = resolve; });
+    });
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    await act(async () => {
+      await rendererHarness.options.onStatePatch({ overrides: { activeDecorationId: 'changed' } });
+    });
+
+    await waitFor(() => expect(requestSignal).toHaveProperty('aborted', true));
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
+    resolveRequest(secureCartResponse());
+    await act(async () => { await Promise.resolve(); });
+    expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
+  it('lets a new request supersede a cancelled request id without stale navigation', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    let resolveFirst;
+    let resolveSecond;
+    fetch
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue editing' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    resolveFirst(secureCartResponse({ handoffUrl: 'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=stale' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(navigateToCart).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+
+    resolveSecond(secureCartResponse());
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
+  });
+
+  it('restores the cart action with a retryable error after request timeout', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    fetch.mockImplementationOnce((_endpoint, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }));
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Secure cart request timed out. Try again.');
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
+    expect(navigateToCart).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('does not navigate or update state when a pending handoff resolves after unmount', async () => {

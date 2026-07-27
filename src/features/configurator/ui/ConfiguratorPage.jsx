@@ -76,8 +76,14 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
   const [preparedDownload, setPreparedDownload] = useState(null);
   const bakeProviderRef = useRef(null);
+  const activeCartRequestRef = useRef(null);
   const cartPendingRef = useRef(false);
+  const cartRequestIdRef = useRef(0);
+  const latestStateRef = useRef(state);
   const mountedRef = useRef(false);
+  const reviewOpenRef = useRef(reviewOpen);
+  latestStateRef.current = state;
+  reviewOpenRef.current = reviewOpen;
   const personalizationDeletion = usePersonalizationDeletion({
     onError: setFileError,
     onSelectionChange: setSelectedPersonalizationKey,
@@ -86,12 +92,35 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     updateState,
   });
 
+  const cancelActiveCartRequest = ({ updateUi = true } = {}) => {
+    const activeRequest = activeCartRequestRef.current;
+    if (!activeRequest) return;
+    activeCartRequestRef.current = null;
+    activeRequest.controller.abort();
+    cartPendingRef.current = false;
+    if (updateUi && mountedRef.current) setCartPending(false);
+  };
+
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      cancelActiveCartRequest({ updateUi: false });
+    };
   }, []);
 
   useEffect(() => () => preparedDownload?.release(), [preparedDownload]);
+
+  useEffect(() => {
+    const activeRequest = activeCartRequestRef.current;
+    if (activeRequest && activeRequest.stateSnapshot !== state) {
+      cancelActiveCartRequest();
+    }
+  }, [state]);
+
+  useEffect(() => {
+    if (!reviewOpen) cancelActiveCartRequest();
+  }, [reviewOpen]);
 
   const handleSaveDesign = async () => {
     try {
@@ -134,29 +163,58 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
 
   const handleAddToCart = async () => {
     if (cartPendingRef.current) return;
+    const controller = new AbortController();
+    const id = cartRequestIdRef.current + 1;
+    const stateSnapshot = latestStateRef.current;
+    cartRequestIdRef.current = id;
+    activeCartRequestRef.current = { controller, id, stateSnapshot };
     cartPendingRef.current = true;
     setCartPending(true);
     try {
       setCartError('');
       let productionFiles;
-      if (shouldPrepareBottomPatternAsset(state)) {
-        productionFiles = getCurrentLocalProductionFiles({ state, receipt: localProductionReceipt });
+      if (shouldPrepareBottomPatternAsset(stateSnapshot)) {
+        productionFiles = getCurrentLocalProductionFiles({ state: stateSnapshot, receipt: localProductionReceipt });
       }
       const result = await createSecureCartHandoff({
         context: shopifyContext,
-        state,
+        state: stateSnapshot,
         productionFiles,
+        signal: controller.signal,
       });
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current
+        || activeCartRequestRef.current?.id !== id
+        || !reviewOpenRef.current
+        || latestStateRef.current !== stateSnapshot
+      ) return;
       navigateToCart(result.handoffUrl);
     } catch (error) {
-      if (mountedRef.current) {
+      if (
+        mountedRef.current
+        && activeCartRequestRef.current?.id === id
+        && !isAbortError(error)
+      ) {
         setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
       }
     } finally {
-      cartPendingRef.current = false;
-      if (mountedRef.current) setCartPending(false);
+      if (activeCartRequestRef.current?.id === id) {
+        activeCartRequestRef.current = null;
+        cartPendingRef.current = false;
+        if (mountedRef.current) setCartPending(false);
+      }
     }
+  };
+
+  const handleCloseReview = () => {
+    reviewOpenRef.current = false;
+    cancelActiveCartRequest();
+    setReviewOpen(false);
+  };
+
+  const handleOpenReview = () => {
+    reviewOpenRef.current = true;
+    setReviewOpen(true);
   };
 
   if (status === 'loading') {
@@ -219,7 +277,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             deletePending={personalizationDeletion.deletePending}
             deletePersonalization={personalizationDeletion.deletePersonalization}
             onArtworkSelect={setArtworkFocusId}
-            onReview={() => setReviewOpen(true)}
+            onReview={handleOpenReview}
             product={product}
             quote={quote}
             section={section}
@@ -233,7 +291,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       <DesignReviewDialog
         cartError={cartError}
         cartPending={cartPending}
-        onClose={() => setReviewOpen(false)}
+        onClose={handleCloseReview}
         onAddToCart={handleAddToCart}
         onDownload={() => setLocalProductionReceipt(preparedDownload?.receipt ?? null)}
         onSave={handleSaveDesign}
@@ -272,6 +330,10 @@ async function getLatestPatternBake(bakeProviderRef) {
 
 function defaultNavigateToCart(url) {
   window.location.assign(url);
+}
+
+function isAbortError(error) {
+  return error !== null && typeof error === 'object' && error.name === 'AbortError';
 }
 
 function PreparedDownloadLink({ download, onDownload }) {

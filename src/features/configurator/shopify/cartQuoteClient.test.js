@@ -27,6 +27,7 @@ function ok(body = SUCCESS, init = {}) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -50,6 +51,7 @@ describe('createSecureCartHandoff', () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ shop: SHOP, state, productionFiles: null }),
+      signal: expect.any(AbortSignal),
     });
     const sent = JSON.parse(fetchImpl.mock.calls[0][1].body);
     expect(Object.keys(sent).sort()).toEqual(['productionFiles', 'shop', 'state']);
@@ -93,11 +95,53 @@ describe('createSecureCartHandoff', () => {
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).productionFiles).toBeNull();
   });
 
+  it('accepts a context snapshot with only a valid shop and ignores extra ordinary fields', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const fetchImpl = vi.fn().mockResolvedValue(ok());
+
+    await createSecureCartHandoff({
+      context: { shop: SHOP, futureLaunchField: 'ignored' },
+      state: { layout: 'm' },
+      fetchImpl,
+    });
+
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).shop).toBe(SHOP);
+  });
+
+  it('reads and snapshots each production file field only once', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const fetchImpl = vi.fn().mockResolvedValue(ok());
+    const reads = new Map();
+    const values = {
+      atlasFilename: 'fn8788-uv-atlas.png',
+      atlasSha256: `sha256:${'a'.repeat(64)}`,
+      bundleFilename: 'fn8788-jersey-production.zip',
+      designFilename: 'fn8788-jersey-design.json',
+    };
+    const productionFiles = Object.fromEntries(Object.keys(values).map((key) => [key, undefined]));
+    for (const [key, value] of Object.entries(values)) {
+      Object.defineProperty(productionFiles, key, {
+        configurable: true,
+        enumerable: true,
+        get() {
+          reads.set(key, (reads.get(key) ?? 0) + 1);
+          return value;
+        },
+      });
+    }
+
+    await createSecureCartHandoff({ context: { shop: SHOP }, state: {}, productionFiles, fetchImpl });
+
+    expect(Object.fromEntries(reads)).toEqual(Object.fromEntries(
+      Object.keys(values).map((key) => [key, 1]),
+    ));
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).productionFiles).toEqual(values);
+  });
+
   it.each([
     ['missing context', { context: null, state: {} }],
     ['forged shop casing', { context: { shop: 'TESTCSJ.myshopify.com' }, state: {} }],
     ['invalid shop', { context: { shop: 'testcsj.myshopify.com.target' }, state: {} }],
-    ['incomplete forged context', { context: { shop: SHOP, variantMap: { m: '1004' } }, state: {} }],
     ['missing state', { context: context(), state: undefined }],
   ])('rejects %s before making a request', async (_label, input) => {
     const fetchImpl = vi.fn();
@@ -149,6 +193,69 @@ describe('createSecureCartHandoff', () => {
       fetchImpl: vi.fn().mockResolvedValue(new Response('not-json', { status: 201 })),
     })).rejects.toThrow('Secure cart preparation failed.');
   });
+
+  it('passes a merged signal to fetch and reports a finite timeout error', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(() => new Promise(() => {}));
+    const result = createSecureCartHandoff({
+      context: { shop: SHOP },
+      state: {},
+      timeoutMs: 25,
+      fetchImpl,
+    });
+    const rejection = expect(result).rejects.toThrow('Secure cart request timed out. Try again.');
+
+    expect(fetchImpl.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(fetchImpl.mock.calls[0][1].signal).toHaveProperty('aborted', true);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it('propagates external cancellation as AbortError and removes its listener', async () => {
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    const fetchImpl = vi.fn(() => new Promise(() => {}));
+    const result = createSecureCartHandoff({
+      context: { shop: SHOP },
+      state: {},
+      signal: controller.signal,
+      fetchImpl,
+    });
+
+    controller.abort();
+
+    await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchImpl.mock.calls[0][1].signal).toHaveProperty('aborted', true);
+    expect(removeListener).toHaveBeenCalled();
+  });
+
+  it('clears the timeout after a successful response', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+
+    await createSecureCartHandoff({
+      context: { shop: SHOP },
+      state: {},
+      timeoutMs: 25,
+      fetchImpl: vi.fn().mockResolvedValue(ok()),
+    });
+
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it.each([0, -1, 1.5, 120_001, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid timeout %s before fetch',
+    async (timeoutMs) => {
+      const fetchImpl = vi.fn();
+      await expect(createSecureCartHandoff({
+        context: { shop: SHOP }, state: {}, timeoutMs, fetchImpl,
+      })).rejects.toThrow();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['missing key', { ...SUCCESS, bundleId: undefined }],

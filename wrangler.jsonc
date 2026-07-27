@@ -3,12 +3,12 @@
   "name": "jersey-3d-configurator",
   "compatibility_date": "2026-07-14",
   "main": "workers/index.js",
-  // Deployment also requires DESIGN_QUOTES and CART_QUOTE_RATE_LIMIT KV bindings.
+  // Deployment requires a DESIGN_QUOTES KV binding and a CART_QUOTE_RATE_LIMIT
+  // Rate Limiting binding. Configure their real namespaces during test-store setup.
   // Set CART_QUOTE_SIGNING_SECRET with `wrangler secret`; never place it in this file.
   "vars": {
     "LOCAL_PRODUCTION_FILES": "true",
-    "SHOPIFY_STORE_CONFIG_JSON": "{}",
-    "CART_QUOTE_RATE_LIMIT_PER_MINUTE": "10"
+    "SHOPIFY_STORE_CONFIG_JSON": "{}"
   },
   "assets": {
     "directory": "./dist"

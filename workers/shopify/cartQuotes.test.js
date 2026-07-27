@@ -38,8 +38,12 @@ function runtime(overrides = {}) {
       put: vi.fn(async (key, value, options) => records.set(key, { value, options })),
     },
     CART_QUOTE_RATE_LIMIT: {
-      get: vi.fn(async (key) => limits.get(key) ?? null),
-      put: vi.fn(async (key, value) => limits.set(key, value)),
+      limit: vi.fn(async ({ key }) => {
+        const count = limits.get(key) ?? 0;
+        if (count >= 10) return { success: false };
+        limits.set(key, count + 1);
+        return { success: true };
+      }),
     },
     CART_QUOTE_SIGNING_SECRET: SECRET,
     SHOPIFY_STORE_CONFIG_JSON: JSON.stringify({ [SHOP]: storeConfig() }),
@@ -76,7 +80,11 @@ describe('createCartQuotesHandler', () => {
       material: 'player',
       lighting: 'name-number',
       extras: { sleeveBadge: true, giftBox: false, matchPatch: true },
-      overrides: { ...state().overrides, customTextItems: [{ text: 'CAPTAIN' }, { text: '  ' }] },
+      overrides: {
+        ...state().overrides,
+        customTextItems: [{ text: 'CAPTAIN' }, { text: '  ' }],
+        bottomPattern: { enabled: true },
+      },
     });
     const bytes = [new Uint8Array(24).fill(1), new Uint8Array(24).fill(2)];
     const handler = createCartQuotesHandler(env, {
@@ -90,6 +98,7 @@ describe('createCartQuotesHandler', () => {
       productionFiles: {
         bundleFilename: 'jersey-production.zip',
         designFilename: 'jersey-design.json',
+        atlasFilename: 'jersey-atlas.png',
         atlasSha256: `sha256:${'a'.repeat(64)}`,
       },
     })));
@@ -101,7 +110,8 @@ describe('createCartQuotesHandler', () => {
       designId: expect.stringMatching(/^dsg_[A-Za-z0-9_-]{32}$/),
       expiresAt: NOW + CART_QUOTE_TTL_SECONDS * 1000,
     });
-    const url = new URL(payload.url);
+    expect(Object.keys(payload).sort()).toEqual(['bundleId', 'designId', 'expiresAt', 'handoffUrl']);
+    const url = new URL(payload.handoffUrl);
     expect(url.origin).toBe(`https://${SHOP}`);
     expect(url.pathname).toBe('/apps/jersey-configurator/cart-handoff');
 
@@ -122,7 +132,25 @@ describe('createCartQuotesHandler', () => {
       ],
       quote: { total: 165, currency: 'USD' },
       normalizedState: { layout: 'xl', material: 'player' },
-      productionFiles: { bundleFilename: 'jersey-production.zip' },
+      productionFiles: {
+        bundleFilename: 'jersey-production.zip',
+        designFilename: 'jersey-design.json',
+        atlasFilename: 'jersey-atlas.png',
+      },
+    });
+    expect(record.summary).toMatchObject({
+      Size: 'xl',
+      Template: 'solid',
+      Colors: expect.any(String),
+      Print: 'PLAYER #16',
+      'Custom Text': 'CAPTAIN',
+      Extras: 'sleeveBadge, matchPatch',
+      Artwork: '',
+      'Production Files': 'Local ZIP download',
+      'Bundle File': 'jersey-production.zip',
+      'Design File': 'jersey-design.json',
+      'Atlas File': 'jersey-atlas.png',
+      'UV Atlas SHA-256': `sha256:${'a'.repeat(64)}`,
     });
     expect(record.shopFingerprint).toMatch(/^shop_[A-Za-z0-9_-]{12}$/);
     await expect(verifyQuoteContract(url.searchParams.get('token'), record.components, SECRET, {
@@ -194,6 +222,19 @@ describe('createCartQuotesHandler', () => {
     expect(response.status).toBe(503);
   });
 
+  it('maps malformed fulfillment summary fields to 400 without storing a record', async () => {
+    const { env } = runtime();
+    const invalid = state({
+      overrides: {
+        ...state().overrides,
+        appearance: { template: 'forged-template', colors: {} },
+      },
+    });
+    const response = await createCartQuotesHandler(env)(post(validBody({ state: invalid })));
+    expect(response.status).toBe(400);
+    expect(env.DESIGN_QUOTES.put).not.toHaveBeenCalled();
+  });
+
   it('enforces method, media type, JSON syntax, object shape, and body byte limits', async () => {
     const { env } = runtime();
     const handler = createCartQuotesHandler(env);
@@ -225,6 +266,7 @@ describe('createCartQuotesHandler', () => {
     const valid = {
       bundleFilename: 'bundle_01.zip',
       designFilename: 'design-01.json',
+      atlasFilename: 'atlas-01.png',
       atlasSha256: `sha256:${'F'.repeat(64)}`,
     };
     for (const productionFiles of [null, valid]) {
@@ -234,6 +276,7 @@ describe('createCartQuotesHandler', () => {
     for (const productionFiles of [
       { ...valid, bundleFilename: '../bundle.zip' },
       { ...valid, designFilename: 'dir/design.json' },
+      { ...valid, atlasFilename: '..\\atlas.png' },
       { ...valid, extra: 'field' },
       { ...valid, bundleFilename: `${'a'.repeat(125)}.zip` },
       { ...valid, atlasSha256: 'sha256:abc123' },
@@ -264,21 +307,20 @@ describe('createCartQuotesHandler', () => {
     expect((await createCartQuotesHandler(env)(post(validBody()))).status).toBe(503);
   });
 
-  it('returns 503 for rate-limit reads/writes and design storage failures', async () => {
+  it('returns 503 for rate-limit and design storage failures', async () => {
     for (const override of [
-      { CART_QUOTE_RATE_LIMIT: { get: vi.fn(async () => { throw new Error('read failed'); }), put: vi.fn() } },
-      { CART_QUOTE_RATE_LIMIT: { get: vi.fn(async () => null), put: vi.fn(async () => { throw new Error('write failed'); }) } },
+      { CART_QUOTE_RATE_LIMIT: { limit: vi.fn(async () => { throw new Error('limit failed'); }) } },
       { DESIGN_QUOTES: { put: vi.fn(async () => { throw new Error('storage failed'); }) } },
     ]) {
       const { env } = runtime(override);
       const response = await createCartQuotesHandler(env)(post(validBody()));
       expect(response.status).toBe(503);
       const payload = await json(response);
-      expect(JSON.stringify(payload)).not.toMatch(/read failed|write failed|storage failed/);
+      expect(JSON.stringify(payload)).not.toMatch(/limit failed|storage failed/);
     }
   });
 
-  it('allows ten requests per UTC minute, rejects the eleventh, and hashes the client IP in KV keys', async () => {
+  it('allows ten requests per UTC minute, rejects the eleventh, and hashes the client IP in rate keys', async () => {
     const { env } = runtime();
     const handler = createCartQuotesHandler(env, {
       now: () => NOW,
@@ -288,11 +330,25 @@ describe('createCartQuotesHandler', () => {
       expect((await handler(post(validBody()))).status).toBe(201);
     }
     expect((await handler(post(validBody()))).status).toBe(429);
-    const keys = env.CART_QUOTE_RATE_LIMIT.get.mock.calls.map(([key]) => key);
+    const keys = env.CART_QUOTE_RATE_LIMIT.limit.mock.calls.map(([{ key }]) => key);
     expect(keys).toHaveLength(11);
     expect(new Set(keys).size).toBe(1);
     expect(keys[0]).not.toContain('203.0.113.42');
     expect(keys[0]).toContain(String(Math.floor(NOW / 60000)));
+  });
+
+  it('atomically admits at most ten of twenty concurrent requests', async () => {
+    const { env } = runtime();
+    const handler = createCartQuotesHandler(env, {
+      now: () => NOW,
+      randomBytes: () => crypto.getRandomValues(new Uint8Array(24)),
+    });
+    const responses = await Promise.all(
+      Array.from({ length: 20 }, () => handler(post(validBody()))),
+    );
+    expect(responses.filter(({ status }) => status === 201)).toHaveLength(10);
+    expect(responses.filter(({ status }) => status === 429)).toHaveLength(10);
+    expect(env.DESIGN_QUOTES.put).toHaveBeenCalledTimes(10);
   });
 
   it('uses a distinct anonymous rate-limit bucket and creates distinct URL-safe IDs', async () => {

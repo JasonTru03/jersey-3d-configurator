@@ -1,4 +1,5 @@
 import { calculateTrustedComponents } from './quotePricing.js';
+import { createDesignSummary } from './designSummary.js';
 import {
   QUOTE_SCHEMA_VERSION,
   createShopFingerprint,
@@ -8,7 +9,6 @@ import {
 export const CART_QUOTE_TTL_SECONDS = 7 * 24 * 60 * 60;
 export const DESIGN_RECORD_TTL_SECONDS = 180 * 24 * 60 * 60;
 export const MAX_CART_QUOTE_BODY_BYTES = 256000;
-export const DEFAULT_RATE_LIMIT_PER_MINUTE = 10;
 
 const SHOP_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
 const SAFE_FILENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
@@ -43,7 +43,7 @@ export function createCartQuotesHandler(env, dependencies = {}) {
       if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) {
         throw new ServiceError('Quote clock is unavailable.');
       }
-      await consumeRateLimit(bindings.rateLimit, request, issuedAt, bindings.rateLimitPerMinute);
+      await consumeRateLimit(bindings.rateLimit, request, issuedAt);
 
       let priced;
       try {
@@ -100,6 +100,17 @@ export function createCartQuotesHandler(env, dependencies = {}) {
         throw new ServiceError('Quote signing dependency is unavailable.');
       }
 
+      let summary;
+      try {
+        summary = createDesignSummary({
+          state: body.state,
+          normalizedState: priced.normalizedState,
+          productionFiles,
+        });
+      } catch {
+        throw new ClientError('Design fulfillment summary is invalid.');
+      }
+
       const record = {
         version: QUOTE_SCHEMA_VERSION,
         designId,
@@ -112,6 +123,7 @@ export function createCartQuotesHandler(env, dependencies = {}) {
         quote: priced.quote,
         normalizedState: priced.normalizedState,
         productionFiles,
+        summary,
       };
       try {
         await bindings.designQuotes.put(designId, JSON.stringify(record), {
@@ -121,9 +133,14 @@ export function createCartQuotesHandler(env, dependencies = {}) {
         throw new ServiceError('Design quote storage is unavailable.');
       }
 
-      const url = new URL(`https://${shop}/apps/jersey-configurator/cart-handoff`);
-      url.searchParams.set('token', token);
-      return jsonResponse(201, { url: url.toString(), designId, bundleId, expiresAt });
+      const handoffUrl = new URL(`https://${shop}/apps/jersey-configurator/cart-handoff`);
+      handoffUrl.searchParams.set('token', token);
+      return jsonResponse(201, {
+        handoffUrl: handoffUrl.toString(),
+        designId,
+        bundleId,
+        expiresAt,
+      });
     } catch (error) {
       if (error instanceof ClientError) return errorResponse(400, error.message);
       if (error instanceof RateLimitError) return errorResponse(429, 'Rate limit exceeded.');
@@ -156,8 +173,7 @@ function validateBindings(env) {
   }
   if (
     !env.CART_QUOTE_RATE_LIMIT
-    || typeof env.CART_QUOTE_RATE_LIMIT.get !== 'function'
-    || typeof env.CART_QUOTE_RATE_LIMIT.put !== 'function'
+    || typeof env.CART_QUOTE_RATE_LIMIT.limit !== 'function'
   ) {
     throw new ServiceError('Rate-limit storage binding is missing.');
   }
@@ -175,19 +191,7 @@ function validateBindings(env) {
     rateLimit: env.CART_QUOTE_RATE_LIMIT,
     signingSecret: env.CART_QUOTE_SIGNING_SECRET,
     storeConfigJson: env.SHOPIFY_STORE_CONFIG_JSON,
-    rateLimitPerMinute: parseRateLimit(env.CART_QUOTE_RATE_LIMIT_PER_MINUTE),
   };
-}
-
-function parseRateLimit(value) {
-  if (value === undefined) return DEFAULT_RATE_LIMIT_PER_MINUTE;
-  const normalized = typeof value === 'string' && /^[1-9][0-9]*$/u.test(value)
-    ? Number(value)
-    : value;
-  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
-    throw new ServiceError('Rate-limit configuration is invalid.');
-  }
-  return normalized;
 }
 
 function parseStoreConfigs(serialized) {
@@ -282,10 +286,10 @@ function normalizeProductionFiles(value) {
   if (value === null) return null;
   const files = snapshotExactObject(
     value,
-    ['bundleFilename', 'designFilename', 'atlasSha256'],
+    ['bundleFilename', 'designFilename', 'atlasFilename', 'atlasSha256'],
     'productionFiles',
   );
-  for (const key of ['bundleFilename', 'designFilename']) {
+  for (const key of ['bundleFilename', 'designFilename', 'atlasFilename']) {
     if (
       typeof files[key] !== 'string'
       || files[key].length === 0
@@ -303,7 +307,7 @@ function normalizeProductionFiles(value) {
   return files;
 }
 
-async function consumeRateLimit(kv, request, issuedAt, limit) {
+async function consumeRateLimit(rateLimiter, request, issuedAt) {
   const minute = Math.floor(issuedAt / 60000);
   const connectingIp = request.headers.get('CF-Connecting-IP');
   const client = connectingIp ? `ip:${connectingIp}` : 'anonymous';
@@ -314,28 +318,16 @@ async function consumeRateLimit(kv, request, issuedAt, limit) {
     throw new ServiceError('Rate-limit hashing is unavailable.');
   }
   const key = `cart-quote:${minute}:${encodeBase64Url(digest).slice(0, 32)}`;
-  let stored;
+  let result;
   try {
-    stored = await kv.get(key);
+    result = await rateLimiter.limit({ key });
   } catch {
-    throw new ServiceError('Rate-limit storage is unavailable.');
+    throw new ServiceError('Rate-limit service is unavailable.');
   }
-  let count = 0;
-  if (stored !== null) {
-    if (typeof stored !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(stored)) {
-      throw new ServiceError('Rate-limit storage contains invalid data.');
-    }
-    count = Number(stored);
-    if (!Number.isSafeInteger(count)) {
-      throw new ServiceError('Rate-limit storage contains invalid data.');
-    }
+  if (!result || typeof result.success !== 'boolean') {
+    throw new ServiceError('Rate-limit service returned invalid data.');
   }
-  if (count >= limit) throw new RateLimitError();
-  try {
-    await kv.put(key, String(count + 1), { expirationTtl: 120 });
-  } catch {
-    throw new ServiceError('Rate-limit storage is unavailable.');
-  }
+  if (!result.success) throw new RateLimitError();
 }
 
 class RateLimitError extends Error {}

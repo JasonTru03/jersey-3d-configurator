@@ -2,7 +2,7 @@ import { createWorkerHandler } from './router.js';
 
 const handlersByEnv = new WeakMap();
 
-function getWorkerHandler(env) {
+export function getWorkerHandler(env) {
   let handler = handlersByEnv.get(env);
   if (!handler) {
     handler = createWorkerHandler(env);

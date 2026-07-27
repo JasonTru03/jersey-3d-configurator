@@ -24,13 +24,13 @@ function createInjectedRouter(overrides = {}) {
 
 describe('Worker router', () => {
   it.each([
-    ['/api/cart-quotes', 'cartQuotes'],
-    ['/apps/jersey-configurator/cart-handoff', 'appProxy'],
-    ['/api/design-assets/config', 'designAssets'],
-    ['/storefront.js', 'designAssets'],
-  ])('routes exact pathname %s to %s', async (pathname, expectedHandler) => {
+    ['POST', '/api/cart-quotes', 'cartQuotes'],
+    ['GET', '/apps/jersey-configurator/cart-handoff', 'appProxy'],
+    ['GET', '/api/design-assets/config', 'designAssets'],
+    ['GET', '/storefront.js', 'designAssets'],
+  ])('routes %s %s to %s', async (method, pathname, expectedHandler) => {
     const runtime = createInjectedRouter();
-    const request = new Request(`https://example.workers.dev${pathname}`);
+    const request = new Request(`https://example.workers.dev${pathname}`, { method });
 
     await runtime.handler(request);
 
@@ -41,23 +41,27 @@ describe('Worker router', () => {
   it('ignores the query string while matching secure routes', async () => {
     const runtime = createInjectedRouter();
 
-    await runtime.handler(new Request('https://example.workers.dev/api/cart-quotes?shop=test'));
+    await runtime.handler(new Request('https://example.workers.dev/api/cart-quotes?shop=test', { method: 'POST' }));
     await runtime.handler(new Request('https://example.workers.dev/apps/jersey-configurator/cart-handoff?signature=abc'));
 
     expect(runtime.handlers.cartQuotes).toHaveBeenCalledOnce();
     expect(runtime.handlers.appProxy).toHaveBeenCalledOnce();
   });
 
-  it('passes every method to the matched secure handler', async () => {
+  it.each([
+    ['GET', '/api/cart-quotes'],
+    ['DELETE', '/api/cart-quotes'],
+    ['POST', '/apps/jersey-configurator/cart-handoff'],
+    ['PUT', '/apps/jersey-configurator/cart-handoff'],
+  ])('falls back for unmatched method %s %s', async (method, pathname) => {
     const runtime = createInjectedRouter();
-    const cartRequest = new Request('https://example.workers.dev/api/cart-quotes', { method: 'DELETE' });
-    const proxyRequest = new Request('https://example.workers.dev/apps/jersey-configurator/cart-handoff', { method: 'POST' });
+    const request = new Request(`https://example.workers.dev${pathname}`, { method });
 
-    await runtime.handler(cartRequest);
-    await runtime.handler(proxyRequest);
+    await runtime.handler(request);
 
-    expect(runtime.handlers.cartQuotes).toHaveBeenCalledWith(cartRequest);
-    expect(runtime.handlers.appProxy).toHaveBeenCalledWith(proxyRequest);
+    expect(runtime.handlers.designAssets).toHaveBeenCalledWith(request);
+    expect(runtime.handlers.cartQuotes).not.toHaveBeenCalled();
+    expect(runtime.handlers.appProxy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -79,8 +83,8 @@ describe('Worker router', () => {
   it('initializes each factory once per created router and passes the same env', async () => {
     const runtime = createInjectedRouter();
 
-    await runtime.handler(new Request('https://example.workers.dev/api/cart-quotes'));
-    await runtime.handler(new Request('https://example.workers.dev/api/cart-quotes'));
+    await runtime.handler(new Request('https://example.workers.dev/api/cart-quotes', { method: 'POST' }));
+    await runtime.handler(new Request('https://example.workers.dev/api/cart-quotes', { method: 'POST' }));
     await runtime.handler(new Request('https://example.workers.dev/'));
 
     for (const factory of Object.values(runtime.factories)) {
@@ -99,7 +103,7 @@ describe('Worker router', () => {
       designAssetsHandler,
     });
 
-    await handler(new Request('https://example.workers.dev/api/cart-quotes'));
+    await handler(new Request('https://example.workers.dev/api/cart-quotes', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/apps/jersey-configurator/cart-handoff'));
     await handler(new Request('https://example.workers.dev/'));
 
@@ -116,7 +120,7 @@ describe('Worker router', () => {
     const promiseRouter = createInjectedRouter({ appProxy: vi.fn(() => promise) });
     const errorRouter = createInjectedRouter({ designAssets: vi.fn(() => { throw error; }) });
 
-    expect(responseRouter.handler(new Request('https://example.workers.dev/api/cart-quotes'))).toBe(response);
+    expect(responseRouter.handler(new Request('https://example.workers.dev/api/cart-quotes', { method: 'POST' }))).toBe(response);
     expect(promiseRouter.handler(new Request('https://example.workers.dev/apps/jersey-configurator/cart-handoff'))).toBe(promise);
     expect(() => errorRouter.handler(new Request('https://example.workers.dev/'))).toThrow(error);
   });

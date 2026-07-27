@@ -1,5 +1,6 @@
 {% liquid
   assign product_resource = closest.product | default: product
+  assign initial_variant = product_resource.selected_or_first_available_variant
 %}
 
 {% if product_resource and block.settings.enabled %}
@@ -10,42 +11,53 @@
       {% endfor %}
     }
   {% endcapture %}
+  {% capture configurator_url %}https://jersey-3d-configurator.jason1064969838.workers.dev/?shop={{ shop.permanent_domain | url_encode }}&productHandle={{ product_resource.handle | url_encode }}&variantId={{ initial_variant.id }}&variantMap={{ variant_map | strip | url_encode }}&returnPath={{ routes.cart_url | url_encode }}{% endcapture %}
 
   <div
     id="product-3d-configurator-launch-{{ block.id }}"
     class="product-3d-configurator-block"
     data-product-3d-configurator-block
+    data-initial-variant-id="{{ initial_variant.id }}"
     data-variant-map="{{ variant_map | strip | escape }}"
     data-shop="{{ shop.permanent_domain | escape }}"
     data-product-handle="{{ product_resource.handle | escape }}"
     data-return-path="{{ routes.cart_url | escape }}"
     {{ block.shopify_attributes }}
   >
-    <button type="button" class="button" data-product-3d-configurator-button>
+    <a class="button" data-product-3d-configurator-button href="{{ configurator_url | strip | escape }}">
       {{ block.settings.button_label | escape }}
-    </button>
+    </a>
   </div>
 
   <script>
     (() => {
-      const launcher = document.getElementById('product-3d-configurator-launch-{{ block.id }}');
-      if (!launcher || launcher.dataset.ready === 'true') return;
-      launcher.dataset.ready = 'true';
+      if (document.documentElement.dataset.pc3dBlockLauncherReady === 'true') return;
+      document.documentElement.dataset.pc3dBlockLauncherReady = 'true';
 
-      const button = launcher.querySelector('[data-product-3d-configurator-button]');
-      const variantMap = JSON.parse(launcher.dataset.variantMap);
-
-      button.addEventListener('click', () => {
+      document.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-product-3d-configurator-button]');
+        const launcher = button?.closest('[data-product-3d-configurator-block]');
+        if (!launcher) return;
         const details = launcher.closest('[data-testid="product-information-details"]');
-        const productForm = details?.querySelector('form[action*="/cart/add"]')
+        const productForm = launcher.closest('form[action*="/cart/add"]')
+          || details?.querySelector('form[action*="/cart/add"]')
           || document.querySelector('form[action*="/cart/add"]');
+        const formVariantId = productForm?.elements?.id?.value;
         const selectVariantField = productForm?.querySelector('select[name="id"]');
         const checkedVariantField = productForm?.querySelector('input[name="id"]:checked');
         const hiddenVariantField = productForm?.querySelector('input[type="hidden"][name="id"]');
-        const variantId = selectVariantField?.value || checkedVariantField?.value || hiddenVariantField?.value;
+        const urlVariantId = new URL(window.location.href).searchParams.get('variant');
+        const variantId = formVariantId
+          || selectVariantField?.value
+          || checkedVariantField?.value
+          || hiddenVariantField?.value
+          || urlVariantId
+          || launcher.dataset.initialVariantId;
 
         if (!variantId) return;
 
+        event.preventDefault();
+        const variantMap = JSON.parse(launcher.dataset.variantMap);
         const workerUrl = new URL('https://jersey-3d-configurator.jason1064969838.workers.dev/');
         workerUrl.searchParams.set('shop', launcher.dataset.shop);
         workerUrl.searchParams.set('productHandle', launcher.dataset.productHandle);

@@ -1,15 +1,24 @@
 {
-  "shop": {
-    "localTime": {
-      "date": "2026-07-27"
-    }
-  },
   "cartTransform": {
     "config": {
       "jsonValue": {
         "schema": 1,
         "shopFingerprint": "shop_AAAAAAAAAAAA",
-        "signingSecret": "task8-transform-test-secret-32-bytes-minimum"
+        "signingSecret": "task8-transform-test-secret-32-bytes-minimum",
+        "productId": "fn8788-jersey",
+        "currency": "USD",
+        "jerseyVariants": {
+          "s": "111",
+          "m": "333",
+          "l": "555",
+          "xl": "777"
+        },
+        "surchargeVariants": {
+          "8": "222",
+          "10": "444",
+          "12": "666",
+          "16": "888"
+        }
       }
     }
   },
@@ -36,7 +45,39 @@
         "merchandise": {
           "__typename": "ProductVariant",
           "id": "gid://shopify/ProductVariant/111"
-        }
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "99.00",
+            "currencyCode": "USD"
+          }
+        },
+        "sizeSummary": {
+          "value": "s"
+        },
+        "templateSummary": {
+          "value": "blank"
+        },
+        "colorsSummary": {
+          "value": "{}"
+        },
+        "printSummary": {
+          "value": ""
+        },
+        "customTextSummary": {
+          "value": ""
+        },
+        "extrasSummary": {
+          "value": ""
+        },
+        "artworkSummary": {
+          "value": ""
+        },
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
       },
       {
         "id": "gid://shopify/CartLine/surcharge1",
@@ -59,7 +100,25 @@
         "merchandise": {
           "__typename": "ProductVariant",
           "id": "gid://shopify/ProductVariant/222"
-        }
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "8.00",
+            "currencyCode": "USD"
+          }
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
       }
     ]
   }

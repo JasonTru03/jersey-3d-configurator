@@ -73,11 +73,21 @@
         "artworkSummary": {
           "value": ""
         },
-        "productionFilesSummary": null,
-        "bundleFileSummary": null,
-        "designFileSummary": null,
-        "atlasFileSummary": null,
-        "atlasSha256Summary": null
+        "productionFilesSummary": {
+          "value": "Local ZIP download"
+        },
+        "bundleFileSummary": {
+          "value": "fn8788-jersey-production.zip"
+        },
+        "designFileSummary": {
+          "value": "fn8788-jersey-design.json"
+        },
+        "atlasFileSummary": {
+          "value": "fn8788-jersey-uv-atlas.png"
+        },
+        "atlasSha256Summary": {
+          "value": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
       },
       {
         "id": "gid://shopify/CartLine/surcharge1",
@@ -86,7 +96,7 @@
           "value": "bun_AAAAAAAAAAAAAAAA"
         },
         "quote": {
-          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.pW5qg7HHt6R7bOYj1ucH77958blOgiY5vZLAaI7SMFA"
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.pW5qg7HHt6R7bOYj1ucH77958blOgiY5vZLAaI7SMFo"
         },
         "component": {
           "value": "surcharge"
@@ -107,18 +117,30 @@
             "currencyCode": "USD"
           }
         },
-        "sizeSummary": null,
+        "sizeSummary": {
+          "value": "xl"
+        },
         "templateSummary": null,
         "colorsSummary": null,
         "printSummary": null,
         "customTextSummary": null,
         "extrasSummary": null,
         "artworkSummary": null,
-        "productionFilesSummary": null,
-        "bundleFileSummary": null,
-        "designFileSummary": null,
-        "atlasFileSummary": null,
-        "atlasSha256Summary": null
+        "productionFilesSummary": {
+          "value": "tampered"
+        },
+        "bundleFileSummary": {
+          "value": "evil.zip"
+        },
+        "designFileSummary": {
+          "value": "evil.json"
+        },
+        "atlasFileSummary": {
+          "value": "evil.png"
+        },
+        "atlasSha256Summary": {
+          "value": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
       }
     ]
   }

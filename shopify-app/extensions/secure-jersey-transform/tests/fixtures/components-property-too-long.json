@@ -1,0 +1,504 @@
+{
+  "cartTransform": {
+    "config": {
+      "jsonValue": {
+        "schema": 1,
+        "shopFingerprint": "shop_5DHRxuwnMgPX",
+        "signingSecret": "task8-transform-test-secret-32-bytes-minimum",
+        "productId": "fn8788-jersey",
+        "currency": "USD",
+        "jerseyVariants": {
+          "s": "111",
+          "m": "333",
+          "l": "555",
+          "xl": "777"
+        },
+        "surchargeVariants": {
+          "8": "222",
+          "10": "444",
+          "12": "666",
+          "16": "888",
+          "30": "1000000000000000000",
+          "31": "1000000000000000001",
+          "32": "1000000000000000002",
+          "33": "1000000000000000003",
+          "34": "1000000000000000004",
+          "35": "1000000000000000005",
+          "36": "1000000000000000006",
+          "37": "1000000000000000007",
+          "38": "1000000000000000008",
+          "39": "1000000000000000009"
+        }
+      }
+    }
+  },
+  "cart": {
+    "lines": [
+      {
+        "id": "gid://shopify/CartLine/longbase",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "base"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "99.00",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/111"
+        },
+        "sizeSummary": {
+          "value": "s"
+        },
+        "templateSummary": {
+          "value": "blank"
+        },
+        "colorsSummary": {
+          "value": "{}"
+        },
+        "printSummary": {
+          "value": ""
+        },
+        "customTextSummary": {
+          "value": ""
+        },
+        "extrasSummary": {
+          "value": ""
+        },
+        "artworkSummary": {
+          "value": ""
+        },
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long0",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000000"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long1",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000001"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long2",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000002"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long3",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000003"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long4",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000004"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long5",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000005"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long6",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000006"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long7",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000007"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long8",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000008"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/long9",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_FFFFFFFFFFFFFFFF"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0ZGRkZGRkZGRkZGRkZGRkYiLCJkc2dfRkZGRkZGRkZGRkZGRkZGRiIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.j7E4BB-h4nWIo0xc8XO7E9SO72FmNEuV_U53cIcI8xk"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_FFFFFFFFFFFFFFFF"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/1000000000000000009"
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      }
+    ]
+  }
+}

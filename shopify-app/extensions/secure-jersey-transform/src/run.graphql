@@ -8,11 +8,29 @@ query Input {
     lines {
       id
       quantity
+      cost {
+        totalAmount {
+          amount
+          currencyCode
+        }
+      }
       bundleId: attribute(key: "_jersey_bundle_id") { value }
       quote: attribute(key: "_jersey_quote") { value }
       component: attribute(key: "_jersey_component") { value }
       designId: attribute(key: "_jersey_design_id") { value }
       schemaVersion: attribute(key: "_jersey_schema") { value }
+      sizeSummary: attribute(key: "Size") { value }
+      templateSummary: attribute(key: "Template") { value }
+      colorsSummary: attribute(key: "Colors") { value }
+      printSummary: attribute(key: "Print") { value }
+      customTextSummary: attribute(key: "Custom Text") { value }
+      extrasSummary: attribute(key: "Extras") { value }
+      artworkSummary: attribute(key: "Artwork") { value }
+      productionFilesSummary: attribute(key: "Production Files") { value }
+      bundleFileSummary: attribute(key: "Bundle File") { value }
+      designFileSummary: attribute(key: "Design File") { value }
+      atlasFileSummary: attribute(key: "Atlas File") { value }
+      atlasSha256Summary: attribute(key: "UV Atlas SHA-256") { value }
       merchandise {
         __typename
         ... on ProductVariant { id }

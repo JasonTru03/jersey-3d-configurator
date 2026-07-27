@@ -8,7 +8,7 @@
         "productId": "fn8788-jersey",
         "currency": "USD",
         "jerseyVariants": {
-          "s": "111",
+          "s": "0111",
           "m": "333",
           "l": "555",
           "xl": "777"
@@ -73,6 +73,47 @@
         "artworkSummary": {
           "value": ""
         },
+        "productionFilesSummary": null,
+        "bundleFileSummary": null,
+        "designFileSummary": null,
+        "atlasFileSummary": null,
+        "atlasSha256Summary": null
+      },
+      {
+        "id": "gid://shopify/CartLine/surcharge1",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_AAAAAAAAAAAAAAAA"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.pW5qg7HHt6R7bOYj1ucH77958blOgiY5vZLAaI7SMFo"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_AAAAAAAAAAAAAAAA"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/222"
+        },
+        "cost": {
+          "totalAmount": {
+            "amount": "8.00",
+            "currencyCode": "USD"
+          }
+        },
+        "sizeSummary": null,
+        "templateSummary": null,
+        "colorsSummary": null,
+        "printSummary": null,
+        "customTextSummary": null,
+        "extrasSummary": null,
+        "artworkSummary": null,
         "productionFilesSummary": null,
         "bundleFileSummary": null,
         "designFileSummary": null,

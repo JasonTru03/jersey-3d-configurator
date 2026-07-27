@@ -9,6 +9,9 @@ Shared test configuration:
 - shop fingerprint: `shop_5DHRxuwnMgPX`
 - signing secret: `task8-transform-test-secret-32-bytes-minimum`
 - schema: `1`
+- product ID: `fn8788-jersey`
+- currency: `USD`
+- complete jersey and surcharge variant maps
 
 `valid-two-component.json` therefore acts as the cross-language compatibility
 fixture for the exact header encoding, component ordering, compact JSON, and
@@ -20,3 +23,19 @@ before these lines enter Shopify. Cart Transform validates the signed
 `issuedAt < expiresAt` structure but deliberately does not invalidate an
 already-admitted cart as time passes. `same-day-short-lived.json` protects that
 boundary.
+
+The merged parent adds `_jersey_components`, the same canonical compact
+component JSON covered by the token HMAC. Validation can therefore rebuild the
+signature from a merged line without trusting browser-supplied component text.
+Its encoded value is capped at 255 bytes.
+
+`Size`, `Template`, `Colors`, `Print`, `Custom Text`, `Extras`, and `Artwork`
+(plus the all-or-none production-file fields) are copied only from the base
+component. They remain buyer-facing display data and are not part of the HMAC.
+Fulfillment must ignore those strings and resolve the trusted Worker design
+record by the signed `designId`.
+
+The transform accepts only the configured currency and compares the
+fixed-point sum of Shopify line totals with the signed `totalMinor`. It also
+caps cart lines, bundle groups, components per group, output operations, and
+attribute byte lengths before allocating merge output.

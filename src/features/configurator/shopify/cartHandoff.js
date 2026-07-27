@@ -1,11 +1,4 @@
-import {
-  getBillableCustomTextItems,
-  getCustomTextItems,
-} from '../config/customTextItems.js';
-import { getPrintItems } from '../config/printItems.js';
-
-const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
-const EXPIRED_PRICING_MESSAGE = 'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.';
+const SHOP_DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
 export const MAX_SURCHARGE_TOTAL = 10000;
 const PREFERENCE_BASE = BigInt(MAX_SURCHARGE_TOTAL + 1);
 
@@ -31,47 +24,6 @@ export function parseShopifyLaunch(search) {
     variantMap,
     initialLayout: Object.entries(variantMap).find(([, mappedVariantId]) => mappedVariantId === variantId)?.[0],
   };
-}
-
-export function createCartUrl({ context, quote, state, productionFiles }) {
-  const shop = normalizeShop(context?.shop);
-  if (!shop) throw new Error('Invalid Shopify shop host.');
-
-  const variantId = context?.variantMap?.[state?.layout];
-
-  if (!isNumericId(variantId)) {
-    throw new Error('No Shopify variant exists for the selected size.');
-  }
-
-  const customizationTotal = quote?.customizationTotal;
-  if (!Number.isSafeInteger(customizationTotal) || customizationTotal < 0) {
-    throw new Error('Invalid configurator quote.');
-  }
-
-  const cartItems = [`${variantId}:1`];
-  if (customizationTotal > 0) {
-    const surchargeItems = findSurchargeCombination(
-      context?.surchargeVariantMap,
-      customizationTotal,
-    );
-    if (!surchargeItems) {
-      throw new Error(EXPIRED_PRICING_MESSAGE);
-    }
-    if (surchargeItems.some((item) => item.variantId === String(variantId))) {
-      throw new Error(EXPIRED_PRICING_MESSAGE);
-    }
-    surchargeItems.forEach(({ variantId: surchargeVariantId, quantity }) => {
-      cartItems.push(`${surchargeVariantId}:${quantity}`);
-    });
-  }
-
-  const properties = createProperties(state, productionFiles);
-  const query = new URLSearchParams({
-    properties: encodeBase64Url(JSON.stringify(properties)),
-    storefront: 'true',
-  });
-
-  return `https://${shop}/cart/${cartItems.join(',')}?${query}`;
 }
 
 export function findSurchargeCombination(variantMap, target) {
@@ -174,36 +126,6 @@ function parseVariantMap(rawVariantMap) {
   } catch {
     return null;
   }
-}
-
-function createProperties(state, productionFiles) {
-  const appearance = state?.overrides?.appearance ?? {};
-  const hasPlayerSet = state?.lighting === 'name-number' || state?.lighting === 'raised-print';
-  const player = hasPlayerSet ? getPrintItems(state?.overrides)[0] : null;
-  const print = player && (player.name || player.number)
-    ? `${player.name ?? ''}${player.number ? ` #${player.number}` : ''}`.trim()
-    : '';
-  const customText = getBillableCustomTextItems(
-    getCustomTextItems(state?.overrides),
-  ).map((item) => item.text.trim()).join(' | ');
-  const properties = {
-    Size: state?.layout ?? '',
-    Template: appearance.template ?? '',
-    Colors: JSON.stringify(appearance.colors ?? {}),
-    Print: print,
-    'Custom Text': customText,
-    Extras: Object.entries(state?.extras ?? {}).filter(([, enabled]) => enabled).map(([id]) => id).join(', '),
-    Artwork: (state?.overrides?.decorations ?? []).map((item) => item.name ?? item.id).join(', '),
-  };
-  if (!state?.overrides?.bottomPattern?.enabled) return properties;
-  if (!productionFiles?.bundleFilename || !productionFiles?.designFilename || !productionFiles?.atlasSha256) throw new Error('Local production files are not ready.');
-  return {
-    ...properties,
-    'Production Files': 'Local ZIP download',
-    'Bundle File': productionFiles.bundleFilename,
-    'Design File': productionFiles.designFilename,
-    'UV Atlas SHA-256': productionFiles.atlasSha256,
-  };
 }
 
 function isNumericId(value) {
@@ -310,13 +232,4 @@ function buildSurchargeItems(state) {
 function compareSurchargeEntries(first, second) {
   if (first.amount !== second.amount) return second.amount - first.amount;
   return first.variantId.localeCompare(second.variantId, 'en', { numeric: true });
-}
-
-function encodeBase64Url(value) {
-  const bytes = new TextEncoder().encode(value);
-  let binary = '';
-
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }

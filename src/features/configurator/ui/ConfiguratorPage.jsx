@@ -26,7 +26,8 @@ import { TemplateLibrary } from './TemplateLibrary.jsx';
 import { ZoneColorPanel } from './ZoneColorPanel.jsx';
 import { BottomPatternPanel } from './BottomPatternPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
-import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
+import { parseShopifyLaunch } from '../shopify/cartHandoff.js';
+import { createSecureCartHandoff } from '../shopify/cartQuoteClient.js';
 import { hashAtlasBlob } from '../scene/bottomPatternBaker.js';
 import { createBrowserDownload } from '../designs/browserDownload.js';
 import {
@@ -71,9 +72,11 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [reviewOpen, setReviewOpen] = useState(false);
   const [fileError, setFileError] = useState('');
   const [cartError, setCartError] = useState('');
+  const [cartPending, setCartPending] = useState(false);
   const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
   const [preparedDownload, setPreparedDownload] = useState(null);
   const bakeProviderRef = useRef(null);
+  const cartPendingRef = useRef(false);
   const personalizationDeletion = usePersonalizationDeletion({
     onError: setFileError,
     onSelectionChange: setSelectedPersonalizationKey,
@@ -124,16 +127,26 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   };
 
   const handleAddToCart = async () => {
+    if (cartPendingRef.current) return;
+    cartPendingRef.current = true;
+    setCartPending(true);
     try {
       setCartError('');
       let productionFiles;
       if (shouldPrepareBottomPatternAsset(state)) {
         productionFiles = getCurrentLocalProductionFiles({ state, receipt: localProductionReceipt });
       }
-      const url = createCartUrl({ context: shopifyContext, quote, state, productionFiles });
-      navigateToCart(url);
+      const result = await createSecureCartHandoff({
+        context: shopifyContext,
+        state,
+        productionFiles,
+      });
+      navigateToCart(result.handoffUrl);
     } catch (error) {
       setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
+    } finally {
+      cartPendingRef.current = false;
+      setCartPending(false);
     }
   };
 
@@ -210,6 +223,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       </section>
       <DesignReviewDialog
         cartError={cartError}
+        cartPending={cartPending}
         onClose={() => setReviewOpen(false)}
         onAddToCart={handleAddToCart}
         onDownload={() => setLocalProductionReceipt(preparedDownload?.receipt ?? null)}

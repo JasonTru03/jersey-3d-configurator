@@ -13,7 +13,7 @@ const APPEARANCE_SUMMARY_ROWS = [
   ['number', 'Name and number'],
 ];
 
-export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
+export function DesignReviewDialog({ cartError, cartPending = false, onAddToCart, onClose, onDownload, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -140,7 +140,15 @@ export function DesignReviewDialog({ cartError, onAddToCart, onClose, onDownload
               {preparedDownload.label}
             </a>
           )}
-          <button className="primary-button" disabled={!shopifyContext} onClick={() => onAddToCart?.()} type="button">Add to Shopify cart</button>
+          <button
+            aria-busy={cartPending}
+            className="primary-button"
+            disabled={cartPending || !shopifyContext}
+            onClick={() => onAddToCart?.()}
+            type="button"
+          >
+            {cartPending ? 'Preparing secure cart…' : 'Add to Shopify cart'}
+          </button>
         </div>
       </section>
     </div>

@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useConfigurator } from './useConfigurator.js';
-import { createCartUrl, parseShopifyLaunch } from '../shopify/cartHandoff.js';
+import { parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import { productApi } from '../api/productApi.js';
 
 describe('useConfigurator design files', () => {
@@ -15,13 +15,7 @@ describe('useConfigurator design files', () => {
 
     expect(context?.initialLayout).toBe('xl');
     expect(result.current.state.layout).toBe('xl');
-    expect(createCartUrl({
-      context,
-      quote: result.current.quote,
-      state: result.current.state,
-      designAsset: { designId: 'dsg_test', url: 'https://TARGET/atlas.png', sha256: 'abc', version: 2 },
-    }))
-      .toContain('/cart/48039101989015:1');
+    expect(context.variantMap[result.current.state.layout]).toBe('48039101989015');
   });
 
   it('exposes normalized appearance in selected options for the garment renderer', async () => {

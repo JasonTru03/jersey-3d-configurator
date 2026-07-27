@@ -99,6 +99,7 @@ beforeEach(() => {
   URL.createObjectURL.mockClear();
   URL.revokeObjectURL.mockClear();
   window.history.replaceState(null, '', '/');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(secureCartResponse()));
 });
 
 describe('ConfiguratorPage', () => {
@@ -460,16 +461,19 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
     await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
-    expect(readCartProperties(navigateToCart.mock.calls[0][0])).toMatchObject({
-        'Production Files': 'Local ZIP download',
-        'Bundle File': 'fn8788-jersey-production.zip',
-      'Design File': 'fn8788-jersey-design.json',
-      'UV Atlas SHA-256': 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
+    expect(navigateToCart).toHaveBeenCalledWith(
+      'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=test-token',
+    );
+    expect(JSON.parse(fetch.mock.calls[0][1].body).productionFiles).toEqual({
+      atlasFilename: 'fn8788-jersey-uv-atlas.png',
+      atlasSha256: 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
+      bundleFilename: 'fn8788-jersey-production.zip',
+      designFilename: 'fn8788-jersey-design.json',
     });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('adds the jersey and exact customization surcharge for a 107-dollar quote', async () => {
+  it('requests a secure handoff without sending browser-computed pricing or variant maps', async () => {
     window.history.replaceState(
       null,
       '',
@@ -488,16 +492,26 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
     await waitFor(() => expect(navigateToCart).toHaveBeenCalledWith(
-      expect.stringContaining('/cart/48039101923479:1,49000000000018:1'),
+      'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=test-token',
     ));
+    const requestBody = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(requestBody.productionFiles).toBeNull();
+    expect(Object.keys(requestBody).sort()).toEqual(['productionFiles', 'shop', 'state']);
+    expect(JSON.stringify(requestBody)).not.toMatch(/quote|customizationTotal|variantMap|surchargeVariantMap/i);
   });
 
-  it('shows expired launch pricing in Review and does not navigate to the cart', async () => {
+  it('keeps Review open with a finite Worker error and allows a retry', async () => {
     window.history.replaceState(
       null,
       '',
       '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2210%22%3A%2249000000000010%22%7D&variantId=48039101923479',
     );
+    fetch
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: 'Pricing changed. Reopen the Shopify product page.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      ))
+      .mockResolvedValueOnce(secureCartResponse());
     const navigateToCart = vi.fn();
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
@@ -508,18 +522,25 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
-    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Pricing changed. Reopen the Shopify product page.');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
     expect(navigateToCart).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('shows expired pricing when a surcharge mapping reuses the jersey variant', async () => {
+  it('does not navigate when secure handoff response validation fails', async () => {
     window.history.replaceState(
       null,
       '',
       '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2248039101923479%22%7D&variantId=48039101923479',
     );
+    fetch.mockResolvedValueOnce(secureCartResponse({
+      handoffUrl: 'https://TARGET/apps/jersey-configurator/cart-handoff?token=stolen',
+    }));
     const navigateToCart = vi.fn();
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
@@ -530,10 +551,30 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
-    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Secure cart preparation failed.');
     expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
+  it('allows only one cart quote request while the handoff is pending', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    let resolveRequest;
+    fetch.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve; }));
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    const add = screen.getByRole('button', { name: 'Add to Shopify cart' });
+
+    fireEvent.click(add);
+    fireEvent.click(add);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+    expect(navigateToCart).not.toHaveBeenCalled();
+
+    resolveRequest(secureCartResponse());
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
   });
 
   it('blocks the cart after the saved patterned design changes', async () => {
@@ -621,8 +662,15 @@ describe('ConfiguratorPage', () => {
   });
 });
 
-function readCartProperties(url) {
-  const encoded = new URL(url).searchParams.get('properties');
-  const base64 = encoded.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(encoded.length / 4) * 4, '=');
-  return JSON.parse(atob(base64));
+function secureCartResponse(overrides = {}) {
+  return new Response(JSON.stringify({
+    handoffUrl: 'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=test-token',
+    designId: 'dsg_1234567890abcdef',
+    bundleId: 'bun_1234567890abcdef',
+    expiresAt: Date.now() + 60_000,
+    ...overrides,
+  }), {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }

@@ -100,6 +100,33 @@ describe('DesignReviewDialog', () => {
     expect(onAddToCart).toHaveBeenCalledWith();
   });
 
+  it('disables and marks the cart action busy while a secure handoff is pending', () => {
+    const props = {
+      cartPending: true,
+      onAddToCart: vi.fn(),
+      onClose: () => {},
+      onSave: () => {},
+      open: true,
+      product: { name: 'FN8788 Match Jersey', options: { templates: [] } },
+      quote: { total: 107 },
+      selected: {},
+      shopifyContext: { shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } },
+      state: { overrides: {} },
+    };
+    const { rerender } = render(<DesignReviewDialog {...props} />);
+
+    const pending = screen.getByRole('button', { name: 'Preparing secure cart…' });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(pending);
+    expect(props.onAddToCart).not.toHaveBeenCalled();
+
+    rerender(<DesignReviewDialog {...props} cartPending={false} />);
+    const ready = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    expect(ready).toBeEnabled();
+    expect(ready).toHaveAttribute('aria-busy', 'false');
+  });
+
   it('explains that bottom-pattern production uses the downloaded local files', () => {
     render(
       <DesignReviewDialog

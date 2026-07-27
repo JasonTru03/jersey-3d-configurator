@@ -1,429 +1,131 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createCartUrl,
-  findSurchargeCombination,
-  MAX_SURCHARGE_TOTAL,
-  parseShopifyLaunch,
-} from './cartHandoff.js';
+import * as cartHandoff from './cartHandoff.js';
 
-function decodeProperties(url) {
-  const encoded = new URL(url).searchParams.get('properties');
-  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-}
+const { findSurchargeCombination, MAX_SURCHARGE_TOTAL, parseShopifyLaunch } = cartHandoff;
+const VARIANT_MAP = '%7B%22s%22%3A%2248039101890711%22%2C%22xl%22%3A%2248039101989015%22%7D';
 
-describe('cart handoff', () => {
-  it('uses the selected size variant and concise order properties', () => {
-    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&productHandle=custom-3d-football-jersey&variantMap=%7B%22s%22%3A%2248039101890711%22%2C%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2268%22%3A%2249000000000068%22%7D');
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 68, merchandisePrice: 89, total: 157 },
-      state: {
-        lighting: 'raised-print',
-        layout: 's',
-        extras: {},
-        overrides: {
-          appearance: {
-            template: 'solid',
-            colors: {
-              body: '#fff',
-              sleeves: '#fff',
-              shoulderSide: '#111',
-              collar: '#111',
-              pattern: '#d8c17a',
-              number: '#111',
-            },
-          },
-          printName: 'PLAYER',
-          printNumber: '10',
-          printItems: [{ id: 'print-1', name: 'CAPTAIN', number: '9' }],
-          customTextItems: [
-            { id: 'text-1', text: '  CHELSEA FC  ' },
-            { id: 'text-2', text: '   ' },
-            { id: 'text-3', text: 'LONDON' },
-          ],
-          decorations: [],
-          bottomPattern: { enabled: true },
-        },
-      },
-      productionFiles: {
-        bundleFilename: 'fn8788-jersey-production.zip',
-        designFilename: 'fn8788-jersey-design.json',
-        atlasSha256: 'sha256:abc123',
-      },
-    });
-
-    expect(url).toContain('/cart/48039101890711:1,49000000000068:1');
-    expect(url).toContain('storefront=true');
-    expect(decodeProperties(url)).toEqual({
-      Size: 's',
-      Template: 'solid',
-      Colors: JSON.stringify({ body: '#fff', sleeves: '#fff', shoulderSide: '#111', collar: '#111', pattern: '#d8c17a', number: '#111' }),
-      Print: 'CAPTAIN #9',
-      'Custom Text': 'CHELSEA FC | LONDON',
-      Extras: '',
-      Artwork: '',
-      'Production Files': 'Local ZIP download',
-      'Bundle File': 'fn8788-jersey-production.zip',
-      'Design File': 'fn8788-jersey-design.json',
-      'UV Atlas SHA-256': 'sha256:abc123',
+describe('Shopify launch parsing', () => {
+  it('normalizes a valid launch and resolves the selected layout', () => {
+    expect(parseShopifyLaunch(
+      `?shop=TESTCSJ.MYSHOPIFY.COM&variantMap=${VARIANT_MAP}&variantId=48039101989015&productHandle=jersey`,
+    )).toEqual({
+      shop: 'testcsj.myshopify.com',
+      productHandle: 'jersey',
+      returnPath: '',
+      surchargeVariantMap: null,
+      variantId: '48039101989015',
+      variantMap: { s: '48039101890711', xl: '48039101989015' },
+      initialLayout: 'xl',
     });
   });
 
-  it('keeps the normal cart properties without requiring an asset when the bottom pattern is disabled', () => {
-    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D');
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 0, merchandisePrice: 89, total: 89 },
-      state: { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    });
-
-    expect(url).toContain('/cart/48039101890711:1?');
-    expect(decodeProperties(url)).toMatchObject({ Size: 's', Template: '', Colors: '{}', Print: '', Extras: '', Artwork: '' });
-    expect(decodeProperties(url)).not.toHaveProperty('Production Files');
+  it('rejects invalid shops and malformed required variant maps', () => {
+    expect(parseShopifyLaunch('?shop=example.com')).toBeNull();
+    expect(parseShopifyLaunch(`?shop=-bad.myshopify.com&variantMap=${VARIANT_MAP}`)).toBeNull();
+    expect(parseShopifyLaunch(`?shop=bad-.myshopify.com&variantMap=${VARIANT_MAP}`)).toBeNull();
+    expect(parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%22abc%22%7D')).toBeNull();
+    expect(parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%7D')).toBeNull();
   });
 
-  it('omits legacy player defaults when the player set is disabled', () => {
-    const context = parseShopifyLaunch(
-      '?shop=testcsj.myshopify.com'
-      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
-      + '&surchargeVariantMap=%7B%228%22%3A%2249000000000008%22%7D',
-    );
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 8, merchandisePrice: 89, total: 97 },
-      state: {
-        lighting: 'none',
-        layout: 'm',
-        extras: {},
-        overrides: {
-          printName: 'PLAYER',
-          printNumber: '16',
-          customTextItems: [{ id: 'text-1', text: 'CHELSEA FC' }],
-          bottomPattern: { enabled: false },
-        },
-      },
-    });
-
-    expect(decodeProperties(url)).toMatchObject({
-      Print: '',
-      'Custom Text': 'CHELSEA FC',
-    });
+  it('keeps a malformed optional surcharge map isolated from the valid launch', () => {
+    expect(parseShopifyLaunch(
+      `?shop=testcsj.myshopify.com&variantMap=${VARIANT_MAP}&surchargeVariantMap=%7B%2218%22%3A%22bad%22%7D`,
+    )).toMatchObject({ shop: 'testcsj.myshopify.com', surchargeVariantMap: null });
   });
 
-  it('uses the normalized legacy fallback when name-number is enabled without printItems', () => {
-    const context = parseShopifyLaunch(
-      '?shop=testcsj.myshopify.com'
-      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
-      + '&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%7D',
-    );
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 18, merchandisePrice: 89, total: 107 },
-      state: {
-        lighting: 'name-number',
-        layout: 'm',
-        extras: {},
-        overrides: {
-          printName: 'PLAYER',
-          printNumber: '16',
-          bottomPattern: { enabled: false },
-        },
-      },
-    });
-
-    expect(decodeProperties(url)).toMatchObject({ Print: 'PLAYER #16' });
+  it('accepts internal return paths and rejects external or ambiguous paths', () => {
+    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${VARIANT_MAP}&returnPath=%2Fcart%3Fx%3D1`))
+      .toMatchObject({ returnPath: '/cart?x=1' });
+    for (const returnPath of [
+      'https%3A%2F%2FTARGET%2F',
+      '%2F%2FTARGET%2F',
+      '%2F%5CTARGET%2F',
+      '%2F%0A%2F%2FTARGET%2F',
+      '%2F%0D%2F%2FTARGET%2F',
+      '%2F%09%2F%2FTARGET%2F',
+    ]) {
+      expect(parseShopifyLaunch(
+        `?shop=testcsj.myshopify.com&variantMap=${VARIANT_MAP}&returnPath=${returnPath}`,
+      )).toBeNull();
+    }
   });
 
-  it('omits legacy player fields for unknown lighting and explicit empty printItems', () => {
-    const context = parseShopifyLaunch(
-      '?shop=testcsj.myshopify.com'
-      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D',
-    );
-    const createUrl = (lighting, overrides) => createCartUrl({
-      context,
-      quote: { customizationTotal: 0, merchandisePrice: 89, total: 89 },
-      state: {
-        lighting,
-        layout: 'm',
-        extras: {},
-        overrides: {
-          printName: 'STALE',
-          printNumber: '99',
-          bottomPattern: { enabled: false },
-          ...overrides,
-        },
-      },
-    });
-
-    expect(decodeProperties(createUrl('bogus')).Print).toBe('');
-    expect(decodeProperties(createUrl('raised-print', { printItems: [] })).Print).toBe('');
+  it('does not expose credentials or direct-cart construction APIs', () => {
+    const context = parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${VARIANT_MAP}`);
+    expect(Object.keys(context).sort()).toEqual([
+      'initialLayout', 'productHandle', 'returnPath', 'shop',
+      'surchargeVariantMap', 'variantId', 'variantMap',
+    ]);
+    expect(cartHandoff).not.toHaveProperty('createCartUrl');
   });
+});
 
-  it('requires a local design filename and atlas hash for an enabled bottom pattern without uploading assets', () => {
-    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D');
-    const state = { layout: 's', extras: {}, overrides: { bottomPattern: { enabled: true } } };
-
-    expect(() => createCartUrl({ context, quote: { customizationTotal: 0, total: 89 }, state })).toThrow('Local production files are not ready.');
-  });
-
-  it('keeps one exact surcharge line when the amount is mapped', () => {
-    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%2C%2212%22%3A%2249000000000012%22%7D');
-
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 18, merchandisePrice: 89, total: 107 },
-      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    });
-
-    expect(url).toContain('/cart/48039101923479:1,49000000000018:1');
-  });
-
+describe('surcharge combinations', () => {
   it('takes the exact fast path at the supported upper boundary', () => {
     expect(findSurchargeCombination({
       1: '4900000000000001',
       [MAX_SURCHARGE_TOTAL]: '4900000000010000',
     }, MAX_SURCHARGE_TOTAL)).toEqual([
-      {
-        amount: MAX_SURCHARGE_TOTAL,
-        quantity: 1,
-        variantId: '4900000000010000',
-      },
+      { amount: MAX_SURCHARGE_TOTAL, quantity: 1, variantId: '4900000000010000' },
     ]);
   });
 
-  it('composes 62 dollars from 50 and 12 when the exact amount is absent', () => {
-    const context = parseShopifyLaunch(
-      '?shop=testcsj.myshopify.com'
-      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
-      + '&surchargeVariantMap=%7B%2250%22%3A%2249000000000050%22%2C%2212%22%3A%2249000000000012%22%2C%228%22%3A%2249000000000008%22%7D',
-    );
-
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 62, merchandisePrice: 89, total: 151 },
-      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    });
-
-    expect(url).toContain('/cart/48039101923479:1,49000000000050:1,49000000000012:1');
-  });
-
-  it('uses quantity when repeating one surcharge variant is optimal', () => {
-    const context = parseShopifyLaunch(
-      '?shop=testcsj.myshopify.com'
-      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
-      + '&surchargeVariantMap=%7B%228%22%3A%2249000000000008%22%7D',
-    );
-
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 24, merchandisePrice: 89, total: 113 },
-      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    });
-
-    expect(url).toContain('/cart/48039101923479:1,49000000000008:3');
+  it('composes exact sums and uses quantity when repetition is optimal', () => {
+    expect(findSurchargeCombination({
+      50: '4900000000000050',
+      12: '4900000000000012',
+      8: '4900000000000008',
+    }, 62)).toEqual([
+      { amount: 50, quantity: 1, variantId: '4900000000000050' },
+      { amount: 12, quantity: 1, variantId: '4900000000000012' },
+    ]);
+    expect(findSurchargeCombination({ 8: '4900000000000008' }, 24)).toEqual([
+      { amount: 8, quantity: 3, variantId: '4900000000000008' },
+    ]);
   });
 
   it('chooses the fewest units, then kinds, then larger amounts deterministically', () => {
     expect(findSurchargeCombination({
-      8: '4900000000000008',
-      7: '4900000000000007',
-      6: '4900000000000006',
-      5: '4900000000000005',
-      4: '4900000000000004',
-    }, 12)).toEqual([
-      { amount: 6, quantity: 2, variantId: '4900000000000006' },
-    ]);
-
+      8: '4900000000000008', 7: '4900000000000007', 6: '4900000000000006',
+      5: '4900000000000005', 4: '4900000000000004',
+    }, 12)).toEqual([{ amount: 6, quantity: 2, variantId: '4900000000000006' }]);
     expect(findSurchargeCombination({
-      7: '4900000000000007',
-      6: '4900000000000006',
-      4: '4900000000000004',
-      3: '4900000000000003',
+      7: '4900000000000007', 6: '4900000000000006',
+      4: '4900000000000004', 3: '4900000000000003',
     }, 10)).toEqual([
       { amount: 7, quantity: 1, variantId: '4900000000000007' },
       { amount: 3, quantity: 1, variantId: '4900000000000003' },
     ]);
   });
 
-  it('handles zero, invalid targets, and invalid map entries', () => {
+  it('handles zero and rejects invalid or unsupported targets without large allocation', () => {
     expect(findSurchargeCombination({ invalid: 'bad' }, 0)).toEqual([]);
-    expect(findSurchargeCombination({ 8: '4900000000000008' }, -1)).toBeNull();
-    expect(findSurchargeCombination({ 8: '4900000000000008' }, 1.5)).toBeNull();
-    expect(findSurchargeCombination({ 8: '4900000000000008' }, Number.MAX_SAFE_INTEGER + 1)).toBeNull();
+    for (const target of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, MAX_SURCHARGE_TOTAL + 1]) {
+      expect(findSurchargeCombination({ 8: '4900000000000008' }, target)).toBeNull();
+    }
+  });
+
+  it('ignores invalid entries and rejects one variant mapped to different amounts', () => {
     expect(findSurchargeCombination({
       0: '4900000000000000',
       '-4': '4900000000000004',
       8: 'bad',
       12: '4900000000000012',
-      13: '4900000000000013',
-      99: '4900000000000099',
-    }, 12)).toEqual([
-      { amount: 12, quantity: 1, variantId: '4900000000000012' },
-    ]);
-  });
-
-  it('rejects totals above the supported price domain without allocating by target', () => {
+    }, 12)).toEqual([{ amount: 12, quantity: 1, variantId: '4900000000000012' }]);
     expect(findSurchargeCombination({
-      [MAX_SURCHARGE_TOTAL + 1]: '4900000000010001',
-    }, MAX_SURCHARGE_TOTAL + 1)).toBeNull();
-
-    expect(() => createCartUrl({
-      context: {
-        shop: 'testcsj.myshopify.com',
-        variantMap: { m: '48039101923479' },
-        surchargeVariantMap: {
-          [MAX_SURCHARGE_TOTAL + 1]: '4900000000010001',
-        },
-      },
-      quote: {
-        customizationTotal: MAX_SURCHARGE_TOTAL + 1,
-        merchandisePrice: 89,
-        total: MAX_SURCHARGE_TOTAL + 90,
-      },
-      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    })).toThrow(
-      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
-    );
-  });
-
-  it('rejects one surcharge variant mapped to different amounts', () => {
-    const conflictingMap = {
       8: '4900000000000008',
       12: '4900000000000008',
-    };
-
-    expect(findSurchargeCombination(conflictingMap, 16)).toBeNull();
-    expect(() => createCartUrl({
-      context: {
-        shop: 'testcsj.myshopify.com',
-        variantMap: { m: '48039101923479' },
-        surchargeVariantMap: conflictingMap,
-      },
-      quote: { customizationTotal: 16, merchandisePrice: 89, total: 105 },
-      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    })).toThrow(
-      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
-    );
+    }, 16)).toBeNull();
   });
 
   it('allows equal amounts with different variants and chooses a stable variant id', () => {
     expect(findSurchargeCombination({
       8: '4900000000000009',
       '08': '4900000000000008',
-    }, 8)).toEqual([
-      { amount: 8, quantity: 1, variantId: '4900000000000008' },
-    ]);
+    }, 8)).toEqual([{ amount: 8, quantity: 1, variantId: '4900000000000008' }]);
   });
 
-  it('rejects a surcharge combination that reuses the base jersey variant', () => {
-    expect(() => createCartUrl({
-      context: {
-        shop: 'testcsj.myshopify.com',
-        variantMap: { m: '48039101923479' },
-        surchargeVariantMap: { 8: '48039101923479' },
-      },
-      quote: { customizationTotal: 8, merchandisePrice: 89, total: 97 },
-      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    })).toThrow(
-      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
-    );
-  });
-
-  it('reports expired pricing before cart navigation when no exact sum exists', () => {
-    const context = parseShopifyLaunch(
-      '?shop=testcsj.myshopify.com'
-      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D'
-      + '&surchargeVariantMap=%7B%2210%22%3A%2249000000000010%22%7D',
-    );
-
-    expect(() => createCartUrl({
-      context,
-      quote: { customizationTotal: 23, merchandisePrice: 89, total: 112 },
-      state: { layout: 'm', extras: {}, overrides: { bottomPattern: { enabled: false } } },
-    })).toThrow(
-      'Pricing for this configurator launch has expired. Reopen it from the Shopify product page.',
-    );
-  });
-
-  it('round-trips Unicode and reserved characters in compact custom text properties', () => {
-    const context = parseShopifyLaunch(
-      '?shop=testcsj.myshopify.com'
-      + '&variantMap=%7B%22m%22%3A%2248039101923479%22%7D',
-    );
-    const url = createCartUrl({
-      context,
-      quote: { customizationTotal: 0, merchandisePrice: 89, total: 89 },
-      state: {
-        layout: 'm',
-        extras: {},
-        overrides: {
-          bottomPattern: { enabled: false },
-          customTextItems: [
-            { id: 'text-1', text: '  蓝军⚽\nLONDON | & =  ' },
-            { id: 'text-2', text: '🔥冠军' },
-          ],
-        },
-      },
-    });
-
-    expect(decodeProperties(url)).toMatchObject({
-      'Custom Text': '蓝军⚽\nLONDON | & = | 🔥冠军',
-    });
-    expect(url).not.toContain('蓝军');
-    expect(url).not.toContain('data:');
-  });
-
-  it('rejects an invalid shop host, malformed maps, and missing selected-size variants', () => {
-    expect(parseShopifyLaunch('?shop=example.com')).toBeNull();
-    expect(parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%22abc%22%7D')).toBeNull();
-    expect(() => createCartUrl({
-      context: { shop: 'testcsj.myshopify.com@TARGET', variantMap: { s: '48039101890711' } },
-      state: { layout: 's' },
-      designAsset: { designId: 'dsg_1', url: 'https://TARGET/atlas.png', sha256: 'x', version: 1 },
-    })).toThrow('Invalid Shopify shop host.');
-    expect(() => createCartUrl({
-      context: { shop: 'testcsj.myshopify.com', variantMap: {} },
-      state: { layout: 'xl' },
-      designAsset: { designId: 'dsg_1', url: 'https://TARGET/atlas.png', sha256: 'x', version: 1 },
-    })).toThrow('selected size');
-  });
-
-  it('accepts an internal return path and rejects external return paths', () => {
-    const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
-
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2Fcart`))
-      .toMatchObject({ returnPath: '/cart' });
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=https%3A%2F%2FTARGET%2F`))
-      .toBeNull();
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%2FTARGET%2F`))
-      .toBeNull();
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%5CTARGET%2F`))
-      .toBeNull();
-  });
-
-  it('does not expose a design upload credential from launch parameters', () => {
-    const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
-    const surchargeVariantMap = '%7B%2218%22%3A%2249000000000018%22%7D';
-    expect(Object.keys(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&surchargeVariantMap=${surchargeVariantMap}`)).sort())
-      .toEqual(['initialLayout', 'productHandle', 'returnPath', 'shop', 'surchargeVariantMap', 'variantId', 'variantMap']);
-  });
-
-  it('rejects malformed surcharge variant maps without discarding the Shopify launch', () => {
-    const context = parseShopifyLaunch('?shop=testcsj.myshopify.com&variantMap=%7B%22s%22%3A%2248039101890711%22%7D&surchargeVariantMap=%7B%2218%22%3A%22bad%22%7D');
-
-    expect(context).toMatchObject({ shop: 'testcsj.myshopify.com', surchargeVariantMap: null });
-  });
-
-  it('rejects control-character return paths while preserving internal queries', () => {
-    const variantMap = '%7B%22s%22%3A%2248039101890711%22%7D';
-
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%0A%2F%2FTARGET%2F`))
-      .toBeNull();
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%0D%2F%2FTARGET%2F`))
-      .toBeNull();
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2F%09%2F%2FTARGET%2F`))
-      .toBeNull();
-    expect(parseShopifyLaunch(`?shop=testcsj.myshopify.com&variantMap=${variantMap}&returnPath=%2Fcart%3Fx%3D1`))
-      .toMatchObject({ returnPath: '/cart?x=1' });
+  it('returns null when no exact sum exists', () => {
+    expect(findSurchargeCombination({ 10: '4900000000000010' }, 23)).toBeNull();
   });
 });

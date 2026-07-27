@@ -47,6 +47,9 @@ if (packageJson.devDependencies?.["smol-toml"] !== "1.7.1") {
 if (packageJson.scripts?.deploy !== "node scripts/deploy.mjs") {
   throw new Error("deploy must run the guarded deployment script");
 }
+if (packageJson.scripts?.["deploy:check"] !== "node scripts/deploy.mjs --check-only") {
+  throw new Error("deploy:check must run the guard without deploying");
+}
 if (packageJson.scripts?.["test:deploy"] !== "node --test scripts/deploy.test.mjs") {
   throw new Error("test:deploy must run the deployment guard tests");
 }
@@ -55,10 +58,17 @@ if (!packageJson.scripts?.test?.includes("npm run test:deploy")) {
 }
 
 const deployScript = contents.get("scripts/deploy.mjs");
-for (const marker of ["--app-config", '["app", "deploy", "--config", configName]']) {
+for (const marker of [
+  "npm run deploy -- CONFIG_NAME",
+  "npm run deploy:check -- CONFIG_NAME",
+  '["app", "deploy", "--config", configName]',
+]) {
   if (!deployScript.includes(marker)) {
     throw new Error(`deploy script must contain: ${marker}`);
   }
+}
+if (deployScript.includes("--app-config")) {
+  throw new Error("deploy script must use the PowerShell-safe positional config interface");
 }
 
 function assertEqual(actual, expected, label) {

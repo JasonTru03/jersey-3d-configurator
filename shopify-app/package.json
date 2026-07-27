@@ -12,7 +12,8 @@
     "test:deploy": "node --test scripts/deploy.test.mjs",
     "test:functions": "cargo test --manifest-path extensions/secure-jersey-transform/Cargo.toml && cargo test --manifest-path extensions/secure-jersey-validation/Cargo.toml",
     "verify:scaffold": "node scripts/verify-scaffold.mjs",
-    "deploy": "node scripts/deploy.mjs"
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:check": "node scripts/deploy.mjs --check-only"
   },
   "devDependencies": {
     "@shopify/cli": "4.5.2",

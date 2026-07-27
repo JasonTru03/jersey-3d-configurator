@@ -31,7 +31,10 @@ function validContract(overrides = {}) {
 }
 
 function encodeBase64Url(text) {
-  const bytes = new TextEncoder().encode(text);
+  return encodeBytesBase64Url(new TextEncoder().encode(text));
+}
+
+function encodeBytesBase64Url(bytes) {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
@@ -47,6 +50,27 @@ function mutateHeader(token, mutate) {
   const compactHeader = JSON.parse(decodeBase64Url(encodedHeader));
   mutate(compactHeader);
   return `${encodeBase64Url(JSON.stringify(compactHeader))}.${signature}`;
+}
+
+async function authenticateCompactHeader(compactHeader, components) {
+  const encodedHeader = encodeBase64Url(JSON.stringify(compactHeader));
+  const compactComponents = canonicalizeQuoteComponents(components).map((component) => [
+    component.role === 'base' ? 'b' : 's',
+    component.variantId,
+    component.quantity,
+  ]);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const message = `q${QUOTE_SCHEMA_VERSION}\n${encodedHeader}\n${JSON.stringify(compactComponents)}`;
+  const signature = new Uint8Array(
+    await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)),
+  );
+  return `${encodedHeader}.${encodeBytesBase64Url(signature)}`;
 }
 
 describe('Shopify quote contract', () => {
@@ -132,7 +156,7 @@ describe('Shopify quote contract', () => {
     }
   });
 
-  it('checks schema, shop binding, and expiry after authentication', async () => {
+  it('authenticates the raw header before checking schema, shop binding, and expiry', async () => {
     const contract = validContract();
     const token = await signQuoteContract(contract, SECRET);
 
@@ -143,7 +167,21 @@ describe('Shopify quote contract', () => {
     await expect(verifyQuoteContract(token, contract.components, SECRET, { now: contract.expiresAt }))
       .rejects.toThrow('Quote has expired');
     await expect(verifyQuoteContract(mutateHeader(token, (header) => { header[0] = 2; }), contract.components, SECRET, { now: NOW }))
+      .rejects.toThrow('Quote signature is invalid');
+
+    const compactHeader = JSON.parse(decodeBase64Url(token.split('.')[0]));
+    compactHeader[0] = 2;
+    const authenticatedUnknownSchema = await authenticateCompactHeader(compactHeader, contract.components);
+    await expect(verifyQuoteContract(authenticatedUnknownSchema, contract.components, SECRET, { now: NOW }))
       .rejects.toThrow('Unsupported quote schema version');
+  });
+
+  it('rejects an authenticated quote before its issuedAt time', async () => {
+    const contract = validContract({ issuedAt: NOW + 1_000, expiresAt: NOW + 60_000 });
+    const token = await signQuoteContract(contract, SECRET);
+
+    await expect(verifyQuoteContract(token, contract.components, SECRET, { now: NOW }))
+      .rejects.toThrow('Quote is not yet valid');
   });
 
   it('strictly rejects malformed, non-canonical, segmented, and oversized tokens', async () => {
@@ -193,6 +231,23 @@ describe('Shopify quote contract', () => {
     for (const [override, message] of cases) {
       await expect(signQuoteContract(validContract(override), SECRET)).rejects.toThrow(message);
     }
+  });
+
+  it('requires an exact contract and component object schema', async () => {
+    await expect(signQuoteContract(validContract({ unexpected: true }), SECRET))
+      .rejects.toThrow('Quote contract has unexpected field "unexpected"');
+
+    const componentWithExtra = [
+      { role: 'base', variantId: '1', quantity: 1, amount: 100 },
+    ];
+    expect(() => canonicalizeQuoteComponents(componentWithExtra))
+      .toThrow('Quote component 0 has unexpected field "amount"');
+    await expect(signQuoteContract(validContract({ components: componentWithExtra }), SECRET))
+      .rejects.toThrow('Quote component 0 has unexpected field "amount"');
+
+    const componentMissingQuantity = [{ role: 'base', variantId: '1' }];
+    expect(() => canonicalizeQuoteComponents(componentMissingQuantity))
+      .toThrow('Quote component 0 is missing required field "quantity"');
   });
 
   it('requires unique uint64 variants, positive quantities, and exactly one base', async () => {

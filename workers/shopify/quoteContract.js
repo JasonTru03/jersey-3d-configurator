@@ -30,6 +30,11 @@ export function canonicalizeQuoteComponents(components) {
     if (!isPlainObject(component)) {
       throw new TypeError(`Quote component ${index} must be a plain object.`);
     }
+    assertExactKeys(
+      component,
+      ['role', 'variantId', 'quantity'],
+      `Quote component ${index}`,
+    );
     if (component.role !== 'base' && component.role !== 'surcharge') {
       throw new TypeError(`Quote component ${index} role must be base or surcharge.`);
     }
@@ -78,11 +83,11 @@ export async function signQuoteContract(contract, secret) {
 }
 
 export function decodeQuoteHeader(token) {
-  return parseToken(token).header;
+  return parseHeader(parseTokenEnvelope(token));
 }
 
 export async function verifyQuoteContract(token, components, secret, options = {}) {
-  const parsed = parseToken(token);
+  const parsed = parseTokenEnvelope(token);
   const canonicalComponents = canonicalizeQuoteComponents(components);
   const secretBytes = normalizeSecret(secret);
   const actualSignature = await createSignature(
@@ -93,11 +98,12 @@ export async function verifyQuoteContract(token, components, secret, options = {
   if (!constantTimeEqual(actualSignature, parsed.signature)) {
     throw new Error('Quote signature is invalid.');
   }
+  const header = parseHeader(parsed);
 
   const expectedShopFingerprint = options.expectedShopFingerprint;
   if (expectedShopFingerprint !== undefined) {
     assertShopFingerprint(expectedShopFingerprint);
-    if (parsed.header.shopFingerprint !== expectedShopFingerprint) {
+    if (header.shopFingerprint !== expectedShopFingerprint) {
       throw new Error('Quote shop fingerprint does not match.');
     }
   }
@@ -106,11 +112,12 @@ export async function verifyQuoteContract(token, components, secret, options = {
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new TypeError('Quote verification time must be a non-negative millisecond integer.');
   }
-  if (now >= parsed.header.expiresAt) throw new Error('Quote has expired.');
-  return { ...parsed.header };
+  if (now < header.issuedAt) throw new Error('Quote is not yet valid.');
+  if (now >= header.expiresAt) throw new Error('Quote has expired.');
+  return { ...header };
 }
 
-function parseToken(token) {
+function parseTokenEnvelope(token) {
   if (typeof token !== 'string') throw new TypeError('Quote token must be a string.');
   if (token.length > MAX_QUOTE_TOKEN_LENGTH) {
     throw new RangeError(`Quote token exceeds ${MAX_QUOTE_TOKEN_LENGTH} characters.`);
@@ -125,6 +132,10 @@ function parseToken(token) {
   const signature = decodeCanonicalBase64Url(segments[1], 'Quote signature');
   if (signature.length !== 32) throw new TypeError('Quote signature must contain exactly 32 bytes.');
 
+  return { encodedHeader: segments[0], headerBytes, signature };
+}
+
+function parseHeader({ encodedHeader, headerBytes }) {
   let compactHeader;
   try {
     compactHeader = JSON.parse(decoder.decode(headerBytes));
@@ -133,14 +144,29 @@ function parseToken(token) {
   }
   const header = normalizeCompactHeader(compactHeader);
   const canonicalHeader = encodeHeader(header);
-  if (segments[0] !== canonicalHeader) {
+  if (encodedHeader !== canonicalHeader) {
     throw new TypeError('Quote header encoding is not canonical.');
   }
-  return { encodedHeader: segments[0], signature, header };
+  return header;
 }
 
 function normalizeContractHeader(contract) {
   if (!isPlainObject(contract)) throw new TypeError('Quote contract must be a plain object.');
+  assertExactKeys(
+    contract,
+    [
+      'version',
+      'shopFingerprint',
+      'bundleId',
+      'designId',
+      'totalMinor',
+      'currency',
+      'issuedAt',
+      'expiresAt',
+      'components',
+    ],
+    'Quote contract',
+  );
   return validateHeader({
     version: contract.version,
     shopFingerprint: contract.shopFingerprint,
@@ -284,4 +310,20 @@ function isPlainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function assertExactKeys(value, expectedKeys, field) {
+  const actualKeys = Reflect.ownKeys(value).filter((key) => (
+    Object.prototype.propertyIsEnumerable.call(value, key)
+  ));
+  const expected = new Set(expectedKeys);
+  const unexpected = actualKeys.find((key) => !expected.has(key));
+  if (unexpected !== undefined) {
+    throw new TypeError(`${field} has unexpected field "${String(unexpected)}".`);
+  }
+  const actual = new Set(actualKeys);
+  const missing = expectedKeys.find((key) => !actual.has(key));
+  if (missing !== undefined) {
+    throw new TypeError(`${field} is missing required field "${missing}".`);
+  }
 }

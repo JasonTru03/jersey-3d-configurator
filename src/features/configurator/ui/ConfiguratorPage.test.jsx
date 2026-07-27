@@ -577,6 +577,54 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
   });
 
+  it('does not navigate or update state when a pending handoff resolves after unmount', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    let resolveRequest;
+    fetch.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve; }));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const navigateToCart = vi.fn();
+    const { unmount } = render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await act(async () => {
+      resolveRequest(secureCartResponse());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(navigateToCart).not.toHaveBeenCalled();
+    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/state update.*unmounted|unmounted component/i);
+    consoleError.mockRestore();
+  });
+
+  it('does not update state when a pending handoff rejects after unmount', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    let rejectRequest;
+    fetch.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRequest = reject; }));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const navigateToCart = vi.fn();
+    const { unmount } = render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await act(async () => {
+      rejectRequest(new Error('late network failure'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(navigateToCart).not.toHaveBeenCalled();
+    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/state update.*unmounted|unmounted component/i);
+    consoleError.mockRestore();
+  });
+
   it('blocks the cart after the saved patterned design changes', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
     const navigateToCart = vi.fn();

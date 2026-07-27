@@ -29,7 +29,7 @@ export async function createSecureCartHandoff({
   fetchImpl = fetch,
 }) {
   assertRequest(endpoint, context, state, productionFiles, fetchImpl);
-  const receipt = productionFiles === undefined
+  const receipt = productionFiles === undefined || productionFiles === null
     ? null
     : snapshotProductionFiles(productionFiles);
 
@@ -77,7 +77,9 @@ function assertRequest(endpoint, context, state, productionFiles, fetchImpl) {
   }
   if (!isPlainObject(state)) throw new TypeError('A design state is required.');
   assertSameOriginEndpoint(endpoint);
-  if (productionFiles !== undefined) snapshotProductionFiles(productionFiles);
+  if (productionFiles !== undefined && productionFiles !== null) {
+    snapshotProductionFiles(productionFiles);
+  }
 }
 
 function isValidShopifyContext(context) {

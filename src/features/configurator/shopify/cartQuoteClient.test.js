@@ -79,6 +79,20 @@ describe('createSecureCartHandoff', () => {
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).productionFiles).toEqual(productionFiles);
   });
 
+  it('normalizes an explicit null production receipt to body null', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const fetchImpl = vi.fn().mockResolvedValue(ok());
+
+    await createSecureCartHandoff({
+      context: context(),
+      state: { layout: 'm' },
+      productionFiles: null,
+      fetchImpl,
+    });
+
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).productionFiles).toBeNull();
+  });
+
   it.each([
     ['missing context', { context: null, state: {} }],
     ['forged shop casing', { context: { shop: 'TESTCSJ.myshopify.com' }, state: {} }],

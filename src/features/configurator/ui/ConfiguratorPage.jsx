@@ -77,6 +77,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [preparedDownload, setPreparedDownload] = useState(null);
   const bakeProviderRef = useRef(null);
   const cartPendingRef = useRef(false);
+  const mountedRef = useRef(false);
   const personalizationDeletion = usePersonalizationDeletion({
     onError: setFileError,
     onSelectionChange: setSelectedPersonalizationKey,
@@ -84,6 +85,11 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     state,
     updateState,
   });
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => () => preparedDownload?.release(), [preparedDownload]);
 
@@ -141,12 +147,15 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         state,
         productionFiles,
       });
+      if (!mountedRef.current) return;
       navigateToCart(result.handoffUrl);
     } catch (error) {
-      setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
+      if (mountedRef.current) {
+        setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
+      }
     } finally {
       cartPendingRef.current = false;
-      setCartPending(false);
+      if (mountedRef.current) setCartPending(false);
     }
   };
 

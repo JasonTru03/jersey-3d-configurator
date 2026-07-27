@@ -50,7 +50,7 @@ The Worker adds three focused responsibilities:
 2. recompute merchandise and customization amounts from a server-owned price catalog;
 3. issue a short-lived signed quote containing the trusted cart contract.
 
-Each accepted quote receives a random `designId` and `bundleId`. The normalized design record is stored in a dedicated Cloudflare binding under `designId`. The signed payload contains only the fields required by Shopify Functions: schema version, shop, bundle ID, design ID, jersey variant ID, component variant IDs and quantities, total merchandise amount, currency, issued time, and expiry time.
+Each accepted quote receives a random `designId` and `bundleId`. The normalized design record is stored in a dedicated Cloudflare binding under `designId`. To stay within Shopify line-property limits, the cart carries a compact signed header containing schema version, shop fingerprint, bundle ID, design ID, total merchandise amount, currency, issued time, and expiry time. The signature also covers the canonical jersey and surcharge component IDs and quantities. Shopify Functions reconstruct that component list from the actual cart lines, so removing or replacing a component invalidates the signature without placing the full design or a long component document in cart properties.
 
 The signing secret is stored as a Cloudflare secret and never appears in launch parameters, repository files, frontend bundles, or line-item display properties.
 

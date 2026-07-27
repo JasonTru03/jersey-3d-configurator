@@ -78,8 +78,31 @@ describe('Shopify quote contract', () => {
     const lower = await createShopFingerprint('example-store.myshopify.com');
 
     expect(await createShopFingerprint('  EXAMPLE-STORE.MYSHOPIFY.COM  ')).toBe(lower);
+    expect(lower).toBe('shop_Yr8XBk0JGzAx');
     expect(lower).toMatch(/^shop_[A-Za-z0-9_-]{12}$/u);
     await expect(createShopFingerprint('example.com')).rejects.toThrow('Shop domain');
+  });
+
+  it('matches the independently calculated cross-implementation golden token', async () => {
+    const goldenContract = {
+      version: 1,
+      shopFingerprint: 'shop_Fj3mQ2x9AbCd',
+      bundleId: 'bun_0123456789abcdef',
+      designId: 'dsg_0123456789abcdef',
+      totalMinor: 12_345,
+      currency: 'USD',
+      issuedAt: 1_799_999_999_000,
+      expiresAt: 1_800_000_060_000,
+      components: [
+        { role: 'surcharge', variantId: '9007199254740992', quantity: 2 },
+        { role: 'base', variantId: '18446744073709551615', quantity: 1 },
+      ],
+    };
+    const expectedToken = 'WzEsInNob3BfRmozbVEyeDlBYkNkIiwiYnVuXzAxMjM0NTY3ODlhYmNkZWYiLCJkc2dfMDEyMzQ1Njc4OWFiY2RlZiIsMTIzNDUsIlVTRCIsMTc5OTk5OTk5OTAwMCwxODAwMDAwMDYwMDAwXQ.x2Cad4ywoTJ5B8I-dMshtFOzV0b85oNEq9CCkCGCYJE';
+
+    expect(await signQuoteContract(goldenContract, SECRET)).toBe(expectedToken);
+    await expect(verifyQuoteContract(expectedToken, goldenContract.components, SECRET, { now: NOW }))
+      .resolves.toEqual(expect.objectContaining({ designId: goldenContract.designId }));
   });
 
   it('signs and verifies a compact URL-safe contract without embedding components', async () => {
@@ -248,6 +271,36 @@ describe('Shopify quote contract', () => {
     const componentMissingQuantity = [{ role: 'base', variantId: '1' }];
     expect(() => canonicalizeQuoteComponents(componentMissingQuantity))
       .toThrow('Quote component 0 is missing required field "quantity"');
+  });
+
+  it('rejects enumerable accessors before reading time-varying contract or component values', async () => {
+    const contractWithGetter = validContract();
+    let contractReads = 0;
+    Object.defineProperty(contractWithGetter, 'totalMinor', {
+      enumerable: true,
+      get() {
+        contractReads += 1;
+        return contractReads === 1 ? 12_345 : 0;
+      },
+    });
+    await expect(signQuoteContract(contractWithGetter, SECRET))
+      .rejects.toThrow('Quote contract field "totalMinor" must be an own enumerable data property');
+    expect(contractReads).toBe(0);
+
+    const componentWithGetter = { role: 'base', variantId: '1' };
+    let componentReads = 0;
+    Object.defineProperty(componentWithGetter, 'quantity', {
+      enumerable: true,
+      get() {
+        componentReads += 1;
+        return componentReads === 1 ? 1 : 2;
+      },
+    });
+    expect(() => canonicalizeQuoteComponents([componentWithGetter]))
+      .toThrow('Quote component 0 field "quantity" must be an own enumerable data property');
+    expect(componentReads).toBe(0);
+
+    await expect(signQuoteContract(validContract(), SECRET)).resolves.toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
   });
 
   it('requires unique uint64 variants, positive quantities, and exactly one base', async () => {

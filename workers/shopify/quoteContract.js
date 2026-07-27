@@ -27,32 +27,29 @@ export function canonicalizeQuoteComponents(components) {
   const variantIds = new Set();
   let baseCount = 0;
   const normalized = components.map((component, index) => {
-    if (!isPlainObject(component)) {
-      throw new TypeError(`Quote component ${index} must be a plain object.`);
-    }
-    assertExactKeys(
+    const snapshot = snapshotExactDataObject(
       component,
       ['role', 'variantId', 'quantity'],
       `Quote component ${index}`,
     );
-    if (component.role !== 'base' && component.role !== 'surcharge') {
+    if (snapshot.role !== 'base' && snapshot.role !== 'surcharge') {
       throw new TypeError(`Quote component ${index} role must be base or surcharge.`);
     }
-    if (!isCanonicalUint64(component.variantId)) {
+    if (!isCanonicalUint64(snapshot.variantId)) {
       throw new TypeError(`Quote component ${index} variantId must be a canonical positive uint64 string.`);
     }
-    if (!Number.isSafeInteger(component.quantity) || component.quantity <= 0) {
+    if (!Number.isSafeInteger(snapshot.quantity) || snapshot.quantity <= 0) {
       throw new TypeError(`Quote component ${index} quantity must be a positive safe integer.`);
     }
-    if (variantIds.has(component.variantId)) {
-      throw new TypeError(`Quote components contain duplicate variantId "${component.variantId}".`);
+    if (variantIds.has(snapshot.variantId)) {
+      throw new TypeError(`Quote components contain duplicate variantId "${snapshot.variantId}".`);
     }
-    variantIds.add(component.variantId);
-    if (component.role === 'base') baseCount += 1;
+    variantIds.add(snapshot.variantId);
+    if (snapshot.role === 'base') baseCount += 1;
     return {
-      role: component.role,
-      variantId: component.variantId,
-      quantity: component.quantity,
+      role: snapshot.role,
+      variantId: snapshot.variantId,
+      quantity: snapshot.quantity,
     };
   });
 
@@ -70,10 +67,10 @@ export function canonicalizeQuoteComponents(components) {
 }
 
 export async function signQuoteContract(contract, secret) {
-  const header = normalizeContractHeader(contract);
-  const components = canonicalizeQuoteComponents(contract.components);
+  const normalizedContract = normalizeContract(contract);
+  const components = canonicalizeQuoteComponents(normalizedContract.components);
   const secretBytes = normalizeSecret(secret);
-  const encodedHeader = encodeHeader(header);
+  const encodedHeader = encodeHeader(normalizedContract.header);
   const signature = await createSignature(encodedHeader, components, secretBytes);
   const token = `${encodedHeader}.${encodeBase64Url(signature)}`;
   if (token.length > MAX_QUOTE_TOKEN_LENGTH) {
@@ -150,9 +147,8 @@ function parseHeader({ encodedHeader, headerBytes }) {
   return header;
 }
 
-function normalizeContractHeader(contract) {
-  if (!isPlainObject(contract)) throw new TypeError('Quote contract must be a plain object.');
-  assertExactKeys(
+function normalizeContract(contract) {
+  const snapshot = snapshotExactDataObject(
     contract,
     [
       'version',
@@ -167,16 +163,19 @@ function normalizeContractHeader(contract) {
     ],
     'Quote contract',
   );
-  return validateHeader({
-    version: contract.version,
-    shopFingerprint: contract.shopFingerprint,
-    bundleId: contract.bundleId,
-    designId: contract.designId,
-    totalMinor: contract.totalMinor,
-    currency: contract.currency,
-    issuedAt: contract.issuedAt,
-    expiresAt: contract.expiresAt,
-  });
+  return {
+    header: validateHeader({
+      version: snapshot.version,
+      shopFingerprint: snapshot.shopFingerprint,
+      bundleId: snapshot.bundleId,
+      designId: snapshot.designId,
+      totalMinor: snapshot.totalMinor,
+      currency: snapshot.currency,
+      issuedAt: snapshot.issuedAt,
+      expiresAt: snapshot.expiresAt,
+    }),
+    components: snapshot.components,
+  };
 }
 
 function normalizeCompactHeader(value) {
@@ -312,7 +311,8 @@ function isPlainObject(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function assertExactKeys(value, expectedKeys, field) {
+function snapshotExactDataObject(value, expectedKeys, field) {
+  if (!isPlainObject(value)) throw new TypeError(`${field} must be a plain object.`);
   const actualKeys = Reflect.ownKeys(value).filter((key) => (
     Object.prototype.propertyIsEnumerable.call(value, key)
   ));
@@ -326,4 +326,13 @@ function assertExactKeys(value, expectedKeys, field) {
   if (missing !== undefined) {
     throw new TypeError(`${field} is missing required field "${missing}".`);
   }
+  const snapshot = {};
+  for (const key of expectedKeys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      throw new TypeError(`${field} field "${key}" must be an own enumerable data property.`);
+    }
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot;
 }

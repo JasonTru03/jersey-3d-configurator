@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { calculateQuote } from '../../src/features/configurator/config/pricing.js';
 import { jerseyProduct } from '../../src/features/configurator/config/productDefinitions.js';
+import { MAX_SURCHARGE_TOTAL } from '../../src/features/configurator/shopify/cartHandoff.js';
 import { calculateTrustedComponents } from './quotePricing.js';
 
 const jerseyVariants = { s: '1001', m: '1002', l: '1003', xl: '1004' };
@@ -64,7 +65,7 @@ describe('calculateTrustedComponents', () => {
     expect(() => calculateTrustedComponents({
       state: jerseyProduct.defaultState,
       storeConfig: config({ jerseyVariants: { s: '1001' } }),
-    })).toThrow('Store pricing configuration has no jersey variant for layout "m"');
+    })).toThrow('Store pricing configuration has no jersey variant for size "m"');
 
     const charged = { ...structuredClone(jerseyProduct.defaultState), lighting: 'name-number' };
     expect(() => calculateTrustedComponents({
@@ -81,11 +82,75 @@ describe('calculateTrustedComponents', () => {
     expect(() => calculateTrustedComponents({
       state: jerseyProduct.defaultState,
       storeConfig: config({ jerseyVariants: { ...jerseyVariants, m: 'bad-id' } }),
-    })).toThrow('Invalid jersey variant');
+    })).toThrow('Store pricing configuration has invalid jersey variant');
     const charged = { ...structuredClone(jerseyProduct.defaultState), extras: { sleeveBadge: true, giftBox: false, matchPatch: false } };
     expect(() => calculateTrustedComponents({
       state: charged,
       storeConfig: config({ surchargeVariants: { 10: '1002' } }),
-    })).toThrow('must not reuse jersey variant');
+    })).toThrow('surcharge variant "1002" conflicts with a jersey variant');
+  });
+
+  it('validates malformed and conflicting surcharge mappings even for a zero surcharge', () => {
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ surchargeVariants: { garbage: 'bad-id' } }),
+    })).toThrow('Store pricing configuration has invalid surcharge amount');
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ surchargeVariants: { 8: '1001' } }),
+    })).toThrow('Store pricing configuration surcharge variant "1001" conflicts with a jersey variant');
+  });
+
+  it('rejects a surcharge variant that belongs to a non-selected jersey size', () => {
+    const charged = {
+      ...structuredClone(jerseyProduct.defaultState),
+      extras: { sleeveBadge: true, giftBox: false, matchPatch: false },
+    };
+
+    expect(() => calculateTrustedComponents({
+      state: charged,
+      storeConfig: config({ surchargeVariants: { 10: '1001' } }),
+    })).toThrow('Store pricing configuration surcharge variant "1001" conflicts with a jersey variant');
+  });
+
+  it('requires a complete, exact, globally unique jersey variant map', () => {
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ jerseyVariants: { ...jerseyVariants, l: '1002' } }),
+    })).toThrow('Store pricing configuration reuses jersey variant "1002"');
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ jerseyVariants: { ...jerseyVariants, xxl: '1005' } }),
+    })).toThrow('Store pricing configuration has unknown jersey size "xxl"');
+    const { l: _missing, ...missingSize } = jerseyVariants;
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ jerseyVariants: missingSize }),
+    })).toThrow('Store pricing configuration has no jersey variant for size "l"');
+  });
+
+  it('rejects zero, unsafe, and non-decimal variant IDs and invalid surcharge amounts', () => {
+    for (const invalidId of ['0', 0, '01', String(Number.MAX_SAFE_INTEGER + 1)]) {
+      expect(() => calculateTrustedComponents({
+        state: jerseyProduct.defaultState,
+        storeConfig: config({ jerseyVariants: { ...jerseyVariants, m: invalidId } }),
+      })).toThrow('Store pricing configuration has invalid jersey variant');
+    }
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ surchargeVariants: { 8: '0' } }),
+    })).toThrow('Store pricing configuration has invalid surcharge variant');
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ surchargeVariants: { 0: '2000' } }),
+    })).toThrow('Store pricing configuration has invalid surcharge amount');
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ surchargeVariants: { [MAX_SURCHARGE_TOTAL + 1]: '2001' } }),
+    })).toThrow('Store pricing configuration has invalid surcharge amount');
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ surchargeVariants: { 8: '2008', 12: '2008' } }),
+    })).toThrow('Store pricing configuration maps surcharge variant "2008" to multiple amounts');
   });
 });

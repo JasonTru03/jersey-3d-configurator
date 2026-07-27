@@ -13,6 +13,7 @@ const requiredFiles = [
   "LICENSE.shopify-function-examples.md",
   "NOTICE.md",
   "scripts/deploy.mjs",
+  "scripts/deploy.test.mjs",
   "extensions/secure-jersey-transform/Cargo.lock",
   "extensions/secure-jersey-transform/Cargo.toml",
   "extensions/secure-jersey-transform/.gitignore",
@@ -45,6 +46,19 @@ if (packageJson.devDependencies?.["smol-toml"] !== "1.7.1") {
 }
 if (packageJson.scripts?.deploy !== "node scripts/deploy.mjs") {
   throw new Error("deploy must run the guarded deployment script");
+}
+if (packageJson.scripts?.["test:deploy"] !== "node --test scripts/deploy.test.mjs") {
+  throw new Error("test:deploy must run the deployment guard tests");
+}
+if (!packageJson.scripts?.test?.includes("npm run test:deploy")) {
+  throw new Error("the app test entrypoint must include the deployment guard tests");
+}
+
+const deployScript = contents.get("scripts/deploy.mjs");
+for (const marker of ["--app-config", '["app", "deploy", "--config", configName]']) {
+  if (!deployScript.includes(marker)) {
+    throw new Error(`deploy script must contain: ${marker}`);
+  }
 }
 
 function assertEqual(actual, expected, label) {

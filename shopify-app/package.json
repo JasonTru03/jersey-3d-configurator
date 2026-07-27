@@ -8,7 +8,8 @@
     "build:functions": "npm run build:function:transform && npm run build:function:validation",
     "build:function:transform": "shopify app function build --no-color --path extensions/secure-jersey-transform",
     "build:function:validation": "shopify app function build --no-color --path extensions/secure-jersey-validation",
-    "test": "npm run verify:scaffold && npm run test:functions",
+    "test": "npm run verify:scaffold && npm run test:deploy && npm run test:functions",
+    "test:deploy": "node --test scripts/deploy.test.mjs",
     "test:functions": "cargo test --manifest-path extensions/secure-jersey-transform/Cargo.toml && cargo test --manifest-path extensions/secure-jersey-validation/Cargo.toml",
     "verify:scaffold": "node scripts/verify-scaffold.mjs",
     "deploy": "node scripts/deploy.mjs"

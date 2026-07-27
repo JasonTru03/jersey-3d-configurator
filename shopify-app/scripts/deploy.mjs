@@ -9,10 +9,10 @@ const checkOnlyIndex = args.indexOf("--check-only");
 const checkOnly = checkOnlyIndex !== -1;
 if (checkOnly) args.splice(checkOnlyIndex, 1);
 
-const configIndex = args.findIndex((argument) => argument === "--config" || argument === "-c");
+const configIndex = args.indexOf("--app-config");
 const configName = configIndex === -1 ? undefined : args[configIndex + 1];
 if (!configName || configName.startsWith("-") || !/^[a-zA-Z0-9_-]+$/.test(configName)) {
-  throw new Error("Deployment requires an explicit named config: npm run deploy -- --config CONFIG_NAME");
+  throw new Error("Deployment requires an explicit named config: npm run deploy -- --app-config CONFIG_NAME");
 }
 
 const configPath = resolve(root, `shopify.app.${configName}.toml`);

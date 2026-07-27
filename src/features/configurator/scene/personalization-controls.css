@@ -63,7 +63,7 @@
   touch-action: none;
 }
 
-:is(.configurator-root, .pc3d-section) .print-rotate-control.is-dragging .print-control--rotate {
+:is(.configurator-root, .pc3d-section) .print-control--rotate.is-dragging {
   cursor: grabbing;
 }
 

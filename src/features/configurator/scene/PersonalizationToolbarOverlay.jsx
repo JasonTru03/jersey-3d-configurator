@@ -370,7 +370,7 @@ export function PersonalizationToolbarOverlay({
       >
         <button
           aria-label="Drag to rotate personalization"
-          className="print-control print-control--rotate"
+          className={`print-control print-control--rotate${isRotating ? ' is-dragging' : ''}`}
           disabled={mutationDisabled}
           onKeyDown={rotateWithKeyboard}
           onLostPointerCapture={(event) => finishRotation(event, 'cancel')}

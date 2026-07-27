@@ -1,4 +1,4 @@
-import { Maximize2, Pencil, RotateCw, Trash2 } from 'lucide-react';
+import { GripVertical, Maximize2, Pencil, RotateCw, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   beginRotationGesture,
@@ -7,6 +7,7 @@ import {
 } from './personalizationRotation.js';
 import {
   getPersonalizationDockLayout,
+  getPersonalizationRotateHandleLayout,
   measurePersonalizationStageArea,
   personalizationStageAreasEqual,
 } from './personalizationToolbarLayout.js';
@@ -78,7 +79,6 @@ export function PersonalizationToolbarOverlay({
   rotationGestureCancelRef.current = onRotationGestureCancel;
   resizeGestureCancelRef.current = onResizeGestureCancel;
   const [stageArea, setStageArea] = useState(null);
-  const [frozenDockLayout, setFrozenDockLayout] = useState(null);
   const [isRotating, setIsRotating] = useState(false);
   const itemKey = item?.key ?? item?.id ?? null;
   const anchorVisible = Boolean(anchor?.visible);
@@ -96,7 +96,6 @@ export function PersonalizationToolbarOverlay({
     }
     releaseGesturePointer(rotation);
     releaseGesturePointer(resizeGesture);
-    setFrozenDockLayout(null);
     setIsRotating(false);
   }, [anchorVisible, itemKey, mutationDisabled]);
 
@@ -142,8 +141,8 @@ export function PersonalizationToolbarOverlay({
 
   if (!item || !anchorVisible) return null;
   const dockPosition = getDockPosition(anchor);
-  const dockLayout = frozenDockLayout
-    ?? getPersonalizationDockLayout(dockPosition, anchor, stageArea);
+  const dockLayout = getPersonalizationDockLayout(dockPosition, anchor, stageArea);
+  const rotateHandleLayout = getPersonalizationRotateHandleLayout(anchor, stageArea);
 
   const finishResize = (event, mode) => {
     const start = resizeStart.current;
@@ -251,7 +250,6 @@ export function PersonalizationToolbarOverlay({
     } else {
       onRotationGestureCancel?.(finalStart.itemKey);
     }
-    setFrozenDockLayout(null);
     setIsRotating(false);
   };
 
@@ -278,7 +276,6 @@ export function PersonalizationToolbarOverlay({
       hasMoved: false,
     };
     onRotationGestureStart?.(itemKey);
-    setFrozenDockLayout(dockLayout);
     setIsRotating(true);
   };
 
@@ -352,9 +349,28 @@ export function PersonalizationToolbarOverlay({
         }}
       >
         <button aria-label="Edit personalization" className="print-control print-control--edit" disabled={mutationDisabled} onClick={() => onEdit?.(itemKey)} type="button"><Pencil size={15} /></button>
+        <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" disabled={mutationDisabled} onClick={() => onCopy?.(itemKey)} type="button">×2</button>
+        <button aria-label="Delete personalization" className="print-control print-control--delete" disabled={mutationDisabled} onClick={deleteItem} type="button"><Trash2 size={15} /></button>
+      </div>
+      <svg aria-hidden="true" className="print-rotate-connector" data-testid="print-rotate-connector">
+        <line
+          x1={rotateHandleLayout.left}
+          x2={anchor.left + anchor.width}
+          y1={rotateHandleLayout.top + 44}
+          y2={anchor.top}
+        />
+      </svg>
+      <div
+        className={`print-rotate-control${isRotating ? ' is-dragging' : ''}`}
+        data-testid="print-rotate-control"
+        style={{
+          '--print-rotate-position-left': `${rotateHandleLayout.left}px`,
+          '--print-rotate-position-top': `${rotateHandleLayout.top}px`,
+        }}
+      >
         <button
           aria-label="Drag to rotate personalization"
-          className={`print-control print-control--rotate${isRotating ? ' is-dragging' : ''}`}
+          className="print-control print-control--rotate"
           disabled={mutationDisabled}
           onKeyDown={rotateWithKeyboard}
           onLostPointerCapture={(event) => finishRotation(event, 'cancel')}
@@ -363,9 +379,10 @@ export function PersonalizationToolbarOverlay({
           onPointerMove={rotate}
           onPointerUp={(event) => finishRotation(event, 'commit')}
           type="button"
-        ><RotateCw size={15} /></button>
-        <button aria-label="Duplicate personalization" className="print-control print-control--duplicate" disabled={mutationDisabled} onClick={() => onCopy?.(itemKey)} type="button">×2</button>
-        <button aria-label="Delete personalization" className="print-control print-control--delete" disabled={mutationDisabled} onClick={deleteItem} type="button"><Trash2 size={15} /></button>
+        >
+          <span aria-hidden="true" className="print-rotate-icons"><GripVertical size={10} /><RotateCw size={14} /></span>
+          <span aria-hidden="true" className="print-rotate-hint">DRAG</span>
+        </button>
       </div>
       <button
         aria-label="Resize personalization"

@@ -1,7 +1,8 @@
 const CONTROL_SIZE = 44;
 const CONTROL_GAP = 4;
-const CONTROL_COUNT = 4;
+const CONTROL_COUNT = 3;
 const DOCK_EDGE_GAP = 8;
+const ROTATE_HANDLE_OFFSET = 62;
 
 export function getPersonalizationDockLayout(candidate, anchor, stageArea) {
   if (!stageArea) {
@@ -43,6 +44,46 @@ export function getPersonalizationDockLayout(candidate, anchor, stageArea) {
   }
 
   return { columns, left, top };
+}
+
+export function getPersonalizationRotateHandleLayout(anchor, stageArea) {
+  const candidate = {
+    left: anchor.left + anchor.width,
+    top: anchor.top - ROTATE_HANDLE_OFFSET,
+  };
+  if (!stageArea) {
+    return {
+      left: candidate.left,
+      top: Math.max(DOCK_EDGE_GAP, candidate.top),
+    };
+  }
+
+  const halfSize = CONTROL_SIZE / 2;
+  const left = clamp(
+    candidate.left,
+    DOCK_EDGE_GAP + halfSize,
+    Math.max(DOCK_EDGE_GAP + halfSize, stageArea.width - DOCK_EDGE_GAP - halfSize),
+  );
+  const maxTop = Math.max(DOCK_EDGE_GAP, stageArea.height - DOCK_EDGE_GAP - CONTROL_SIZE);
+  let top = clamp(candidate.top, DOCK_EDGE_GAP, maxTop);
+
+  if (stageArea.obstacle && rectanglesIntersect(
+    {
+      bottom: top + CONTROL_SIZE,
+      left: left - halfSize,
+      right: left + halfSize,
+      top,
+    },
+    stageArea.obstacle,
+  )) {
+    top = clamp(
+      Math.max(stageArea.obstacle.bottom + DOCK_EDGE_GAP, anchor.top + anchor.height + DOCK_EDGE_GAP),
+      DOCK_EDGE_GAP,
+      maxTop,
+    );
+  }
+
+  return { left, top };
 }
 
 export function measurePersonalizationStageArea(overlay) {

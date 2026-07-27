@@ -69,9 +69,9 @@ function getDockButtonRects(dock) {
   const columns = Number(dock.style.getPropertyValue('--print-dock-columns'));
   const left = Number.parseFloat(dock.style.getPropertyValue('--print-dock-position-left'));
   const top = Number.parseFloat(dock.style.getPropertyValue('--print-dock-position-top'));
-  const rows = Math.ceil(4 / columns);
+  const rows = Math.ceil(3 / columns);
   const width = columns * 44 + (columns - 1) * 4;
-  return Array.from({ length: 4 }, (_, index) => {
+  return Array.from({ length: 3 }, (_, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
     return makeRect({
@@ -91,7 +91,7 @@ function intersects(first, second) {
 }
 
 describe('PersonalizationToolbarOverlay', () => {
-  it('exposes the five personalization controls in a compact action dock', () => {
+  it('separates the drag rotation handle from the compact action dock', () => {
     renderToolbar();
 
     expect(screen.getByRole('group', { name: 'Selected personalization controls' })).toBeInTheDocument();
@@ -101,9 +101,14 @@ describe('PersonalizationToolbarOverlay', () => {
     expect(screen.getByRole('button', { name: 'Delete personalization' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Duplicate personalization' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resize personalization' })).toBeInTheDocument();
+    expect(screen.getByTestId('print-control-dock')).not.toContainElement(
+      screen.getByRole('button', { name: 'Drag to rotate personalization' }),
+    );
+    expect(screen.getByTestId('print-rotate-control')).toHaveTextContent('DRAG');
+    expect(screen.getByTestId('print-rotate-connector')).toBeInTheDocument();
   });
 
-  it('models four distinct action rectangles below an overlapping left-top stage toolbar', async () => {
+  it('models three distinct action rectangles below an overlapping left-top stage toolbar', async () => {
     const toolbarRect = makeRect({ left: 16, top: 16, width: 144, height: 44 });
     const view = renderToolbarInStage({
       stageWidth: 640,
@@ -116,7 +121,7 @@ describe('PersonalizationToolbarOverlay', () => {
       const dock = screen.getByTestId('print-control-dock');
       await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('68px'));
       const buttonRects = getDockButtonRects(dock);
-      expect(buttonRects).toHaveLength(4);
+      expect(buttonRects).toHaveLength(3);
       expect(buttonRects.every((buttonRect) => !intersects(buttonRect, toolbarRect))).toBe(true);
       expect(buttonRects.every((buttonRect) => (
         buttonRect.left >= 8
@@ -149,7 +154,7 @@ describe('PersonalizationToolbarOverlay', () => {
 
     try {
       const dock = screen.getByTestId('print-control-dock');
-      await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe('538px'));
+      await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe('562px'));
       const buttonRects = getDockButtonRects(dock);
       expect(buttonRects.every((buttonRect) => buttonRect.left >= 8 && buttonRect.right <= 632)).toBe(true);
       expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('48px');
@@ -159,7 +164,7 @@ describe('PersonalizationToolbarOverlay', () => {
     }
   });
 
-  it('wraps all four 44px targets inside a stage narrower than the single-row dock', async () => {
+  it('wraps all three 44px action targets inside a stage narrower than the single-row dock', async () => {
     const view = renderToolbarInStage({
       stageWidth: 120,
       stageHeight: 320,
@@ -171,7 +176,7 @@ describe('PersonalizationToolbarOverlay', () => {
       const dock = screen.getByTestId('print-control-dock');
       await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-columns')).toBe('2'));
       const buttonRects = getDockButtonRects(dock);
-      expect(buttonRects).toHaveLength(4);
+      expect(buttonRects).toHaveLength(3);
       expect(buttonRects.every((buttonRect) => (
         buttonRect.width === 44
         && buttonRect.height === 44
@@ -187,7 +192,7 @@ describe('PersonalizationToolbarOverlay', () => {
     }
   });
 
-  it('freezes the resolved dock geometry until the rotation pointer is released', async () => {
+  it('moves the action dock and captured rotation handle with the latest selection anchor', async () => {
     const view = renderToolbarInStage({
       stageWidth: 640,
       stageHeight: 400,
@@ -197,25 +202,21 @@ describe('PersonalizationToolbarOverlay', () => {
 
     try {
       const dock = screen.getByTestId('print-control-dock');
+      const rotateControl = screen.getByTestId('print-rotate-control');
       const rotateHandle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
       await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('68px'));
-      const frozenGeometry = {
-        columns: dock.style.getPropertyValue('--print-dock-columns'),
-        left: dock.style.getPropertyValue('--print-dock-position-left'),
-        top: dock.style.getPropertyValue('--print-dock-position-top'),
-      };
 
       fireEvent.pointerDown(rotateHandle, { pointerId: 20, clientX: 50, clientY: -20 });
       view.rerenderToolbar({ visible: true, left: 400, top: 300, width: 170, height: 90 });
 
-      expect(dock.style.getPropertyValue('--print-dock-columns')).toBe(frozenGeometry.columns);
-      expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe(frozenGeometry.left);
-      expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe(frozenGeometry.top);
-
-      fireEvent.pointerUp(rotateHandle, { pointerId: 20, clientX: 50, clientY: -20 });
-      expect(dock.style.getPropertyValue('--print-dock-columns')).toBe('4');
+      expect(dock.style.getPropertyValue('--print-dock-columns')).toBe('3');
       expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe('485px');
       expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('248px');
+      expect(rotateControl.style.getPropertyValue('--print-rotate-position-left')).toBe('570px');
+      expect(rotateControl.style.getPropertyValue('--print-rotate-position-top')).toBe('238px');
+
+      fireEvent.pointerUp(rotateHandle, { pointerId: 20, clientX: 50, clientY: -20 });
+      expect(rotateControl).not.toHaveClass('is-dragging');
     } finally {
       view.unmount();
       view.restoreRects();
@@ -279,16 +280,21 @@ describe('PersonalizationToolbarOverlay', () => {
     expect(callbacks.onRotate).not.toHaveBeenCalled();
   });
 
-  it('freezes the entire control dock while rotating and returns it to the latest anchor on release', () => {
+  it('keeps the entire control set attached to a changing anchor while rotating', () => {
     const { callbacks, rerender } = renderToolbar();
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
 
     fireEvent.pointerDown(handle, { pointerId: 4, clientX: 150, clientY: 50 });
     fireEvent.pointerMove(handle, { pointerId: 4, clientX: 250, clientY: 130 });
     const dock = screen.getByTestId('print-control-dock');
+    const rotateControl = screen.getByTestId('print-rotate-control');
     expect(dock).toHaveStyle({
       '--print-dock-position-left': '150px',
       '--print-dock-position-top': '48px',
+    });
+    expect(rotateControl).toHaveStyle({
+      '--print-rotate-position-left': '200px',
+      '--print-rotate-position-top': '38px',
     });
 
     rerender(
@@ -299,18 +305,19 @@ describe('PersonalizationToolbarOverlay', () => {
       />,
     );
     expect(dock).toHaveStyle({
-      '--print-dock-position-left': '150px',
-      '--print-dock-position-top': '48px',
+      '--print-dock-position-left': '175px',
+      '--print-dock-position-top': '128px',
+    });
+    expect(rotateControl).toHaveStyle({
+      '--print-rotate-position-left': '300px',
+      '--print-rotate-position-top': '118px',
     });
 
     fireEvent.pointerMove(handle, { pointerId: 4, clientX: 150, clientY: 230 });
     expect(callbacks.onRotate).toHaveBeenLastCalledWith('print-1', 180);
 
     fireEvent.pointerUp(handle, { pointerId: 4, clientX: 150, clientY: 50 });
-    expect(dock).toHaveStyle({
-      '--print-dock-position-left': '175px',
-      '--print-dock-position-top': '128px',
-    });
+    expect(rotateControl).not.toHaveClass('is-dragging');
   });
 
   it('clears a hidden anchor gesture before showing the latest unfrozen dock', () => {
@@ -323,7 +330,7 @@ describe('PersonalizationToolbarOverlay', () => {
 
     fireEvent.pointerDown(handle, { pointerId: 10, clientX: 150, clientY: 50 });
     fireEvent.pointerMove(handle, { pointerId: 10, clientX: 200, clientY: 100 });
-    expect(handle).toHaveClass('is-dragging');
+    expect(screen.getByTestId('print-rotate-control')).toHaveClass('is-dragging');
 
     rerender(
       <PersonalizationToolbarOverlay
@@ -341,7 +348,7 @@ describe('PersonalizationToolbarOverlay', () => {
         {...callbacks}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Drag to rotate personalization' })).not.toHaveClass('is-dragging');
+    expect(screen.getByTestId('print-rotate-control')).not.toHaveClass('is-dragging');
     expect(screen.getByTestId('print-control-dock')).toHaveStyle({
       '--print-dock-position-left': '60px',
       '--print-dock-position-top': '148px',

@@ -48,7 +48,6 @@
 }
 
 :is(.configurator-root, .pc3d-section) .print-control--edit,
-:is(.configurator-root, .pc3d-section) .print-control--rotate,
 :is(.configurator-root, .pc3d-section) .print-control--duplicate,
 :is(.configurator-root, .pc3d-section) .print-control--delete {
   position: relative;
@@ -56,12 +55,56 @@
 }
 
 :is(.configurator-root, .pc3d-section) .print-control--rotate {
+  position: relative;
+  inset: auto;
+  grid-template-rows: 22px 10px;
+  align-content: center;
   cursor: grab;
   touch-action: none;
 }
 
-:is(.configurator-root, .pc3d-section) .print-control--rotate.is-dragging {
+:is(.configurator-root, .pc3d-section) .print-rotate-control.is-dragging .print-control--rotate {
   cursor: grabbing;
+}
+
+:is(.configurator-root, .pc3d-section) .print-rotate-control {
+  position: absolute;
+  top: var(--print-rotate-position-top);
+  left: var(--print-rotate-position-left);
+  width: 44px;
+  height: 44px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+:is(.configurator-root, .pc3d-section) .print-rotate-icons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+:is(.configurator-root, .pc3d-section) .print-rotate-hint {
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+:is(.configurator-root, .pc3d-section) .print-rotate-connector {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+:is(.configurator-root, .pc3d-section) .print-rotate-connector line {
+  stroke: #ef5d43;
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
 }
 
 :is(.configurator-root, .pc3d-section) .print-control--duplicate {

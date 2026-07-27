@@ -5,7 +5,7 @@ application_url = "https://TARGET_WORKER_DOMAIN"
 embedded = false
 
 [access_scopes]
-scopes = "write_cart_transforms,write_cart_validations"
+scopes = "write_app_proxy,write_cart_transforms,write_cart_validations"
 
 [webhooks]
 api_version = "2026-07"

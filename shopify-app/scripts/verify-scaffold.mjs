@@ -1,4 +1,5 @@
 import {readFile, readdir} from "node:fs/promises";
+import {createHash} from "node:crypto";
 import {resolve} from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -6,6 +7,8 @@ const requiredFiles = [
   "package.json",
   "package-lock.json",
   "shopify.app.toml",
+  "LICENSE.shopify-function-examples.md",
+  "NOTICE.md",
   "extensions/secure-jersey-transform/Cargo.toml",
   "extensions/secure-jersey-transform/shopify.extension.toml",
   "extensions/secure-jersey-transform/schema.graphql",
@@ -33,7 +36,6 @@ const requiredConfig = [
   'client_id = "TARGET_SHOPIFY_CLIENT_ID"',
   'application_url = "https://TARGET_WORKER_DOMAIN"',
   "embedded = false",
-  'scopes = "write_cart_transforms,write_cart_validations"',
   'api_version = "2026-07"',
   'prefix = "apps"',
   'subpath = "jersey-configurator"',
@@ -42,6 +44,45 @@ const requiredConfig = [
 ];
 for (const expected of requiredConfig) {
   if (!appConfig.includes(expected)) throw new Error(`Missing app config: ${expected}`);
+}
+
+const scopesMatch = appConfig.match(/^\s*scopes\s*=\s*"([^"]*)"\s*$/m);
+if (!scopesMatch) throw new Error("Missing access_scopes.scopes app config");
+
+const expectedScopes = [
+  "write_app_proxy",
+  "write_cart_transforms",
+  "write_cart_validations",
+];
+const configuredScopes = scopesMatch[1]
+  .split(",")
+  .map((scope) => scope.trim())
+  .filter(Boolean)
+  .sort();
+if (
+  configuredScopes.length !== expectedScopes.length
+  || configuredScopes.some((scope, index) => scope !== expectedScopes[index])
+) {
+  throw new Error(`Access scopes must be exactly: ${expectedScopes.join(",")}`);
+}
+
+const sourceCommit = "19ccafceda1d0052c2c90c0a1e4db3fe37b16c27";
+const sourcePaths = [
+  "checkout/rust/cart-transform/default",
+  "checkout/rust/cart-checkout-validation/default",
+];
+const notice = contents.get("NOTICE.md");
+for (const traceabilityValue of [sourceCommit, ...sourcePaths, "MIT"]) {
+  if (!notice.includes(traceabilityValue)) {
+    throw new Error(`NOTICE.md must identify upstream source: ${traceabilityValue}`);
+  }
+}
+
+const licenseHash = createHash("sha256")
+  .update(contents.get("LICENSE.shopify-function-examples.md"))
+  .digest("hex");
+if (licenseHash !== "03fde3ca1c31000b50d86635cc982c2957a44c95f153901d538830224a024125") {
+  throw new Error("Shopify function-examples license must match the exact upstream LICENSE.md");
 }
 
 const targetChecks = new Map([

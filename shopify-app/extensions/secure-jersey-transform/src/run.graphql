@@ -1,8 +1,22 @@
 query Input {
+  cartTransform {
+    config: metafield(namespace: "$app:secure_jersey", key: "config") {
+      jsonValue
+    }
+  }
   cart {
     lines {
       id
       quantity
+      bundleId: attribute(key: "_jersey_bundle_id") { value }
+      quote: attribute(key: "_jersey_quote") { value }
+      component: attribute(key: "_jersey_component") { value }
+      designId: attribute(key: "_jersey_design_id") { value }
+      schemaVersion: attribute(key: "_jersey_schema") { value }
+      merchandise {
+        __typename
+        ... on ProductVariant { id }
+      }
     }
   }
 }

@@ -145,11 +145,19 @@ const extensionChecks = new Map([
     handle: "secure-jersey-transform",
     target: "cart.transform.run",
     resultType: "CartTransformRunResult",
+    dependencies: {
+      base64: "=0.22.1",
+      hmac: "=0.12.1",
+      serde_json: "=1.0.151",
+      sha2: "=0.10.9",
+      shopify_function: "=1.1.0",
+    },
   }],
   ["extensions/secure-jersey-validation/shopify.extension.toml", {
     handle: "secure-jersey-validation",
     target: "cart.validations.generate.run",
     resultType: "CartValidationsGenerateRunResult",
+    dependencies: {shopify_function: "=1.1.0"},
   }],
 ]);
 for (const [file, expected] of extensionChecks) {
@@ -196,7 +204,7 @@ for (const [file, expected] of extensionChecks) {
 
   const cargoFile = file.replace("shopify.extension.toml", "Cargo.toml");
   const cargoConfig = parse(contents.get(cargoFile));
-  assertEqual(cargoConfig.dependencies, {shopify_function: "=1.1.0"}, `${cargoFile} dependencies`);
+  assertEqual(cargoConfig.dependencies, expected.dependencies, `${cargoFile} dependencies`);
   const lockFile = file.replace("shopify.extension.toml", "Cargo.lock");
   if (!/name = "shopify_function"\r?\nversion = "1\.1\.0"/.test(contents.get(lockFile))) {
     throw new Error(`${lockFile} must lock shopify_function 1.1.0`);

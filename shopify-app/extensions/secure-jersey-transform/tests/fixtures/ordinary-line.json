@@ -1,0 +1,33 @@
+{
+  "shop": {
+    "localTime": {
+      "date": "2026-07-27"
+    }
+  },
+  "cartTransform": {
+    "config": {
+      "jsonValue": {
+        "schema": 1,
+        "shopFingerprint": "shop_5DHRxuwnMgPX",
+        "signingSecret": "task8-transform-test-secret-32-bytes-minimum"
+      }
+    }
+  },
+  "cart": {
+    "lines": [
+      {
+        "id": "gid://shopify/CartLine/ordinary",
+        "quantity": 1,
+        "bundleId": null,
+        "quote": null,
+        "component": null,
+        "designId": null,
+        "schemaVersion": null,
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/999"
+        }
+      }
+    ]
+  }
+}

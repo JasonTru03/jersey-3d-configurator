@@ -1,0 +1,66 @@
+{
+  "shop": {
+    "localTime": {
+      "date": "2026-07-27"
+    }
+  },
+  "cartTransform": {
+    "config": {
+      "jsonValue": {
+        "schema": 1,
+        "shopFingerprint": "shop_5DHRxuwnMgPX",
+        "signingSecret": "task8-transform-test-secret-32-bytes-minimum"
+      }
+    }
+  },
+  "cart": {
+    "lines": [
+      {
+        "id": "gid://shopify/CartLine/base4",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_DDDDDDDDDDDDDDDD"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0REREREREREREREREREREQiLCJkc2dfRERERERERERERERERERERCIsMTA3MDAsIlVTRCIsMTc4NTExMDQwMDAwMCwxNzg1MTE0MDAwMDAwXQ.vrtf7OnqT8wIyU43LVT0usaQjBOWwhvNuXa7vsD_Nd8"
+        },
+        "component": {
+          "value": "base"
+        },
+        "designId": {
+          "value": "dsg_DDDDDDDDDDDDDDDD"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/777"
+        }
+      },
+      {
+        "id": "gid://shopify/CartLine/surcharge4",
+        "quantity": 1,
+        "bundleId": {
+          "value": "bun_DDDDDDDDDDDDDDDD"
+        },
+        "quote": {
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0REREREREREREREREREREQiLCJkc2dfRERERERERERERERERERERCIsMTA3MDAsIlVTRCIsMTc4NTExMDQwMDAwMCwxNzg1MTE0MDAwMDAwXQ.vrtf7OnqT8wIyU43LVT0usaQjBOWwhvNuXa7vsD_Nd8"
+        },
+        "component": {
+          "value": "surcharge"
+        },
+        "designId": {
+          "value": "dsg_DDDDDDDDDDDDDDDD"
+        },
+        "schemaVersion": {
+          "value": "1"
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/888"
+        }
+      }
+    ]
+  }
+}

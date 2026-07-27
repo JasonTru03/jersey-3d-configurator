@@ -33,6 +33,7 @@ struct CandidateLine {
 
 #[shopify_function]
 fn run(input: schema::run::Input) -> Result<schema::CartTransformRunResult> {
+    let shop_local_date = input.shop().local_time().date().to_string();
     let Some(config_metafield) = input.cart_transform().config() else {
         return Ok(empty_result());
     };
@@ -92,11 +93,11 @@ fn run(input: schema::run::Input) -> Result<schema::CartTransformRunResult> {
                     .unwrap_or_default(),
                 variant_gid,
                 variant_id,
-                total_minor: match decimal_to_minor(line.cost().total_amount().amount().0) {
+                total_minor: match decimal_to_minor(line.cost().subtotal_amount().amount().0) {
                     Some(value) => value,
                     None => return Ok(empty_result()),
                 },
-                currency: line.cost().total_amount().currency_code().to_string(),
+                currency: line.cost().subtotal_amount().currency_code().to_string(),
                 summary: vec![
                     (
                         "Size",
@@ -169,7 +170,7 @@ fn run(input: schema::run::Input) -> Result<schema::CartTransformRunResult> {
     let mut operations = Vec::new();
     let mut output_upper_bound = OUTPUT_FIXED_OVERHEAD_BYTES;
     for lines in groups.values() {
-        if let Some(operation) = verified_merge(lines, &config) {
+        if let Some(operation) = verified_merge(lines, &config, &shop_local_date) {
             if operations.len() >= MAX_OPERATIONS {
                 return Ok(empty_result());
             }
@@ -198,6 +199,7 @@ fn empty_result() -> schema::CartTransformRunResult {
 fn verified_merge(
     lines: &[CandidateLine],
     config: &crate::contract::StoreConfig,
+    shop_local_date: &str,
 ) -> Option<schema::LinesMergeOperation> {
     if lines.is_empty() || lines.len() > MAX_COMPONENTS_PER_GROUP {
         return None;
@@ -247,6 +249,7 @@ fn verified_merge(
         config,
         total_minor,
         currency,
+        shop_local_date,
     )?;
     let base = lines.iter().find(|line| line.component == "base")?;
     let summary = parent_summary(base)?;
@@ -407,6 +410,20 @@ mod tests {
     }
 
     #[test]
+    fn discounted_cart_uses_pre_discount_subtotal_for_quote_verification() -> Result<()> {
+        assert_eq!(run_fixture("valid-discounted.json")?.operations.len(), 1);
+        assert!(run_fixture("wrong-subtotal.json")?.operations.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn coarse_offline_expiry_rejects_only_definitely_old_quotes() -> Result<()> {
+        assert!(run_fixture("old-expired.json")?.operations.is_empty());
+        assert_eq!(run_fixture("expiry-grace.json")?.operations.len(), 1);
+        Ok(())
+    }
+
+    #[test]
     fn shared_full_store_config_is_accepted() -> Result<()> {
         assert_eq!(run_fixture("shared-store-config.json")?.operations.len(), 1);
         Ok(())
@@ -495,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn mismatched_shopify_total_or_currency_emits_no_merge() -> Result<()> {
+    fn mismatched_shopify_subtotal_or_currency_emits_no_merge() -> Result<()> {
         for fixture in ["wrong-total.json", "wrong-currency.json"] {
             assert!(run_fixture(fixture)?.operations.is_empty());
         }

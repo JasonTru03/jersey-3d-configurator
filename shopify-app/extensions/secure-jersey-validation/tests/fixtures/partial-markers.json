@@ -48,6 +48,10 @@
           "totalAmount": {
             "amount": "99.00",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "99.00",
+            "currencyCode": "USD"
           }
         },
         "sizeSummary": {
@@ -81,5 +85,10 @@
   },
   "buyerJourney": {
     "step": "CHECKOUT_INTERACTION"
+  },
+  "shop": {
+    "localTime": {
+      "date": "2026-07-20"
+    }
   }
 }

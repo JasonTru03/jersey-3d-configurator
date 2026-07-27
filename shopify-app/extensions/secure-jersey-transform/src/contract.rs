@@ -8,6 +8,7 @@ use std::collections::{BTreeSet, HashSet};
 pub const QUOTE_SCHEMA_VERSION: i64 = 1;
 const MAX_TOKEN_LENGTH: usize = 255;
 const MAX_COMPONENTS_JSON_BYTES: usize = 255;
+const MILLIS_PER_DAY: i64 = 86_400_000;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -103,8 +104,9 @@ pub fn verify_contract(
     design_id: &str,
     schema: &str,
     config: &StoreConfig,
-    shopify_total_minor: i64,
+    shopify_subtotal_minor: i64,
     shopify_currency: &str,
+    shop_local_date: &str,
 ) -> Option<VerifiedContract> {
     if token.len() > MAX_TOKEN_LENGTH || schema != "1" {
         return None;
@@ -148,9 +150,10 @@ pub fn verify_contract(
         || !currency.bytes().all(|byte| byte.is_ascii_uppercase())
         || currency != config.currency
         || shopify_currency != config.currency
-        || total_minor != shopify_total_minor
+        || total_minor != shopify_subtotal_minor
         || issued_at < 0
         || issued_at >= expires_at
+        || definitely_expired(shop_local_date, expires_at)?
     {
         return None;
     }
@@ -196,6 +199,53 @@ pub fn verify_contract(
         bundle_id: bundle_id.to_owned(),
         design_id: design_id.to_owned(),
         components_json: compact_json,
+    })
+}
+
+fn definitely_expired(shop_local_date: &str, expires_at: i64) -> Option<bool> {
+    let shop_day = parse_iso_date_to_epoch_day(shop_local_date)?;
+    let expiry_utc_day = expires_at.checked_div(MILLIS_PER_DAY)?;
+    let last_grace_day = expiry_utc_day.checked_add(1)?;
+    Some(shop_day > last_grace_day)
+}
+
+fn parse_iso_date_to_epoch_day(value: &str) -> Option<i64> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    let year = parse_decimal(&bytes[0..4])?;
+    let month = parse_decimal(&bytes[5..7])?;
+    let day = parse_decimal(&bytes[8..10])?;
+    if year < 1970 || !(1..=12).contains(&month) {
+        return None;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if day == 0 || day > days_in_month {
+        return None;
+    }
+
+    let adjusted_year = year - if month <= 2 { 1 } else { 0 };
+    let era = adjusted_year.div_euclid(400);
+    let year_of_era = adjusted_year - era * 400;
+    let adjusted_month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * adjusted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
+fn parse_decimal(bytes: &[u8]) -> Option<i64> {
+    bytes.iter().try_fold(0_i64, |value, byte| {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value.checked_mul(10)?.checked_add(i64::from(*byte - b'0'))
     })
 }
 
@@ -322,4 +372,25 @@ fn is_url_safe(value: &str) -> bool {
     value
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_canonical_gregorian_dates_to_epoch_days() {
+        assert_eq!(parse_iso_date_to_epoch_day("1970-01-01"), Some(0));
+        assert_eq!(parse_iso_date_to_epoch_day("2000-02-29"), Some(11_016));
+        for value in ["1969-12-31", "2026-02-29", "2026-13-01", "2026-7-20"] {
+            assert_eq!(parse_iso_date_to_epoch_day(value), None);
+        }
+    }
+
+    #[test]
+    fn offline_expiry_uses_current_shop_day_greater_than_expiry_utc_day_plus_one() {
+        let expiry = 20_654 * MILLIS_PER_DAY;
+        assert_eq!(definitely_expired("2026-07-21", expiry), Some(false));
+        assert_eq!(definitely_expired("2026-07-22", expiry), Some(true));
+    }
 }

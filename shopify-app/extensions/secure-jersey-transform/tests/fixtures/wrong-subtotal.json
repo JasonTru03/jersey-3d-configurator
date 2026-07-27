@@ -18,8 +18,7 @@
           "10": "444",
           "12": "666",
           "16": "888"
-        },
-        "unexpected": true
+        }
       }
     }
   },
@@ -53,7 +52,7 @@
             "currencyCode": "USD"
           },
           "subtotalAmount": {
-            "amount": "99.00",
+            "amount": "98.00",
             "currencyCode": "USD"
           }
         },

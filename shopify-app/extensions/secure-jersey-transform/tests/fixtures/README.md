@@ -19,10 +19,15 @@ HMAC message bytes. The hostile fixtures each alter one cart invariant while
 retaining the original JavaScript-produced token.
 
 Expiry admission is enforced with millisecond precision by the Worker/App Proxy
-before these lines enter Shopify. Cart Transform validates the signed
-`issuedAt < expiresAt` structure but deliberately does not invalidate an
-already-admitted cart as time passes. `same-day-short-lived.json` protects that
-boundary.
+for the quote's exact seven-day TTL before these lines enter Shopify. The design
+record remains in Cloudflare storage for 180 days. Cart Transform also validates
+`issuedAt < expiresAt` and performs a conservative offline replay check using
+`shop.localTime.date`. It rejects only when the shop date is later than the
+expiry UTC date plus one full grace day. This date/timezone boundary can add up
+to roughly three calendar days (about 60 hours in the worst alignment), but it
+cannot change the signed components or price. The exact rejection formula is
+`currentShopDay > expiryUtcDay + 1`.
+`old-expired.json` and `expiry-grace.json` protect both sides of that boundary.
 
 The merged parent adds `_jersey_components`, the same canonical compact
 component JSON covered by the token HMAC. Validation can therefore rebuild the
@@ -38,8 +43,9 @@ Fulfillment must ignore those strings and resolve the trusted Worker design
 record by the signed `designId`.
 
 The transform accepts only USD, matching the Worker's integer minor-unit
-contract, and compares the
-fixed-point sum of Shopify line totals with the signed `totalMinor`. It also
+contract, and compares the fixed-point sum of Shopify's pre-discount line
+`subtotalAmount` values with the signed `totalMinor`. Native discounts may lower
+`totalAmount` without invalidating the quote. It also
 caps cart lines, bundle groups, components per group, output operations, and
 attribute byte lengths before allocating merge output. A conservative,
 deterministic 19,000-byte JSON upper bound is accumulated across all merge

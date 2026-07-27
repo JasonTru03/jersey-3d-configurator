@@ -56,6 +56,10 @@
           "totalAmount": {
             "amount": "99.00",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "99.00",
+            "currencyCode": "USD"
           }
         },
         "merchandise": {
@@ -111,6 +115,10 @@
           "totalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
           }
         },
         "merchandise": {
@@ -150,6 +158,10 @@
         },
         "cost": {
           "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          },
+          "subtotalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
           }
@@ -193,6 +205,10 @@
           "totalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
           }
         },
         "merchandise": {
@@ -232,6 +248,10 @@
         },
         "cost": {
           "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          },
+          "subtotalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
           }
@@ -275,6 +295,10 @@
           "totalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
           }
         },
         "merchandise": {
@@ -314,6 +338,10 @@
         },
         "cost": {
           "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          },
+          "subtotalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
           }
@@ -357,6 +385,10 @@
           "totalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
           }
         },
         "merchandise": {
@@ -396,6 +428,10 @@
         },
         "cost": {
           "totalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
+          },
+          "subtotalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
           }
@@ -439,6 +475,10 @@
           "totalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
           }
         },
         "merchandise": {
@@ -480,6 +520,10 @@
           "totalAmount": {
             "amount": "0.80",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "0.80",
+            "currencyCode": "USD"
           }
         },
         "merchandise": {
@@ -500,5 +544,10 @@
         "atlasSha256Summary": null
       }
     ]
+  },
+  "shop": {
+    "localTime": {
+      "date": "2026-07-20"
+    }
   }
 }

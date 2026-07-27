@@ -1,5 +1,5 @@
 {
-  "cartTransform": {
+  "validation": {
     "config": {
       "jsonValue": {
         "schema": 1,
@@ -18,8 +18,7 @@
           "10": "444",
           "12": "666",
           "16": "888"
-        },
-        "unexpected": true
+        }
       }
     }
   },
@@ -49,7 +48,7 @@
         },
         "cost": {
           "totalAmount": {
-            "amount": "99.00",
+            "amount": "89.00",
             "currencyCode": "USD"
           },
           "subtotalAmount": {
@@ -108,7 +107,7 @@
         },
         "cost": {
           "totalAmount": {
-            "amount": "8.00",
+            "amount": "7.00",
             "currencyCode": "USD"
           },
           "subtotalAmount": {
@@ -130,6 +129,9 @@
         "atlasSha256Summary": null
       }
     ]
+  },
+  "buyerJourney": {
+    "step": "CHECKOUT_INTERACTION"
   },
   "shop": {
     "localTime": {

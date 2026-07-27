@@ -48,9 +48,9 @@ The Worker adds three focused responsibilities:
 
 1. normalize and validate the submitted design;
 2. recompute merchandise and customization amounts from a server-owned price catalog;
-3. issue a short-lived signed quote containing the trusted cart contract.
+3. issue a seven-day signed quote containing the trusted cart contract.
 
-Each accepted quote receives a random `designId` and `bundleId`. The normalized design record is stored in a dedicated Cloudflare binding under `designId`. To stay within Shopify line-property limits, the cart carries a compact signed header containing schema version, shop fingerprint, bundle ID, design ID, total merchandise amount, currency, issued time, and expiry time. The signature also covers the canonical jersey and surcharge component IDs and quantities. Shopify Functions reconstruct that component list from the actual cart lines, so removing or replacing a component invalidates the signature without placing the full design or a long component document in cart properties.
+Each accepted quote receives a random `designId` and `bundleId`. The normalized design record is stored for 180 days in a dedicated Cloudflare binding under `designId`. To stay within Shopify line-property limits, the cart carries a compact signed header containing schema version, shop fingerprint, bundle ID, design ID, total merchandise amount, currency, issued time, and expiry time. The signature also covers the canonical jersey and surcharge component IDs and quantities. Shopify Functions reconstruct that component list from the actual cart lines, so removing or replacing a component invalidates the signature without placing the full design or a long component document in cart properties.
 
 The signing secret is stored as a Cloudflare secret and never appears in launch parameters, repository files, frontend bundles, or line-item display properties.
 
@@ -79,7 +79,7 @@ The merged parent line carries:
 - concise visible customization summary;
 - a stable bundle title such as `Custom 3D Football Jersey`.
 
-The displayed parent price is the Shopify-calculated sum of the actual component variants and quantities. The Function does not invent a browser-provided price.
+The displayed parent price is the Shopify-calculated sum of the actual component variants and quantities. Signature verification uses Shopify's pre-discount line `subtotalAmount`, so native discounts may reduce the buyer's `totalAmount` without invalidating the trusted catalog price. The Function does not invent a browser-provided price.
 
 An incomplete or malformed group is left identifiable for validation rather than silently repaired.
 
@@ -91,13 +91,23 @@ The validation Function evaluates every customization-marked cart line. It verif
 - target shop and currency;
 - quote issue and expiry times;
 - jersey variant, surcharge variants, and quantities;
-- Shopify line total against the signed expected total;
+- Shopify pre-discount line subtotal against the signed expected total;
 - required `designId` and bundle identity;
 - absence of orphaned or duplicate customization components.
 
 Validation emits a clear buyer-facing error and blocks checkout when any invariant fails. A normal blank jersey with no customization marker remains a normal merchandise purchase. Production instructions explicitly treat unsigned custom properties as unverified and ignore them.
 
 Shopify Functions perform this verification from their input and app-owned configuration; they do not depend on a network request to Cloudflare during checkout.
+
+The App Proxy enforces the seven-day quote TTL with millisecond precision before
+cart admission. Shopify Functions have no dynamic epoch input for comparing the
+signed expiry, so their offline replay check uses `shop.localTime.date`. A quote
+is rejected only when the shop date is later than the expiry UTC date plus one
+full grace day. This conservative timezone boundary can admit a signed quote for
+up to roughly three calendar days (about 60 hours in the worst timezone/expiry
+alignment), but it never changes the signed components or price and therefore
+does not create a lower-price path. After that boundary the cart is blocked and
+the shopper must add the design again.
 
 ## Data flow
 
@@ -115,7 +125,8 @@ Shopify Functions perform this verification from their input and app-owned confi
 
 - Quote endpoint failures keep the shopper in the review dialog and display a retryable, plain-language error.
 - Unknown stores, variants, amounts, currencies, or stale pricing versions produce an explicit pricing-configuration error.
-- Expired quotes ask the shopper to generate a fresh cart handoff.
+- The App Proxy rejects quotes past the exact seven-day TTL; Shopify Functions
+  reject definitely old carts after their documented date/timezone grace.
 - Partial `/cart/add.js` responses are checked before redirecting; failed additions are surfaced rather than reported as successful.
 - Invalid Shopify App Proxy signatures receive an error response without creating cart state.
 - Invalid or incomplete bundles remain blocked at checkout with instructions to remove the affected customized jersey and add it again from the configurator.
@@ -171,7 +182,8 @@ Required acceptance cases:
 2. Removing the visible line removes every underlying component.
 3. Changing component quantity or substituting a cheaper surcharge is rejected at checkout.
 4. Removing every surcharge component while retaining customization metadata is rejected at checkout.
-5. Replaying an expired quote is rejected.
+5. The App Proxy rejects an exact-TTL replay, and Shopify Functions reject a
+   replay once it is definitely beyond the documented offline grace.
 6. Two different customized jerseys coexist without being cross-merged.
 7. A standard blank jersey remains purchasable as ordinary merchandise.
 8. Size-specific base prices, discounts, tax treatment, and currency remain consistent with Shopify merchandise.

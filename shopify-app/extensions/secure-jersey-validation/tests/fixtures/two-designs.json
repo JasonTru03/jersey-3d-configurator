@@ -50,6 +50,10 @@
           "totalAmount": {
             "amount": "99.00",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "99.00",
+            "currencyCode": "USD"
           }
         },
         "sizeSummary": {
@@ -105,6 +109,10 @@
           "totalAmount": {
             "amount": "8.00",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "8.00",
+            "currencyCode": "USD"
           }
         },
         "sizeSummary": null,
@@ -144,6 +152,10 @@
         },
         "cost": {
           "totalAmount": {
+            "amount": "99.00",
+            "currencyCode": "USD"
+          },
+          "subtotalAmount": {
             "amount": "99.00",
             "currencyCode": "USD"
           }
@@ -201,6 +213,10 @@
           "totalAmount": {
             "amount": "8.00",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "8.00",
+            "currencyCode": "USD"
           }
         },
         "sizeSummary": null,
@@ -220,5 +236,10 @@
   },
   "buyerJourney": {
     "step": "CHECKOUT_INTERACTION"
+  },
+  "shop": {
+    "localTime": {
+      "date": "2026-07-20"
+    }
   }
 }

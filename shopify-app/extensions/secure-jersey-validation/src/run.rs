@@ -37,6 +37,7 @@ impl SecureLine {
 
 #[shopify_function]
 fn run(input: schema::run::Input) -> Result<schema::CartValidationsGenerateRunResult> {
+    let shop_local_date = input.shop().local_time().date().to_string();
     let lines: Vec<SecureLine> = input.cart().lines().iter().map(snapshot_line).collect();
     let config = input
         .validation()
@@ -65,13 +66,13 @@ fn run(input: schema::run::Input) -> Result<schema::CartValidationsGenerateRunRe
         });
     };
 
-    if validate_lines(&lines, &config).is_none() {
+    if validate_lines(&lines, &config, &shop_local_date).is_none() {
         return Ok(blocked_result());
     }
     Ok(allowed_result())
 }
 
-fn validate_lines(lines: &[SecureLine], config: &StoreConfig) -> Option<()> {
+fn validate_lines(lines: &[SecureLine], config: &StoreConfig, shop_local_date: &str) -> Option<()> {
     let mut raw_groups: BTreeMap<String, Vec<&SecureLine>> = BTreeMap::new();
     let mut merged_bundles = BTreeSet::new();
 
@@ -81,7 +82,7 @@ fn validate_lines(lines: &[SecureLine], config: &StoreConfig) -> Option<()> {
             if raw_groups.contains_key(bundle_id) || !merged_bundles.insert(bundle_id.to_owned()) {
                 return None;
             }
-            validate_merged_parent(line, config)?;
+            validate_merged_parent(line, config, shop_local_date)?;
         } else if line.has_marker() {
             let bundle_id = line.bundle_id.as_ref()?;
             if merged_bundles.contains(bundle_id) {
@@ -104,12 +105,16 @@ fn validate_lines(lines: &[SecureLine], config: &StoreConfig) -> Option<()> {
         return None;
     }
     for group in raw_groups.values() {
-        validate_raw_group(group, config)?;
+        validate_raw_group(group, config, shop_local_date)?;
     }
     Some(())
 }
 
-fn validate_merged_parent(line: &SecureLine, config: &StoreConfig) -> Option<()> {
+fn validate_merged_parent(
+    line: &SecureLine,
+    config: &StoreConfig,
+    shop_local_date: &str,
+) -> Option<()> {
     if line.quantity != 1 || line.component.is_some() {
         return None;
     }
@@ -137,6 +142,7 @@ fn validate_merged_parent(line: &SecureLine, config: &StoreConfig) -> Option<()>
         config,
         line.total_minor?,
         &line.currency,
+        shop_local_date,
     )?;
     if verified.components_json != components_json {
         return None;
@@ -144,7 +150,11 @@ fn validate_merged_parent(line: &SecureLine, config: &StoreConfig) -> Option<()>
     Some(())
 }
 
-fn validate_raw_group(lines: &[&SecureLine], config: &StoreConfig) -> Option<()> {
+fn validate_raw_group(
+    lines: &[&SecureLine],
+    config: &StoreConfig,
+    shop_local_date: &str,
+) -> Option<()> {
     if lines.is_empty() || lines.len() > MAX_COMPONENTS_PER_GROUP {
         return None;
     }
@@ -195,6 +205,7 @@ fn validate_raw_group(lines: &[&SecureLine], config: &StoreConfig) -> Option<()>
         config,
         total_minor,
         currency,
+        shop_local_date,
     )?;
     Some(())
 }
@@ -235,8 +246,8 @@ fn snapshot_line(line: &schema::run::input::cart::Lines) -> SecureLine {
         schema_version: line.schema_version().and_then(|item| item.value()).cloned(),
         components_json: line.components().and_then(|item| item.value()).cloned(),
         variant_id,
-        total_minor: decimal_to_minor(line.cost().total_amount().amount().0),
-        currency: line.cost().total_amount().currency_code().to_string(),
+        total_minor: decimal_to_minor(line.cost().subtotal_amount().amount().0),
+        currency: line.cost().subtotal_amount().currency_code().to_string(),
     }
 }
 
@@ -336,6 +347,31 @@ mod tests {
     fn complete_raw_component_group_is_allowed() -> Result<()> {
         assert_allowed("valid-raw.json")?;
         assert_allowed("two-designs.json")?;
+        Ok(())
+    }
+
+    #[test]
+    fn discounted_lines_use_pre_discount_subtotal_for_quote_verification() -> Result<()> {
+        assert_allowed("valid-discounted-raw.json")?;
+        assert_allowed("valid-discounted-merged.json")?;
+        assert_blocked("wrong-subtotal.json")?;
+        Ok(())
+    }
+
+    #[test]
+    fn coarse_offline_expiry_rejects_only_definitely_old_quotes() -> Result<()> {
+        assert_blocked("old-expired-raw.json")?;
+        assert_blocked("old-expired-merged.json")?;
+        assert_allowed("expiry-grace-raw.json")?;
+        assert_allowed("expiry-grace-merged.json")?;
+        Ok(())
+    }
+
+    #[test]
+    fn missing_surcharge_is_blocked_at_each_buyer_journey_boundary() -> Result<()> {
+        assert_blocked("missing-surcharge-cart.json")?;
+        assert_blocked("missing-surcharge.json")?;
+        assert_blocked("missing-surcharge-completion.json")?;
         Ok(())
     }
 

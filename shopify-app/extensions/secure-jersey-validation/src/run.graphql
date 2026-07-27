@@ -1,4 +1,9 @@
 query Input {
+  shop {
+    localTime {
+      date
+    }
+  }
   buyerJourney {
     step
   }
@@ -12,7 +17,7 @@ query Input {
       id
       quantity
       cost {
-        totalAmount {
+        subtotalAmount {
           amount
           currencyCode
         }

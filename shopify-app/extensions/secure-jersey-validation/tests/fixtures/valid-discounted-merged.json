@@ -31,7 +31,7 @@
           "value": "bun_AAAAAAAAAAAAAAAA"
         },
         "quote": {
-          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.pW5qg7HHt6R7bOYj1ucH77958blOgiY5vZLAaI7SMFA"
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.pW5qg7HHt6R7bOYj1ucH77958blOgiY5vZLAaI7SMFo"
         },
         "component": null,
         "designId": {
@@ -49,7 +49,7 @@
         },
         "cost": {
           "totalAmount": {
-            "amount": "107.00",
+            "amount": "96.00",
             "currencyCode": "USD"
           },
           "subtotalAmount": {

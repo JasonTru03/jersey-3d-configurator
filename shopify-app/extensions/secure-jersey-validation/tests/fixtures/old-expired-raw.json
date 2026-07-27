@@ -1,5 +1,5 @@
 {
-  "cartTransform": {
+  "validation": {
     "config": {
       "jsonValue": {
         "schema": 1,
@@ -18,8 +18,7 @@
           "10": "444",
           "12": "666",
           "16": "888"
-        },
-        "unexpected": true
+        }
       }
     }
   },
@@ -32,7 +31,7 @@
           "value": "bun_AAAAAAAAAAAAAAAA"
         },
         "quote": {
-          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.pW5qg7HHt6R7bOYj1ucH77958blOgiY5vZLAaI7SMFo"
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4MzkwMDgwMDAwMCwxNzg0NTA1NjAwMDAwXQ.aAL3Y7JzrJILCKivf40_N8my-C0xggP-uu3M0u5qx54"
         },
         "component": {
           "value": "base"
@@ -91,7 +90,7 @@
           "value": "bun_AAAAAAAAAAAAAAAA"
         },
         "quote": {
-          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4NDUwNTYwMDAwMCwxNzg1NTQyNDAwMDAwXQ.pW5qg7HHt6R7bOYj1ucH77958blOgiY5vZLAaI7SMFo"
+          "value": "WzEsInNob3BfNURIUnh1d25NZ1BYIiwiYnVuX0FBQUFBQUFBQUFBQUFBQUEiLCJkc2dfQUFBQUFBQUFBQUFBQUFBQSIsMTA3MDAsIlVTRCIsMTc4MzkwMDgwMDAwMCwxNzg0NTA1NjAwMDAwXQ.aAL3Y7JzrJILCKivf40_N8my-C0xggP-uu3M0u5qx54"
         },
         "component": {
           "value": "surcharge"
@@ -131,9 +130,12 @@
       }
     ]
   },
+  "buyerJourney": {
+    "step": "CHECKOUT_INTERACTION"
+  },
   "shop": {
     "localTime": {
-      "date": "2026-07-20"
+      "date": "2026-07-23"
     }
   }
 }

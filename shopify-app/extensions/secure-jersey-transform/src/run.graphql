@@ -1,4 +1,9 @@
 query Input {
+  shop {
+    localTime {
+      date
+    }
+  }
   cartTransform {
     config: metafield(namespace: "$app:secure_jersey", key: "config") {
       jsonValue
@@ -9,7 +14,7 @@ query Input {
       id
       quantity
       cost {
-        totalAmount {
+        subtotalAmount {
           amount
           currencyCode
         }

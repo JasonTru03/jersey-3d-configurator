@@ -50,6 +50,10 @@
           "totalAmount": {
             "amount": "99.00",
             "currencyCode": "EUR"
+          },
+          "subtotalAmount": {
+            "amount": "99.00",
+            "currencyCode": "EUR"
           }
         },
         "sizeSummary": {
@@ -105,6 +109,10 @@
           "totalAmount": {
             "amount": "8.00",
             "currencyCode": "EUR"
+          },
+          "subtotalAmount": {
+            "amount": "8.00",
+            "currencyCode": "EUR"
           }
         },
         "sizeSummary": null,
@@ -124,5 +132,10 @@
   },
   "buyerJourney": {
     "step": "CHECKOUT_INTERACTION"
+  },
+  "shop": {
+    "localTime": {
+      "date": "2026-07-20"
+    }
   }
 }

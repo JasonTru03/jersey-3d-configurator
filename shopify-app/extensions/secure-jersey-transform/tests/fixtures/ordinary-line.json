@@ -40,6 +40,10 @@
           "totalAmount": {
             "amount": "8.00",
             "currencyCode": "USD"
+          },
+          "subtotalAmount": {
+            "amount": "8.00",
+            "currencyCode": "USD"
           }
         },
         "sizeSummary": null,
@@ -56,5 +60,10 @@
         "atlasSha256Summary": null
       }
     ]
+  },
+  "shop": {
+    "localTime": {
+      "date": "2026-07-20"
+    }
   }
 }

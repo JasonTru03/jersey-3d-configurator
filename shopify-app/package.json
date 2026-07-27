@@ -8,12 +8,15 @@
     "build:functions": "npm run build:function:transform && npm run build:function:validation",
     "build:function:transform": "shopify app function build --no-color --path extensions/secure-jersey-transform",
     "build:function:validation": "shopify app function build --no-color --path extensions/secure-jersey-validation",
-    "test": "npm run verify:scaffold && npm run test:deploy && npm run test:functions",
+    "test": "npm run verify:scaffold && npm run test:deploy && npm run test:store-config && npm run test:functions",
     "test:deploy": "node --test scripts/deploy.test.mjs",
+    "test:store-config": "node --test scripts/store-config.test.mjs",
     "test:functions": "cargo test --manifest-path extensions/secure-jersey-transform/Cargo.toml && cargo test --manifest-path extensions/secure-jersey-validation/Cargo.toml",
     "verify:scaffold": "node scripts/verify-scaffold.mjs",
     "deploy": "node scripts/deploy.mjs",
-    "deploy:check": "node scripts/deploy.mjs --check-only"
+    "deploy:check": "node scripts/deploy.mjs --check-only",
+    "configure:store": "node scripts/configure-store.mjs",
+    "read:store-config": "node scripts/read-store-config.mjs"
   },
   "devDependencies": {
     "@shopify/cli": "4.5.2",

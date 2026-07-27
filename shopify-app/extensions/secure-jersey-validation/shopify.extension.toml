@@ -1,0 +1,17 @@
+api_version = "2025-01"
+
+[[extensions]]
+name = "t:name"
+handle = "secure-jersey-validation"
+type = "function"
+description = "t:description"
+
+  [[extensions.targeting]]
+  target = "purchase.validation.run"
+  input_query = "src/run.graphql"
+  export = "run"
+
+  [extensions.build]
+  command = "cargo build --target=wasm32-wasip1 --release"
+  path = "target/wasm32-wasip1/release/secure-jersey-validation.wasm"
+  watch = ["src/**/*.rs"]

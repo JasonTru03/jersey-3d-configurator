@@ -1,0 +1,21 @@
+# Shopify CLI and local app linkage
+.shopify/
+.env
+.env.*
+!.env.example
+shopify.app.local.toml
+shopify.app.*.local.toml
+
+# Local secrets/configuration
+*.secret
+*.secrets
+secrets/
+local-config/
+
+# Dependencies and function build output
+node_modules/
+target/
+**/target/
+result/
+**/result/
+Cargo.lock

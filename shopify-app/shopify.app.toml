@@ -1,0 +1,21 @@
+# Local scaffold only. Replace every TARGET_* placeholder in a private local config before any deployment command.
+client_id = "TARGET_SHOPIFY_CLIENT_ID"
+name = "Secure Jersey Configurator"
+application_url = "https://TARGET_WORKER_DOMAIN"
+embedded = false
+
+[access_scopes]
+scopes = "write_cart_transforms,write_cart_validations"
+
+[webhooks]
+api_version = "2026-07"
+
+[auth]
+redirect_urls = [
+  "https://TARGET_WORKER_DOMAIN/auth/callback"
+]
+
+[app_proxy]
+prefix = "apps"
+subpath = "jersey-configurator"
+url = "https://TARGET_WORKER_DOMAIN/apps/jersey-configurator"

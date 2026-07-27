@@ -130,7 +130,7 @@ describe('calculateTrustedComponents', () => {
   });
 
   it('rejects zero, unsafe, and non-decimal variant IDs and invalid surcharge amounts', () => {
-    for (const invalidId of ['0', 0, '01', String(Number.MAX_SAFE_INTEGER + 1)]) {
+    for (const invalidId of ['0', 0, '01', Number.MAX_SAFE_INTEGER + 1]) {
       expect(() => calculateTrustedComponents({
         state: jerseyProduct.defaultState,
         storeConfig: config({ jerseyVariants: { ...jerseyVariants, m: invalidId } }),
@@ -152,5 +152,29 @@ describe('calculateTrustedComponents', () => {
       state: jerseyProduct.defaultState,
       storeConfig: config({ surchargeVariants: { 8: '2008', 12: '2008' } }),
     })).toThrow('Store pricing configuration maps surcharge variant "2008" to multiple amounts');
+  });
+
+  it('preserves canonical Shopify uint64 variant ID strings beyond JavaScript safe integers', () => {
+    const aboveSafeInteger = '9007199254740992';
+    const uint64Maximum = '18446744073709551615';
+
+    expect(calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ jerseyVariants: { ...jerseyVariants, m: aboveSafeInteger } }),
+    }).jerseyVariantId).toBe(aboveSafeInteger);
+    expect(calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ jerseyVariants: { ...jerseyVariants, m: uint64Maximum } }),
+    }).jerseyVariantId).toBe(uint64Maximum);
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({ jerseyVariants: { ...jerseyVariants, m: Number.MAX_SAFE_INTEGER + 1 } }),
+    })).toThrow('Store pricing configuration has invalid jersey variant');
+    expect(() => calculateTrustedComponents({
+      state: jerseyProduct.defaultState,
+      storeConfig: config({
+        jerseyVariants: { ...jerseyVariants, m: '18446744073709551616' },
+      }),
+    })).toThrow('Store pricing configuration has invalid jersey variant');
   });
 });

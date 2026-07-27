@@ -8,6 +8,7 @@ import { normalizeDesignState } from './designNormalizer.js';
 
 const LAYOUT_IDS = jerseyProduct.options.layout.map((option) => option.id);
 const LAYOUT_ID_SET = new Set(LAYOUT_IDS);
+const UINT64_MAX_DECIMAL = '18446744073709551615';
 
 export function calculateTrustedComponents({ state, storeConfig } = {}) {
   const normalizedState = normalizeDesignState(state);
@@ -124,12 +125,17 @@ function validateSurchargeVariants(variantMap, jerseyVariantIds) {
 }
 
 function normalizePositiveVariantId(value, invalidMessage) {
-  if (typeof value === 'string') {
-    const number = Number(value);
-    if (/^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(number)) return value;
-  }
+  if (typeof value === 'string' && isCanonicalUint64(value)) return value;
   if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);
   throw new TypeError(invalidMessage);
+}
+
+function isCanonicalUint64(value) {
+  if (!/^[1-9][0-9]*$/.test(value)) return false;
+  if (value.length !== UINT64_MAX_DECIMAL.length) {
+    return value.length < UINT64_MAX_DECIMAL.length;
+  }
+  return value <= UINT64_MAX_DECIMAL;
 }
 
 function isPlainObject(value) {

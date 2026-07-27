@@ -11,17 +11,23 @@ export const DESIGN_RECORD_TTL_SECONDS = 180 * 24 * 60 * 60;
 export const MAX_CART_QUOTE_BODY_BYTES = 256000;
 
 const SHOP_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
-const SAFE_FILENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const ATLAS_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/iu;
+const SERVICE_UNAVAILABLE_MESSAGE = 'Secure cart service is temporarily unavailable.';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 class ClientError extends Error {}
-class ServiceError extends Error {}
+class ServiceError extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+  }
+}
 
 export function createCartQuotesHandler(env, dependencies = {}) {
   const now = dependencies.now ?? Date.now;
   const randomBytes = dependencies.randomBytes ?? secureRandomBytes;
+  const logger = dependencies.logger ?? console;
 
   return async function handleCartQuote(request) {
     if (request.method !== 'POST') {
@@ -30,30 +36,38 @@ export function createCartQuotesHandler(env, dependencies = {}) {
 
     try {
       const bindings = validateBindings(env);
-      const storeConfigs = parseStoreConfigs(bindings.storeConfigJson);
-      const body = await parseRequestBody(request);
-      const shop = normalizeShop(body.shop);
-      const productionFiles = normalizeProductionFiles(body.productionFiles);
-      const storeConfig = storeConfigs[shop];
-      if (storeConfig === undefined) {
-        throw new ServiceError('Store pricing configuration is unavailable.');
+      let issuedAt;
+      try {
+        issuedAt = now();
+      } catch {
+        throw new ServiceError('CART_QUOTE_CLOCK_UNAVAILABLE');
       }
-
-      const issuedAt = now();
       if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) {
-        throw new ServiceError('Quote clock is unavailable.');
+        throw new ServiceError('CART_QUOTE_CLOCK_INVALID');
       }
       await consumeRateLimit(bindings.rateLimit, request, issuedAt);
+
+      const body = await parseRequestBody(request);
+      const storeConfigs = parseStoreConfigs(bindings.storeConfigJson);
+      const shop = normalizeShop(body.shop);
+      const storeConfig = storeConfigs[shop];
+      if (storeConfig === undefined) {
+        throw new ServiceError('CART_QUOTE_STORE_NOT_CONFIGURED');
+      }
 
       let priced;
       try {
         priced = calculateTrustedComponents({ state: body.state, storeConfig });
       } catch (error) {
         if (isStoreConfigurationError(error)) {
-          throw new ServiceError('Store pricing configuration is invalid.');
+          throw new ServiceError('CART_QUOTE_STORE_PRICING_INVALID');
         }
         throw new ClientError('Design state is invalid.');
       }
+      const productionFiles = normalizeProductionFiles(
+        body.productionFiles,
+        priced.normalizedState.productId,
+      );
 
       const bundleId = `bun_${encodeBase64Url(readRandomBytes(randomBytes))}`;
       const designId = `dsg_${encodeBase64Url(readRandomBytes(randomBytes))}`;
@@ -61,7 +75,7 @@ export function createCartQuotesHandler(env, dependencies = {}) {
       try {
         shopFingerprint = await createShopFingerprint(shop);
       } catch {
-        throw new ServiceError('Quote signing dependency is unavailable.');
+        throw new ServiceError('CART_QUOTE_SHOP_FINGERPRINT_FAILED');
       }
       const components = [
         { role: 'base', variantId: priced.jerseyVariantId, quantity: 1 },
@@ -73,13 +87,13 @@ export function createCartQuotesHandler(env, dependencies = {}) {
       ];
       const expiresAt = issuedAt + CART_QUOTE_TTL_SECONDS * 1000;
       if (!Number.isSafeInteger(expiresAt)) {
-        throw new ServiceError('Quote clock is unavailable.');
+        throw new ServiceError('CART_QUOTE_EXPIRY_INVALID');
       }
       let totalMinor;
       try {
         totalMinor = toMinorUnits(priced.quote.total, priced.quote.currency);
       } catch {
-        throw new ServiceError('Trusted quote amount is invalid.');
+        throw new ServiceError('CART_QUOTE_TOTAL_MINOR_INVALID');
       }
       const contract = {
         version: QUOTE_SCHEMA_VERSION,
@@ -97,7 +111,7 @@ export function createCartQuotesHandler(env, dependencies = {}) {
       try {
         token = await signQuoteContract(contract, bindings.signingSecret);
       } catch {
-        throw new ServiceError('Quote signing dependency is unavailable.');
+        throw new ServiceError('CART_QUOTE_SIGNING_FAILED');
       }
 
       let summary;
@@ -130,7 +144,7 @@ export function createCartQuotesHandler(env, dependencies = {}) {
           expirationTtl: DESIGN_RECORD_TTL_SECONDS,
         });
       } catch {
-        throw new ServiceError('Design quote storage is unavailable.');
+        throw new ServiceError('CART_QUOTE_DESIGN_STORAGE_FAILED');
       }
 
       const handoffUrl = new URL(`https://${shop}/apps/jersey-configurator/cart-handoff`);
@@ -144,8 +158,11 @@ export function createCartQuotesHandler(env, dependencies = {}) {
     } catch (error) {
       if (error instanceof ClientError) return errorResponse(400, error.message);
       if (error instanceof RateLimitError) return errorResponse(429, 'Rate limit exceeded.');
-      if (error instanceof ServiceError) return errorResponse(503, error.message);
-      return errorResponse(503, 'Cart quote service is unavailable.');
+      const code = error instanceof ServiceError
+        ? error.code
+        : 'CART_QUOTE_UNEXPECTED_FAILURE';
+      logServiceError(logger, code);
+      return errorResponse(503, SERVICE_UNAVAILABLE_MESSAGE);
     }
   };
 }
@@ -166,25 +183,25 @@ export function toMinorUnits(amount, currency) {
 
 function validateBindings(env) {
   if (env === null || typeof env !== 'object') {
-    throw new ServiceError('Cart quote service configuration is missing.');
+    throw new ServiceError('CART_QUOTE_ENV_MISSING');
   }
   if (!env.DESIGN_QUOTES || typeof env.DESIGN_QUOTES.put !== 'function') {
-    throw new ServiceError('Design quote storage binding is missing.');
+    throw new ServiceError('CART_QUOTE_DESIGN_QUOTES_BINDING_MISSING');
   }
   if (
     !env.CART_QUOTE_RATE_LIMIT
     || typeof env.CART_QUOTE_RATE_LIMIT.limit !== 'function'
   ) {
-    throw new ServiceError('Rate-limit storage binding is missing.');
+    throw new ServiceError('CART_QUOTE_RATE_LIMIT_BINDING_MISSING');
   }
   if (
     typeof env.CART_QUOTE_SIGNING_SECRET !== 'string'
     || encoder.encode(env.CART_QUOTE_SIGNING_SECRET).length < 32
   ) {
-    throw new ServiceError('Quote signing secret is missing or invalid.');
+    throw new ServiceError('CART_QUOTE_SIGNING_SECRET_INVALID');
   }
   if (typeof env.SHOPIFY_STORE_CONFIG_JSON !== 'string' || env.SHOPIFY_STORE_CONFIG_JSON.length === 0) {
-    throw new ServiceError('Store pricing configuration is missing.');
+    throw new ServiceError('CART_QUOTE_STORE_CONFIG_MISSING');
   }
   return {
     designQuotes: env.DESIGN_QUOTES,
@@ -199,12 +216,12 @@ function parseStoreConfigs(serialized) {
   try {
     configs = JSON.parse(serialized);
   } catch {
-    throw new ServiceError('Store pricing configuration is invalid.');
+    throw new ServiceError('CART_QUOTE_STORE_CONFIG_JSON_INVALID');
   }
-  if (!isPlainObject(configs)) throw new ServiceError('Store pricing configuration is invalid.');
+  if (!isPlainObject(configs)) throw new ServiceError('CART_QUOTE_STORE_CONFIG_SHAPE_INVALID');
   for (const [shop, config] of Object.entries(configs)) {
     if (!SHOP_PATTERN.test(shop) || !isPlainObject(config)) {
-      throw new ServiceError('Store pricing configuration is invalid.');
+      throw new ServiceError('CART_QUOTE_STORE_CONFIG_ENTRY_INVALID');
     }
     const keys = Object.keys(config);
     const allowed = new Set(['productId', 'currency', 'jerseyVariants', 'surchargeVariants']);
@@ -214,7 +231,7 @@ function parseStoreConfigs(serialized) {
       || !Object.hasOwn(config, 'jerseyVariants')
       || !Object.hasOwn(config, 'surchargeVariants')
     ) {
-      throw new ServiceError('Store pricing configuration is invalid.');
+      throw new ServiceError('CART_QUOTE_STORE_CONFIG_FIELDS_INVALID');
     }
   }
   return configs;
@@ -282,29 +299,27 @@ function normalizeShop(value) {
   return normalized;
 }
 
-function normalizeProductionFiles(value) {
+function normalizeProductionFiles(value, productId) {
   if (value === null) return null;
   const files = snapshotExactObject(
     value,
     ['bundleFilename', 'designFilename', 'atlasFilename', 'atlasSha256'],
     'productionFiles',
   );
-  for (const key of ['bundleFilename', 'designFilename', 'atlasFilename']) {
-    if (
-      typeof files[key] !== 'string'
-      || files[key].length === 0
-      || files[key].length > 128
-      || !SAFE_FILENAME_PATTERN.test(files[key])
-      || files[key] === '.'
-      || files[key] === '..'
-    ) {
+  const expectedFilenames = {
+    bundleFilename: `${productId}-production.zip`,
+    designFilename: `${productId}-design.json`,
+    atlasFilename: `${productId}-uv-atlas.png`,
+  };
+  for (const [key, expected] of Object.entries(expectedFilenames)) {
+    if (files[key] !== expected) {
       throw new ClientError(`productionFiles.${key} is invalid.`);
     }
   }
   if (typeof files.atlasSha256 !== 'string' || !ATLAS_HASH_PATTERN.test(files.atlasSha256)) {
     throw new ClientError('productionFiles.atlasSha256 is invalid.');
   }
-  return files;
+  return { ...files, atlasSha256: files.atlasSha256.toLowerCase() };
 }
 
 async function consumeRateLimit(rateLimiter, request, issuedAt) {
@@ -315,17 +330,17 @@ async function consumeRateLimit(rateLimiter, request, issuedAt) {
   try {
     digest = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(`cart-quote:${client}`)));
   } catch {
-    throw new ServiceError('Rate-limit hashing is unavailable.');
+    throw new ServiceError('CART_QUOTE_RATE_HASH_FAILED');
   }
   const key = `cart-quote:${minute}:${encodeBase64Url(digest).slice(0, 32)}`;
   let result;
   try {
     result = await rateLimiter.limit({ key });
   } catch {
-    throw new ServiceError('Rate-limit service is unavailable.');
+    throw new ServiceError('CART_QUOTE_RATE_LIMIT_FAILED');
   }
   if (!result || typeof result.success !== 'boolean') {
-    throw new ServiceError('Rate-limit service returned invalid data.');
+    throw new ServiceError('CART_QUOTE_RATE_LIMIT_RESULT_INVALID');
   }
   if (!result.success) throw new RateLimitError();
 }
@@ -337,10 +352,10 @@ function readRandomBytes(randomBytes) {
   try {
     bytes = randomBytes(24);
   } catch {
-    throw new ServiceError('Secure random generator is unavailable.');
+    throw new ServiceError('CART_QUOTE_RANDOM_FAILED');
   }
   if (!(bytes instanceof Uint8Array) || bytes.byteLength !== 24) {
-    throw new ServiceError('Secure random generator returned invalid data.');
+    throw new ServiceError('CART_QUOTE_RANDOM_RESULT_INVALID');
   }
   return bytes;
 }
@@ -385,4 +400,12 @@ function jsonResponse(status, payload, headers = {}) {
 
 function errorResponse(status, message, headers) {
   return jsonResponse(status, { error: message }, headers);
+}
+
+function logServiceError(logger, code) {
+  try {
+    logger?.error?.(code);
+  } catch {
+    // Logging must not replace the stable service response.
+  }
 }

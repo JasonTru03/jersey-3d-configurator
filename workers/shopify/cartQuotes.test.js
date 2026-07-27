@@ -105,9 +105,9 @@ describe('createCartQuotesHandler', () => {
       shop: SHOP.toUpperCase(),
       state: complexState,
       productionFiles: {
-        bundleFilename: 'jersey-production.zip',
-        designFilename: 'jersey-design.json',
-        atlasFilename: 'jersey-atlas.png',
+        bundleFilename: 'fn8788-jersey-production.zip',
+        designFilename: 'fn8788-jersey-design.json',
+        atlasFilename: 'fn8788-jersey-uv-atlas.png',
         atlasSha256: `sha256:${'a'.repeat(64)}`,
       },
     })));
@@ -142,9 +142,9 @@ describe('createCartQuotesHandler', () => {
       quote: { total: 165, currency: 'USD' },
       normalizedState: { layout: 'xl', material: 'player' },
       productionFiles: {
-        bundleFilename: 'jersey-production.zip',
-        designFilename: 'jersey-design.json',
-        atlasFilename: 'jersey-atlas.png',
+        bundleFilename: 'fn8788-jersey-production.zip',
+        designFilename: 'fn8788-jersey-design.json',
+        atlasFilename: 'fn8788-jersey-uv-atlas.png',
       },
     });
     expect(record.summary).toMatchObject({
@@ -156,9 +156,9 @@ describe('createCartQuotesHandler', () => {
       Extras: 'sleeveBadge, matchPatch',
       Artwork: 'Crest Badge, custom-logo.png',
       'Production Files': 'Local ZIP download',
-      'Bundle File': 'jersey-production.zip',
-      'Design File': 'jersey-design.json',
-      'Atlas File': 'jersey-atlas.png',
+      'Bundle File': 'fn8788-jersey-production.zip',
+      'Design File': 'fn8788-jersey-design.json',
+      'Atlas File': 'fn8788-jersey-uv-atlas.png',
       'UV Atlas SHA-256': `sha256:${'a'.repeat(64)}`,
     });
     expect(stored.value).not.toContain('data:image');
@@ -232,6 +232,43 @@ describe('createCartQuotesHandler', () => {
     expect(response.status).toBe(503);
   });
 
+  it('rate-limits before reading the body and before parsing store configuration', async () => {
+    let pulls = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(validBody())));
+        controller.close();
+      },
+    }, { highWaterMark: 0 });
+    const { env } = runtime({
+      CART_QUOTE_RATE_LIMIT: { limit: vi.fn(async () => ({ success: false })) },
+      SHOPIFY_STORE_CONFIG_JSON: '{broken',
+    });
+    const request = {
+      method: 'POST',
+      headers: new Headers({
+        'content-type': 'application/json',
+        'CF-Connecting-IP': '203.0.113.42',
+      }),
+      body: stream,
+    };
+
+    expect((await createCartQuotesHandler(env)(request)).status).toBe(429);
+    expect(pulls).toBe(0);
+  });
+
+  it('applies the atomic binding decision to repeated unknown-shop requests', async () => {
+    const { env } = runtime();
+    const handler = createCartQuotesHandler(env, { now: () => NOW });
+    const statuses = [];
+    for (let index = 0; index < 11; index += 1) {
+      statuses.push((await handler(post(validBody({ shop: 'unknown.myshopify.com' })))).status);
+    }
+    expect(statuses).toEqual([...Array(10).fill(503), 429]);
+    expect(env.CART_QUOTE_RATE_LIMIT.limit).toHaveBeenCalledTimes(11);
+  });
+
   it('maps malformed fulfillment summary fields to 400 without storing a record', async () => {
     const { env } = runtime();
     const invalid = state({
@@ -251,6 +288,7 @@ describe('createCartQuotesHandler', () => {
     const getResponse = await handler(new Request('https://worker.example/api/cart-quotes'));
     expect(getResponse.status).toBe(405);
     expect(getResponse.headers.get('allow')).toBe('POST');
+    expect(env.CART_QUOTE_RATE_LIMIT.limit).not.toHaveBeenCalled();
     expect((await handler(post(validBody(), { headers: { 'content-type': 'text/plain' } }))).status).toBe(400);
     expect((await handler(post('{broken'))).status).toBe(400);
     expect((await handler(post('[]'))).status).toBe(400);
@@ -274,9 +312,9 @@ describe('createCartQuotesHandler', () => {
 
   it('validates nullable production file references exactly', async () => {
     const valid = {
-      bundleFilename: 'bundle_01.zip',
-      designFilename: 'design-01.json',
-      atlasFilename: 'atlas-01.png',
+      bundleFilename: 'fn8788-jersey-production.zip',
+      designFilename: 'fn8788-jersey-design.json',
+      atlasFilename: 'fn8788-jersey-uv-atlas.png',
       atlasSha256: `sha256:${'F'.repeat(64)}`,
     };
     for (const productionFiles of [null, valid]) {
@@ -288,15 +326,27 @@ describe('createCartQuotesHandler', () => {
       { ...valid, designFilename: 'dir/design.json' },
       { ...valid, atlasFilename: '..\\atlas.png' },
       { ...valid, extra: 'field' },
-      { ...valid, bundleFilename: `${'a'.repeat(125)}.zip` },
+      { ...valid, bundleFilename: 'wrong-production.zip' },
+      { ...valid, designFilename: 'fn8788-jersey-design.txt' },
+      { ...valid, atlasFilename: 'fn8788-jersey-atlas.png' },
       { ...valid, atlasSha256: 'sha256:abc123' },
     ]) {
       const { env } = runtime();
       expect((await createCartQuotesHandler(env)(post(validBody({ productionFiles })))).status).toBe(400);
     }
+
+    const { env, records } = runtime();
+    const response = await createCartQuotesHandler(env, {
+      now: () => NOW,
+      randomBytes: () => new Uint8Array(24).fill(7),
+    })(post(validBody({ productionFiles: valid })));
+    const payload = await json(response);
+    expect(JSON.parse(records.get(payload.designId).value).productionFiles.atlasSha256)
+      .toBe(`sha256:${'f'.repeat(64)}`);
   });
 
-  it('fails closed for every required binding and malformed store JSON', async () => {
+  it('uses one external 503 message and logs only stable internal error codes', async () => {
+    const logger = { error: vi.fn() };
     for (const missing of [
       'DESIGN_QUOTES',
       'CART_QUOTE_RATE_LIMIT',
@@ -305,16 +355,23 @@ describe('createCartQuotesHandler', () => {
     ]) {
       const { env } = runtime();
       delete env[missing];
-      const response = await createCartQuotesHandler(env)(post(validBody()));
+      const response = await createCartQuotesHandler(env, { logger })(post(validBody()));
       expect(response.status).toBe(503);
-      expect(await json(response)).toEqual({ error: expect.any(String) });
+      expect(await json(response)).toEqual({
+        error: 'Secure cart service is temporarily unavailable.',
+      });
     }
     for (const config of ['{broken', '[]', JSON.stringify({ [SHOP.toUpperCase()]: storeConfig() })]) {
       const { env } = runtime({ SHOPIFY_STORE_CONFIG_JSON: config });
-      expect((await createCartQuotesHandler(env)(post(validBody()))).status).toBe(503);
+      expect((await createCartQuotesHandler(env, { logger })(post(validBody()))).status).toBe(503);
     }
     const { env } = runtime({ CART_QUOTE_SIGNING_SECRET: 'too-short' });
-    expect((await createCartQuotesHandler(env)(post(validBody()))).status).toBe(503);
+    expect((await createCartQuotesHandler(env, { logger })(post(validBody()))).status).toBe(503);
+    expect(logger.error).toHaveBeenCalled();
+    for (const [code] of logger.error.mock.calls) {
+      expect(code).toMatch(/^CART_QUOTE_[A-Z0-9_]+$/);
+      expect(code).not.toMatch(/fixture-store|203\.0\.113|012345|\{|\}/u);
+    }
   });
 
   it('returns 503 for rate-limit and design storage failures', async () => {
@@ -347,8 +404,13 @@ describe('createCartQuotesHandler', () => {
     expect(keys[0]).toContain(String(Math.floor(NOW / 60000)));
   });
 
-  it('atomically admits at most ten of twenty concurrent requests', async () => {
-    const { env } = runtime();
+  it('concurrent requests honor atomic binding decisions', async () => {
+    const decisions = [...Array(10).fill(true), ...Array(10).fill(false)];
+    const { env } = runtime({
+      CART_QUOTE_RATE_LIMIT: {
+        limit: vi.fn(async () => ({ success: decisions.shift() })),
+      },
+    });
     const handler = createCartQuotesHandler(env, {
       now: () => NOW,
       randomBytes: () => crypto.getRandomValues(new Uint8Array(24)),

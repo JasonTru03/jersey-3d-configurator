@@ -12,9 +12,9 @@ function rawState(overrides = {}) {
 }
 
 const productionFiles = {
-  bundleFilename: 'jersey-production.zip',
-  designFilename: 'jersey-design.json',
-  atlasFilename: 'jersey-atlas.png',
+  bundleFilename: 'fn8788-jersey-production.zip',
+  designFilename: 'fn8788-jersey-design.json',
+  atlasFilename: 'fn8788-jersey-uv-atlas.png',
   atlasSha256: `sha256:${'a'.repeat(64)}`,
 };
 
@@ -86,9 +86,9 @@ describe('createDesignSummary', () => {
       Extras: 'sleeveBadge, matchPatch',
       Artwork: 'Crest Badge, sponsor-logo.png',
       'Production Files': 'Local ZIP download',
-      'Bundle File': 'jersey-production.zip',
-      'Design File': 'jersey-design.json',
-      'Atlas File': 'jersey-atlas.png',
+      'Bundle File': 'fn8788-jersey-production.zip',
+      'Design File': 'fn8788-jersey-design.json',
+      'Atlas File': 'fn8788-jersey-uv-atlas.png',
       'UV Atlas SHA-256': `sha256:${'a'.repeat(64)}`,
     });
   });
@@ -131,6 +131,11 @@ describe('createDesignSummary', () => {
       { template: 'unknown', colors: {} },
       { template: 'solid', colors: { unknownZone: '#FFFFFF' } },
       { template: 'solid', colors: { body: '#fff' } },
+      { template: 'solid', colors: {} },
+      {
+        template: 'solid',
+        colors: Object.fromEntries(Object.entries(rawState().overrides.appearance.colors).slice(0, 5)),
+      },
     ]) {
       const state = rawState({ overrides: { ...rawState().overrides, appearance } });
       expect(() => summarize(state)).toThrow();
@@ -178,6 +183,26 @@ describe('createDesignSummary', () => {
       overrides: { ...rawState().overrides, printItems: [] },
     });
     expect(summarize(empty).Print).toBe('');
+  });
+
+  it('counts Unicode print limits by code points rather than UTF-16 units', () => {
+    const accepted = rawState({
+      lighting: 'name-number',
+      overrides: {
+        ...rawState().overrides,
+        printItems: [{ name: '🏆'.repeat(14), number: '9' }],
+      },
+    });
+    expect(summarize(accepted).Print).toBe(`${'🏆'.repeat(14)} #9`);
+
+    const rejected = rawState({
+      lighting: 'name-number',
+      overrides: {
+        ...rawState().overrides,
+        printItems: [{ name: '🏆'.repeat(15), number: '9' }],
+      },
+    });
+    expect(() => summarize(rejected)).toThrow();
   });
 
   it('rejects oversized or unsafe artwork labels and IDs while ignoring source Data URLs', () => {

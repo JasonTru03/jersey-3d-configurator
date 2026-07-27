@@ -69,9 +69,17 @@ function summarizeTemplate(appearance) {
 
 function summarizeColors(appearance) {
   assertPlainObject(appearance.colors, 'Appearance colors');
+  const keys = Object.keys(appearance.colors);
+  if (
+    keys.length !== APPEARANCE_ZONES.length
+    || keys.some((zone) => !ZONE_IDS.has(zone))
+    || APPEARANCE_ZONES.some((zone) => !Object.hasOwn(appearance.colors, zone))
+  ) {
+    throw new TypeError('Appearance colors must contain every supported zone exactly once.');
+  }
   const colors = {};
-  for (const [zone, color] of Object.entries(appearance.colors)) {
-    if (!ZONE_IDS.has(zone)) throw new TypeError(`Appearance color zone "${zone}" is invalid.`);
+  for (const zone of APPEARANCE_ZONES) {
+    const color = appearance.colors[zone];
     if (typeof color !== 'string' || !HEX_COLOR_PATTERN.test(color)) {
       throw new TypeError(`Appearance color ${zone} must be a six-digit hex color.`);
     }
@@ -141,7 +149,7 @@ function summarizeArtwork(decorations = []) {
 function validateSummaryText(value, field, maximum) {
   if (
     typeof value !== 'string'
-    || value.length > maximum
+    || [...value].length > maximum
     || CONTROL_CHARACTER_PATTERN.test(value)
     || DATA_URL_PATTERN.test(value)
   ) {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { jerseyProduct } from '../../src/features/configurator/config/productDefinitions.js';
+import { createDecoration } from '../../src/features/configurator/config/decorations.js';
 import { verifyQuoteContract } from './quoteContract.js';
 import {
   CART_QUOTE_TTL_SECONDS,
@@ -84,6 +85,14 @@ describe('createCartQuotesHandler', () => {
         ...state().overrides,
         customTextItems: [{ text: 'CAPTAIN' }, { text: '  ' }],
         bottomPattern: { enabled: true },
+        decorations: [
+          createDecoration({
+            id: 'crest-1', kind: 'preset', source: 'crest-badge', label: 'Crest Badge', region: 'front',
+          }),
+          createDecoration({
+            id: 'upload-1', kind: 'upload', source: 'data:image/png;base64,SECRET', label: 'custom-logo.png', region: 'front',
+          }),
+        ],
       },
     });
     const bytes = [new Uint8Array(24).fill(1), new Uint8Array(24).fill(2)];
@@ -145,13 +154,14 @@ describe('createCartQuotesHandler', () => {
       Print: 'PLAYER #16',
       'Custom Text': 'CAPTAIN',
       Extras: 'sleeveBadge, matchPatch',
-      Artwork: '',
+      Artwork: 'Crest Badge, custom-logo.png',
       'Production Files': 'Local ZIP download',
       'Bundle File': 'jersey-production.zip',
       'Design File': 'jersey-design.json',
       'Atlas File': 'jersey-atlas.png',
       'UV Atlas SHA-256': `sha256:${'a'.repeat(64)}`,
     });
+    expect(stored.value).not.toContain('data:image');
     expect(record.shopFingerprint).toMatch(/^shop_[A-Za-z0-9_-]{12}$/);
     await expect(verifyQuoteContract(url.searchParams.get('token'), record.components, SECRET, {
       expectedShopFingerprint: record.shopFingerprint,

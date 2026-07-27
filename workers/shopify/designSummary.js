@@ -11,10 +11,8 @@ export const MAX_DESIGN_SUMMARY_BYTES = 4096;
 const TEMPLATE_IDS = new Set(APPEARANCE_TEMPLATES.map(({ id }) => id));
 const ZONE_IDS = new Set(APPEARANCE_ZONES);
 const HEX_COLOR_PATTERN = /^#[0-9A-F]{6}$/iu;
-const PRINT_NAME_PATTERN = /^[A-Za-z0-9 .'-]*$/u;
-const PRINT_NUMBER_PATTERN = /^[A-Za-z0-9]{0,2}$/u;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
-const URL_LIKE_PATTERN = /^(?:data:|https?:\/\/|\/\/)/iu;
+const URL_LIKE_PATTERN = /^(?:data:|https?:\/\/|\/\/|javascript:|vbscript:|file:)/iu;
 const DATA_URL_PATTERN = /data:/iu;
 const encoder = new TextEncoder();
 
@@ -89,18 +87,19 @@ function summarizePrint(lighting, overrides) {
       throw new TypeError(`Print items must contain at most ${MAX_PRINT_ITEMS} entries.`);
     }
   }
-  const player = getPrintItems(overrides)[0];
-  if (!player) return '';
-  const name = validatePrintText(player.name, 'Print name', 14, PRINT_NAME_PATTERN);
-  const number = validatePrintText(player.number, 'Print number', 2, PRINT_NUMBER_PATTERN);
-  return name || number ? `${name}${number ? ` #${number}` : ''}`.trim() : '';
+  return getPrintItems(overrides).map((player, index) => {
+    const name = validatePrintText(player.name, `Print item ${index} name`, 14);
+    const number = validatePrintText(player.number, `Print item ${index} number`, 2);
+    return name || number ? `${name}${number ? ` #${number}` : ''}`.trim() : '';
+  }).filter(Boolean).join(' | ');
 }
 
-function validatePrintText(value, field, maximum, pattern) {
-  if (typeof value !== 'string' || value.length > maximum || !pattern.test(value)) {
+function validatePrintText(value, field, maximum) {
+  const text = validateSummaryText(value, field, maximum).trim();
+  if (URL_LIKE_PATTERN.test(text)) {
     throw new TypeError(`${field} is invalid.`);
   }
-  return value.trim();
+  return text;
 }
 
 function summarizeCustomText(normalizedOverrides) {
@@ -127,15 +126,15 @@ function summarizeArtwork(decorations = []) {
   }
   return decorations.map((decoration, index) => {
     assertPlainObject(decoration, `Artwork ${index}`);
-    const fields = ['id', 'name'].filter((field) => decoration[field] !== undefined);
-    if (fields.length === 0) throw new TypeError(`Artwork ${index} must have a name or ID.`);
+    const fields = ['id', 'label'].filter((field) => decoration[field] !== undefined);
+    if (!fields.includes('id')) throw new TypeError(`Artwork ${index} must have an ID.`);
     for (const field of fields) {
       const text = validateSummaryText(decoration[field], `Artwork ${index} ${field}`, 64).trim();
       if (!text || URL_LIKE_PATTERN.test(text)) {
         throw new TypeError(`Artwork ${index} ${field} must be safe plain text.`);
       }
     }
-    return (decoration.name ?? decoration.id).trim();
+    return (decoration.label ?? decoration.id).trim();
   }).join(', ');
 }
 

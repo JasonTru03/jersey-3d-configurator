@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { jerseyProduct } from '../../src/features/configurator/config/productDefinitions.js';
+import { createDecoration } from '../../src/features/configurator/config/decorations.js';
 import { normalizeDesignState } from './designNormalizer.js';
 import { createDesignSummary } from './designSummary.js';
 
@@ -44,9 +45,27 @@ describe('createDesignSummary', () => {
             number: '#c84f3d',
           },
         },
-        printItems: [{ id: 'print-1', name: 'CAPTAIN', number: '9' }],
+        printItems: [
+          { id: 'print-1', name: 'CAPTAIN', number: '9' },
+          { id: 'print-2', name: 'VICE', number: '10' },
+        ],
         customTextItems: [{ text: '  FINAL  ' }, { text: '  ' }],
-        decorations: [{ id: 'crest-1', name: 'Club Crest' }, { id: 'badge-2' }],
+        decorations: [
+          createDecoration({
+            id: 'crest-1',
+            kind: 'preset',
+            source: 'crest-badge',
+            label: 'Crest Badge',
+            region: 'front',
+          }),
+          createDecoration({
+            id: 'upload-1',
+            kind: 'upload',
+            source: 'data:image/png;base64,AAAA',
+            label: 'sponsor-logo.png',
+            region: 'left-sleeve',
+          }),
+        ],
         bottomPattern: { enabled: true },
       },
     });
@@ -62,10 +81,10 @@ describe('createDesignSummary', () => {
         pattern: '#D1B05D',
         number: '#C84F3D',
       }),
-      Print: 'CAPTAIN #9',
+      Print: 'CAPTAIN #9 | VICE #10',
       'Custom Text': 'FINAL',
       Extras: 'sleeveBadge, matchPatch',
-      Artwork: 'Club Crest, badge-2',
+      Artwork: 'Crest Badge, sponsor-logo.png',
       'Production Files': 'Local ZIP download',
       'Bundle File': 'jersey-production.zip',
       'Design File': 'jersey-design.json',
@@ -124,6 +143,7 @@ describe('createDesignSummary', () => {
       [{ name: 'PLAYER\nADMIN', number: '9' }],
       [{ name: 'PLAYER', number: '999' }],
       [{ name: 'PLAYER', number: 'https://x' }],
+      [{ name: 'javascript:x', number: '9' }],
     ]) {
       const state = rawState({
         lighting: 'name-number',
@@ -139,20 +159,55 @@ describe('createDesignSummary', () => {
     expect(summarize(disabled).Print).toBe('');
   });
 
-  it('rejects oversized or unsafe artwork names and IDs without retaining data URLs', () => {
+  it('retains all eight print items, accepts Unicode names, and handles an explicit empty list', () => {
+    const printItems = Array.from({ length: 8 }, (_, index) => ({
+      id: `print-${index + 1}`,
+      name: index === 0 ? 'JOSÉ 球员' : `PLAYER ${index + 1}`,
+      number: String(index + 1),
+    }));
+    const state = rawState({
+      lighting: 'raised-print',
+      overrides: { ...rawState().overrides, printItems },
+    });
+    expect(summarize(state).Print).toBe(
+      ['JOSÉ 球员 #1', ...Array.from({ length: 7 }, (_, index) => `PLAYER ${index + 2} #${index + 2}`)].join(' | '),
+    );
+
+    const empty = rawState({
+      lighting: 'name-number',
+      overrides: { ...rawState().overrides, printItems: [] },
+    });
+    expect(summarize(empty).Print).toBe('');
+  });
+
+  it('rejects oversized or unsafe artwork labels and IDs while ignoring source Data URLs', () => {
     const invalidDecorations = [
       Array.from({ length: 9 }, (_, index) => ({ id: `art-${index}` })),
       [{ id: 'data:image/png;base64,AAAA' }],
       [{ id: 'https://example.com/art.png' }],
-      [{ id: 'data:image/png;base64,AAAA', name: 'Safe label' }],
-      [{ id: 'art-1', name: '  https://example.com/art.png' }],
-      [{ id: 'art-1', name: 'bad\u0000name' }],
+      [{ id: 'data:image/png;base64,AAAA', label: 'Safe label' }],
+      [{ id: 'art-1', label: '  https://example.com/art.png' }],
+      [{ id: 'art-1', label: 'bad\u0000label' }],
       [{ id: 'a'.repeat(65) }],
     ];
     for (const decorations of invalidDecorations) {
       const state = rawState({ overrides: { ...rawState().overrides, decorations } });
       expect(() => summarize(state)).toThrow();
     }
+
+    const uploaded = rawState({
+      overrides: {
+        ...rawState().overrides,
+        decorations: [createDecoration({
+          id: 'upload-1',
+          kind: 'upload',
+          source: 'data:image/png;base64,AAAA',
+          label: 'custom-logo.png',
+          region: 'front',
+        })],
+      },
+    });
+    expect(summarize(uploaded).Artwork).toBe('custom-logo.png');
   });
 
   it('rejects control characters in normalized custom text and bounds serialized output', () => {

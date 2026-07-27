@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { toMinorUnits } from './cartQuotes.js';
 import {
   createShopFingerprint,
@@ -112,15 +113,18 @@ async function validFixture(overrides = {}) {
 
 function runtime(record, overrides = {}) {
   const get = vi.fn(async () => record === null ? null : JSON.stringify(record));
+  const limit = vi.fn(async () => ({ success: true }));
   const logger = { error: vi.fn() };
   return {
     env: {
       DESIGN_QUOTES: { get },
+      CART_HANDOFF_RATE_LIMIT: { limit },
       CART_QUOTE_SIGNING_SECRET: QUOTE_SECRET,
       SHOPIFY_API_SECRET: API_SECRET,
       ...overrides,
     },
     get,
+    limit,
     logger,
   };
 }
@@ -137,6 +141,30 @@ function decodePayload(html) {
   const binary = atob(base64);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function jsonResponse(body, { ok = true } = {}) {
+  return { ok, json: vi.fn(async () => body) };
+}
+
+async function executeHandoff(items, fetchMock) {
+  const virtualConsole = new VirtualConsole();
+  const dom = new JSDOM(renderHandoffHtml(items), {
+    runScripts: 'outside-only',
+    url: `https://${SHOP}/apps/jersey-configurator/cart-handoff`,
+    virtualConsole,
+  });
+  dom.window.fetch = fetchMock;
+  dom.window.TextDecoder = TextDecoder;
+  const scripts = [...dom.window.document.querySelectorAll('script')];
+  dom.window.eval(scripts.at(-1).textContent);
+  await settleClient();
+  return dom;
+}
+
+async function settleClient() {
+  for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe('verifyAppProxySignature', () => {
@@ -330,6 +358,42 @@ describe('isCartAddResponseValid', () => {
     })).toBe(false);
   });
 
+  it('requires every non-empty visible summary property while allowing omitted empty values', async () => {
+    const { record, token } = await validFixture({
+      summary: {
+        Size: 'xl',
+        Template: 'solid',
+        Colors: '{"body":"#FFFFFF"}',
+        Print: '',
+        'Custom Text': '',
+        Extras: '',
+        Artwork: 'Crest Badge',
+        'Production Files': 'Local ZIP download',
+        'Bundle File': 'jersey-production.zip',
+        'Design File': 'jersey-design.json',
+        'Atlas File': 'jersey-atlas.png',
+        'UV Atlas SHA-256': `sha256:${'a'.repeat(64)}`,
+      },
+    });
+    const items = createCartItems(record, token);
+    const response = {
+      items: items.map((item) => ({
+        variant_id: item.id,
+        quantity: item.quantity,
+        properties: Object.fromEntries(Object.entries(item.properties).filter(([, value]) => value !== '')),
+      })),
+    };
+    expect(isCartAddResponseValid(items, response)).toBe(true);
+    for (const key of ['Artwork', 'Production Files', 'Bundle File', 'UV Atlas SHA-256']) {
+      const missing = structuredClone(response);
+      delete missing.items[0].properties[key];
+      expect(isCartAddResponseValid(items, missing)).toBe(false);
+      const tampered = structuredClone(response);
+      tampered.items[0].properties[key] = 'tampered';
+      expect(isCartAddResponseValid(items, tampered)).toBe(false);
+    }
+  });
+
   it('rejects unsafe numeric responses for uint64 IDs but accepts exact response strings', async () => {
     const { record, token } = await validFixture();
     const items = createCartItems(record, token);
@@ -350,14 +414,56 @@ describe('isCartAddResponseValid', () => {
 describe('createAppProxyHandler', () => {
   it('verifies the proxy before decoding the token or reading KV', async () => {
     const { record } = await validFixture();
-    const { env, get, logger } = runtime(record);
+    const { env, get, limit, logger } = runtime(record);
     const url = await signedUrl({ token: 'not-a-token' });
     url.searchParams.set('signature', '0'.repeat(64));
     const response = await createAppProxyHandler(env, { now: () => NOW, logger })(new Request(url));
 
     expect(response.status).toBe(400);
+    expect(limit).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
     expect(await response.text()).not.toContain('not-a-token');
+  });
+
+  it('rate limits authenticated handoffs before token decode and KV access', async () => {
+    const { record, token } = await validFixture();
+    for (const [loggedInCustomerId, expectedKey] of [
+      ['', `${SHOP}:anonymous`],
+      ['1234567890', `${SHOP}:1234567890`],
+    ]) {
+      const limit = vi.fn(async () => ({ success: false }));
+      const { env, get } = runtime(record, { CART_HANDOFF_RATE_LIMIT: { limit } });
+      const response = await createAppProxyHandler(env, { now: () => NOW })(
+        await requestFor(token, { logged_in_customer_id: loggedInCustomerId }),
+      );
+      expect(response.status).toBe(429);
+      expect(limit).toHaveBeenCalledWith({ key: expectedKey });
+      expect(get).not.toHaveBeenCalled();
+    }
+
+    const limit = vi.fn(async () => ({ success: false }));
+    const { env, get } = runtime(record, { CART_HANDOFF_RATE_LIMIT: { limit } });
+    const response = await createAppProxyHandler(env, { now: () => NOW })(
+      await requestFor('not-a-quote-token'),
+    );
+    expect(response.status).toBe(429);
+    expect(limit).toHaveBeenCalledOnce();
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the handoff limiter is missing, throws, or returns a malformed result', async () => {
+    const { record, token } = await validFixture();
+    const cases = [
+      { CART_HANDOFF_RATE_LIMIT: undefined },
+      { CART_HANDOFF_RATE_LIMIT: { limit: vi.fn(async () => { throw new Error('limiter'); }) } },
+      { CART_HANDOFF_RATE_LIMIT: { limit: vi.fn(async () => ({})) } },
+    ];
+    for (const override of cases) {
+      const { env, get } = runtime(record, override);
+      const response = await createAppProxyHandler(env, { now: () => NOW })(await requestFor(token));
+      expect(response.status).toBe(503);
+      expect(get).not.toHaveBeenCalled();
+    }
   });
 
   it('rejects duplicates and empty critical parameters before KV access', async () => {
@@ -572,5 +678,107 @@ describe('createAppProxyHandler', () => {
     expect(response.status).toBe(405);
     expect(response.headers.get('Allow')).toBe('GET');
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe('rendered handoff client', () => {
+  async function fixtureItems() {
+    const { record, token } = await validFixture({
+      components: [
+        { role: 'base', variantId: '12345678901234', quantity: 1 },
+        { role: 'surcharge', variantId: '42', quantity: 3 },
+      ],
+    });
+    return createCartItems(record, token);
+  }
+
+  function responseItems(items) {
+    return items.map((item) => ({
+      variant_id: Number(item.id),
+      quantity: item.quantity,
+      properties: Object.fromEntries(Object.entries(item.properties).filter(([, value]) => value !== '')),
+    }));
+  }
+
+  it('navigates after a fully validated cart/add response', async () => {
+    const items = await fixtureItems();
+    const fetchMock = vi.fn(async () => jsonResponse({ items: responseItems(items) }));
+    const dom = await executeHandoff(items, fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/cart/add.js');
+    expect(dom.window.document.documentElement.dataset.cartHandoff).toBe('complete');
+  });
+
+  it('reconciles invalid JSON and allows retry only when the bundle is absent', async () => {
+    const items = await fixtureItems();
+    let postCount = 0;
+    const fetchMock = vi.fn(async (path) => {
+      if (path === '/cart/add.js') {
+        postCount += 1;
+        if (postCount === 1) return { ok: true, json: vi.fn(async () => { throw new SyntaxError('bad json'); }) };
+        return jsonResponse({ items: responseItems(items) });
+      }
+      return jsonResponse({ items: [] });
+    });
+    const dom = await executeHandoff(items, fetchMock);
+    const retry = dom.window.document.getElementById('retry');
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/cart/add.js', '/cart.js']);
+    expect(retry.hidden).toBe(false);
+    retry.click();
+    await settleClient();
+    expect(postCount).toBe(2);
+    expect(dom.window.document.documentElement.dataset.cartHandoff).toBe('complete');
+  });
+
+  it('does not retry POST when a network failure reconciles to a complete bundle', async () => {
+    const items = await fixtureItems();
+    const fetchMock = vi.fn(async (path) => {
+      if (path === '/cart/add.js') throw new TypeError('network');
+      return jsonResponse({ items: responseItems(items).reverse() });
+    });
+    const dom = await executeHandoff(items, fetchMock);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/cart/add.js', '/cart.js']);
+    expect(dom.window.document.documentElement.dataset.cartHandoff).toBe('complete');
+    expect(dom.window.document.getElementById('retry').hidden).toBe(true);
+  });
+
+  it('blocks retry and offers cart review when reconciliation finds a partial bundle', async () => {
+    const items = await fixtureItems();
+    const fetchMock = vi.fn(async (path) => {
+      if (path === '/cart/add.js') throw new TypeError('network');
+      return jsonResponse({ items: responseItems(items).slice(0, 1) });
+    });
+    const dom = await executeHandoff(items, fetchMock);
+    const retry = dom.window.document.getElementById('retry');
+    const review = dom.window.document.getElementById('review-cart');
+    expect(retry.hidden).toBe(true);
+    expect(review.hidden).toBe(false);
+    retry.click();
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(review.textContent).toMatch(/Open cart and review/iu);
+    expect(review.getAttribute('href')).toBe('/cart');
+  });
+
+  it('blocks retry when cart reconciliation itself is inconclusive', async () => {
+    const items = await fixtureItems();
+    const fetchMock = vi.fn(async (path) => {
+      if (path === '/cart/add.js') throw new TypeError('network');
+      throw new TypeError('cart unavailable');
+    });
+    const dom = await executeHandoff(items, fetchMock);
+    expect(dom.window.document.getElementById('retry').hidden).toBe(true);
+    expect(dom.window.document.getElementById('review-cart').hidden).toBe(false);
+  });
+
+  it('treats malformed cart item data as inconclusive rather than an empty cart', async () => {
+    const items = await fixtureItems();
+    const fetchMock = vi.fn(async (path) => {
+      if (path === '/cart/add.js') throw new TypeError('network');
+      return jsonResponse({ items: [{ properties: 'malformed' }] });
+    });
+    const dom = await executeHandoff(items, fetchMock);
+    expect(dom.window.document.getElementById('retry').hidden).toBe(true);
+    expect(dom.window.document.getElementById('review-cart').hidden).toBe(false);
   });
 });

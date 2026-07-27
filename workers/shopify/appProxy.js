@@ -76,6 +76,8 @@ class ServiceError extends Error {
   }
 }
 
+class RateLimitError extends Error {}
+
 export function createAppProxyHandler(env, dependencies = {}) {
   const now = dependencies.now ?? Date.now;
   const logger = dependencies.logger ?? console;
@@ -94,6 +96,11 @@ export function createAppProxyHandler(env, dependencies = {}) {
       }
 
       const authenticated = await validateAuthenticatedQuery(url, readNow(now));
+      await consumeHandoffRateLimit(
+        bindings.rateLimit,
+        authenticated.shop,
+        authenticated.loggedInCustomerId,
+      );
       let designId;
       try {
         designId = decodeQuoteHeader(authenticated.token).designId;
@@ -121,6 +128,7 @@ export function createAppProxyHandler(env, dependencies = {}) {
       return htmlResponse(renderHandoffHtml(items));
     } catch (error) {
       if (error instanceof ClientError) return textResponse(error.status, error.message);
+      if (error instanceof RateLimitError) return textResponse(429, 'Rate limit exceeded.');
       const code = error instanceof ServiceError
         ? error.code
         : 'APP_PROXY_UNEXPECTED_FAILURE';
@@ -191,6 +199,7 @@ export function createCartItems(record, token) {
 export function renderHandoffHtml(items) {
   const payload = encodeBase64Url(encoder.encode(JSON.stringify({ items })));
   const cartAddValidator = `(${isCartAddResponseValid.toString()})`;
+  const cartBundleClassifier = `(${classifyCartBundle.toString()})`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -204,6 +213,7 @@ export function renderHandoffHtml(items) {
     <h1>Adding your custom jersey…</h1>
     <p id="status" aria-live="polite">Please keep this page open.</p>
     <button id="retry" type="button" hidden>Try again</button>
+    <a id="review-cart" href="/cart" hidden>Open cart and review</a>
   </main>
   <script type="application/json" id="cart-payload">${payload}</script>
   <script>
@@ -211,21 +221,63 @@ export function renderHandoffHtml(items) {
     'use strict';
     const status = document.getElementById('status');
     const retry = document.getElementById('retry');
+    const reviewCart = document.getElementById('review-cart');
     const encoded = document.getElementById('cart-payload').textContent;
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - encoded.length % 4) % 4);
     const bytes = Uint8Array.from(atob(padded), character => character.charCodeAt(0));
     const payload = JSON.parse(new TextDecoder().decode(bytes));
     const isCartAddResponseValid = ${cartAddValidator};
+    const classifyCartBundle = ${cartBundleClassifier};
     let pending = false;
-    const showError = () => {
+    let retryAllowed = true;
+    const navigateToCart = () => {
+      document.documentElement.dataset.cartHandoff = 'complete';
+      window.location.assign('/cart');
+    };
+    const showRetry = () => {
       status.textContent = 'We could not add your jersey. Please try again.';
       status.className = 'error';
+      reviewCart.hidden = true;
       retry.hidden = false;
     };
-    const addToCart = async () => {
-      if (pending) return;
-      pending = true;
+    const showCartReview = () => {
+      status.textContent = 'Your cart needs review before trying again.';
+      status.className = 'error';
       retry.hidden = true;
+      reviewCart.hidden = false;
+    };
+    const reconcileCart = async () => {
+      try {
+        const response = await fetch('/cart.js', {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+        });
+        const cart = await response.json();
+        if (!response.ok || !cart || typeof cart !== 'object' || !Array.isArray(cart.items)) {
+          throw new Error('cart-reconcile-failed');
+        }
+        const state = classifyCartBundle(payload.items, cart.items, isCartAddResponseValid);
+        if (state === 'complete') {
+          navigateToCart();
+          return;
+        }
+        pending = false;
+        retryAllowed = state === 'none';
+        if (retryAllowed) showRetry();
+        else showCartReview();
+      } catch {
+        pending = false;
+        retryAllowed = false;
+        showCartReview();
+      }
+    };
+    const addToCart = async () => {
+      if (pending || !retryAllowed) return;
+      pending = true;
+      retryAllowed = false;
+      retry.hidden = true;
+      reviewCart.hidden = true;
       status.className = '';
       status.textContent = 'Adding your custom jersey…';
       try {
@@ -239,10 +291,9 @@ export function renderHandoffHtml(items) {
         if (!response.ok || !isCartAddResponseValid(payload.items, result)) {
           throw new Error('cart-add-failed');
         }
-        window.location.assign('/cart');
+        navigateToCart();
       } catch {
-        pending = false;
-        showError();
+        await reconcileCart();
       }
     };
     retry.addEventListener('click', addToCart);
@@ -309,17 +360,77 @@ export function isCartAddResponseValid(requestItems, result) {
     ) {
       return false;
     }
-    return privateKeys.every((key) => (
-      typeof requestProperties[key] === 'string'
-      && responseProperties[key] === requestProperties[key]
-    ));
+    for (const key of privateKeys) {
+      if (
+        typeof requestProperties[key] !== 'string'
+        || !Object.hasOwn(responseProperties, key)
+        || responseProperties[key] !== requestProperties[key]
+      ) {
+        return false;
+      }
+    }
+    return Object.entries(requestProperties).every(([key, value]) => {
+      if (typeof value !== 'string') return false;
+      if (privateKeys.includes(key)) return true;
+      if (value === '') {
+        return !Object.hasOwn(responseProperties, key) || responseProperties[key] === '';
+      }
+      return Object.hasOwn(responseProperties, key) && responseProperties[key] === value;
+    });
   });
+}
+
+export function classifyCartBundle(requestItems, cartItems, validateResponse = isCartAddResponseValid) {
+  if (!Array.isArray(requestItems) || requestItems.length === 0 || !Array.isArray(cartItems)) {
+    return 'unknown';
+  }
+  const bundleId = requestItems[0]?.properties?._jersey_bundle_id;
+  if (typeof bundleId !== 'string' || bundleId.length === 0) return 'unknown';
+  for (const item of cartItems) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return 'unknown';
+    if (
+      item.properties !== null
+      && item.properties !== undefined
+      && (typeof item.properties !== 'object' || Array.isArray(item.properties))
+    ) {
+      return 'unknown';
+    }
+  }
+  const matching = cartItems.filter((item) => (
+    item
+    && typeof item === 'object'
+    && !Array.isArray(item)
+    && item.properties
+    && typeof item.properties === 'object'
+    && item.properties._jersey_bundle_id === bundleId
+  ));
+  if (matching.length === 0) return 'none';
+  if (matching.length !== requestItems.length) return 'partial';
+
+  const unused = new Set(matching.map((_, index) => index));
+  const ordered = [];
+  for (const requestItem of requestItems) {
+    let foundIndex = -1;
+    for (const index of unused) {
+      if (validateResponse([requestItem], { items: [matching[index]] })) {
+        foundIndex = index;
+        break;
+      }
+    }
+    if (foundIndex < 0) return 'partial';
+    unused.delete(foundIndex);
+    ordered.push(matching[foundIndex]);
+  }
+  return validateResponse(requestItems, { items: ordered }) ? 'complete' : 'partial';
 }
 
 function validateBindings(env) {
   if (!isPlainObject(env)) throw new ServiceError('APP_PROXY_ENV_MISSING');
   if (!env.DESIGN_QUOTES || typeof env.DESIGN_QUOTES.get !== 'function') {
     throw new ServiceError('APP_PROXY_DESIGN_QUOTES_BINDING_MISSING');
+  }
+  if (!env.CART_HANDOFF_RATE_LIMIT || typeof env.CART_HANDOFF_RATE_LIMIT.limit !== 'function') {
+    throw new ServiceError('APP_PROXY_RATE_LIMIT_BINDING_MISSING');
   }
   try {
     normalizeSecret(env.CART_QUOTE_SIGNING_SECRET, 'Quote signing secret');
@@ -333,6 +444,7 @@ function validateBindings(env) {
   }
   return {
     designQuotes: env.DESIGN_QUOTES,
+    rateLimit: env.CART_HANDOFF_RATE_LIMIT,
     signingSecret: env.CART_QUOTE_SIGNING_SECRET,
     apiSecret: env.SHOPIFY_API_SECRET,
   };
@@ -404,7 +516,26 @@ async function validateAuthenticatedQuery(url, now) {
   if (pathPrefix !== null && pathPrefix !== APP_PROXY_PATH_PREFIX) {
     throw new ClientError(400, INVALID_HANDOFF_MESSAGE);
   }
-  return { shop, now, token: url.searchParams.get('token') };
+  const loggedInCustomerId = url.searchParams.get('logged_in_customer_id') ?? '';
+  if (loggedInCustomerId !== '' && !/^[1-9][0-9]{0,19}$/u.test(loggedInCustomerId)) {
+    throw new ClientError(400, INVALID_HANDOFF_MESSAGE);
+  }
+  return { shop, now, token: url.searchParams.get('token'), loggedInCustomerId };
+}
+
+async function consumeHandoffRateLimit(rateLimiter, shop, loggedInCustomerId) {
+  let result;
+  try {
+    result = await rateLimiter.limit({
+      key: `${shop}:${loggedInCustomerId || 'anonymous'}`,
+    });
+  } catch {
+    throw new ServiceError('APP_PROXY_RATE_LIMIT_FAILED');
+  }
+  if (!result || typeof result.success !== 'boolean') {
+    throw new ServiceError('APP_PROXY_RATE_LIMIT_RESULT_INVALID');
+  }
+  if (!result.success) throw new RateLimitError();
 }
 
 function normalizeShop(value) {

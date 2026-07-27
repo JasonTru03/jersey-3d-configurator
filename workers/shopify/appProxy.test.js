@@ -7,6 +7,7 @@ import {
 import {
   createAppProxyHandler,
   createCartItems,
+  isCartAddResponseValid,
   renderHandoffHtml,
   verifyAppProxySignature,
 } from './appProxy.js';
@@ -31,8 +32,8 @@ async function proxySignature(parameters, secret = API_SECRET) {
     grouped.set(key, values);
   }
   const message = [...grouped]
-    .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, values]) => `${key}=${values.join(',')}`)
+    .sort()
     .join('');
   const key = await crypto.subtle.importKey(
     'raw',
@@ -165,6 +166,37 @@ describe('verifyAppProxySignature', () => {
     await expect(verifyAppProxySignature(tampered, API_SECRET)).resolves.toBe(false);
     await expect(verifyAppProxySignature(url, 'short')).rejects.toThrow('32 UTF-8 bytes');
   });
+
+  it('sorts complete key-value strings and authenticates form-decoded special characters', async () => {
+    const rawEntries = [
+      ['a', 'z'],
+      ['a0', 'first'],
+      ['plus_as_space', ' '],
+      ['encoded_plus', '+'],
+      ['encoded_space', ' '],
+      ['percent', '%'],
+      ['shop', SHOP],
+      ['timestamp', String(Math.floor(NOW / 1000))],
+      ['token', 'abc'],
+    ];
+    const signature = await proxySignature(rawEntries);
+    const rawQuery = [
+      'a=z',
+      'a0=first',
+      'plus_as_space=+',
+      'encoded_plus=%2B',
+      'encoded_space=%20',
+      'percent=%25',
+      `shop=${SHOP}`,
+      `timestamp=${Math.floor(NOW / 1000)}`,
+      'token=abc',
+      `signature=${signature}`,
+    ].join('&');
+    await expect(verifyAppProxySignature(
+      new URL(`https://worker.example/proxy?${rawQuery}`),
+      API_SECRET,
+    )).resolves.toBe(true);
+  });
 });
 
 describe('createCartItems', () => {
@@ -264,6 +296,57 @@ describe('renderHandoffHtml', () => {
   });
 });
 
+describe('isCartAddResponseValid', () => {
+  it('requires matching variants, quantities, and every private bundle property', async () => {
+    const { record, token } = await validFixture({
+      components: [
+        { role: 'base', variantId: '12345678901234', quantity: 1 },
+        { role: 'surcharge', variantId: '42', quantity: 3 },
+      ],
+    });
+    const items = createCartItems(record, token);
+    const response = {
+      items: items.map((item) => ({
+        variant_id: Number(item.id),
+        quantity: item.quantity,
+        properties: { ...item.properties },
+      })),
+    };
+
+    expect(isCartAddResponseValid(items, response)).toBe(true);
+    expect(isCartAddResponseValid(items, {
+      items: response.items.map(({ variant_id: id, ...item }) => ({ ...item, id })),
+    })).toBe(true);
+    expect(isCartAddResponseValid(items, {
+      items: response.items.map((item, index) => index === 0 ? { ...item, variant_id: 99 } : item),
+    })).toBe(false);
+    expect(isCartAddResponseValid(items, {
+      items: response.items.map((item, index) => index === 1 ? { ...item, quantity: 2 } : item),
+    })).toBe(false);
+    expect(isCartAddResponseValid(items, {
+      items: response.items.map((item, index) => index === 0
+        ? { ...item, properties: { ...item.properties, _jersey_quote: undefined } }
+        : item),
+    })).toBe(false);
+  });
+
+  it('rejects unsafe numeric responses for uint64 IDs but accepts exact response strings', async () => {
+    const { record, token } = await validFixture();
+    const items = createCartItems(record, token);
+    const responseItems = items.map((item) => ({
+      variant_id: item.id,
+      quantity: item.quantity,
+      properties: { ...item.properties },
+    }));
+    expect(isCartAddResponseValid(items, { items: responseItems })).toBe(true);
+    expect(isCartAddResponseValid(items, {
+      items: responseItems.map((item, index) => index === 0
+        ? { ...item, variant_id: Number(item.variant_id) }
+        : item),
+    })).toBe(false);
+  });
+});
+
 describe('createAppProxyHandler', () => {
   it('verifies the proxy before decoding the token or reading KV', async () => {
     const { record } = await validFixture();
@@ -282,6 +365,7 @@ describe('createAppProxyHandler', () => {
     const { env, get } = runtime(record);
     for (const mutate of [
       (url) => url.searchParams.append('shop', SHOP),
+      (url) => url.searchParams.append('token', 'second-token'),
       (url) => url.searchParams.set('token', ''),
       (url) => url.searchParams.delete('timestamp'),
     ]) {
@@ -291,6 +375,27 @@ describe('createAppProxyHandler', () => {
       expect(response.status).toBe(400);
     }
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it('accepts repeated extension parameters with official comma canonicalization', async () => {
+    const { record, token } = await validFixture();
+    const entries = [
+      ['extra', '1'],
+      ['extra', '2'],
+      ['shop', SHOP],
+      ['timestamp', String(Math.floor(NOW / 1000))],
+      ['path_prefix', '/apps/jersey-configurator'],
+      ['logged_in_customer_id', ''],
+      ['token', token],
+    ];
+    const signature = await proxySignature(entries);
+    const url = new URL('https://worker.example/cart-handoff');
+    for (const [key, value] of entries) url.searchParams.append(key, value);
+    url.searchParams.append('signature', signature);
+    const { env, get } = runtime(record);
+    const response = await createAppProxyHandler(env, { now: () => NOW })(new Request(url));
+    expect(response.status).toBe(200);
+    expect(get).toHaveBeenCalledOnce();
   });
 
   it('validates authenticated shop, timestamp, and path prefix', async () => {

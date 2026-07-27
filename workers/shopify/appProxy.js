@@ -51,6 +51,14 @@ const PRODUCTION_SUMMARY_KEYS = [
   'UV Atlas SHA-256',
 ];
 const SUMMARY_KEYS = new Set([...REQUIRED_SUMMARY_KEYS, ...PRODUCTION_SUMMARY_KEYS]);
+const SINGLE_VALUE_PROXY_PARAMETERS = new Set([
+  'signature',
+  'shop',
+  'timestamp',
+  'token',
+  'path_prefix',
+  'logged_in_customer_id',
+]);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -136,8 +144,8 @@ export async function verifyAppProxySignature(input, secret) {
     grouped.set(key, values);
   }
   const canonical = [...grouped]
-    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .map(([key, values]) => `${key}=${values.join(',')}`)
+    .sort()
     .join('');
   const key = await crypto.subtle.importKey(
     'raw',
@@ -182,6 +190,7 @@ export function createCartItems(record, token) {
 
 export function renderHandoffHtml(items) {
   const payload = encodeBase64Url(encoder.encode(JSON.stringify({ items })));
+  const cartAddValidator = `(${isCartAddResponseValid.toString()})`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -206,6 +215,7 @@ export function renderHandoffHtml(items) {
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - encoded.length % 4) % 4);
     const bytes = Uint8Array.from(atob(padded), character => character.charCodeAt(0));
     const payload = JSON.parse(new TextDecoder().decode(bytes));
+    const isCartAddResponseValid = ${cartAddValidator};
     let pending = false;
     const showError = () => {
       status.textContent = 'We could not add your jersey. Please try again.';
@@ -226,7 +236,7 @@ export function renderHandoffHtml(items) {
           body: JSON.stringify({ items: payload.items }),
         });
         const result = await response.json();
-        if (!response.ok || !result || !Array.isArray(result.items) || result.items.length !== payload.items.length) {
+        if (!response.ok || !isCartAddResponseValid(payload.items, result)) {
           throw new Error('cart-add-failed');
         }
         window.location.assign('/cart');
@@ -241,6 +251,69 @@ export function renderHandoffHtml(items) {
   </script>
 </body>
 </html>`;
+}
+
+export function isCartAddResponseValid(requestItems, result) {
+  const privateKeys = [
+    '_jersey_bundle_id',
+    '_jersey_quote',
+    '_jersey_design_id',
+    '_jersey_component',
+    '_jersey_schema',
+  ];
+  if (
+    !Array.isArray(requestItems)
+    || requestItems.length === 0
+    || !result
+    || typeof result !== 'object'
+    || !Array.isArray(result.items)
+    || result.items.length !== requestItems.length
+  ) {
+    return false;
+  }
+  return requestItems.every((requestItem, index) => {
+    const responseItem = result.items[index];
+    if (
+      !requestItem
+      || typeof requestItem !== 'object'
+      || typeof requestItem.id !== 'string'
+      || !responseItem
+      || typeof responseItem !== 'object'
+      || Array.isArray(responseItem)
+    ) {
+      return false;
+    }
+    const responseId = Object.hasOwn(responseItem, 'variant_id')
+      ? responseItem.variant_id
+      : responseItem.id;
+    if (typeof responseId === 'number') {
+      if (
+        !Number.isSafeInteger(responseId)
+        || !Number.isSafeInteger(Number(requestItem.id))
+        || String(responseId) !== requestItem.id
+      ) {
+        return false;
+      }
+    } else if (typeof responseId !== 'string' || responseId !== requestItem.id) {
+      return false;
+    }
+    if (responseItem.quantity !== requestItem.quantity) return false;
+    const requestProperties = requestItem.properties;
+    const responseProperties = responseItem.properties;
+    if (
+      !requestProperties
+      || typeof requestProperties !== 'object'
+      || !responseProperties
+      || typeof responseProperties !== 'object'
+      || Array.isArray(responseProperties)
+    ) {
+      return false;
+    }
+    return privateKeys.every((key) => (
+      typeof requestProperties[key] === 'string'
+      && responseProperties[key] === requestProperties[key]
+    ));
+  });
 }
 
 function validateBindings(env) {
@@ -287,7 +360,7 @@ function validateUnauthenticatedQuery(url) {
       key.length === 0
       || [...key].length > MAX_QUERY_KEY_LENGTH
       || [...value].length > MAX_QUERY_VALUE_LENGTH
-      || seen.has(key)
+      || (SINGLE_VALUE_PROXY_PARAMETERS.has(key) && seen.has(key))
     ) {
       throw new ClientError(400, INVALID_HANDOFF_MESSAGE);
     }

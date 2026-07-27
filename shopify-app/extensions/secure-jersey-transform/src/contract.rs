@@ -89,11 +89,7 @@ pub fn parse_store_config(value: &JsonValue) -> Option<StoreConfig> {
             .product_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-        || config.currency.len() != 3
-        || !config
-            .currency
-            .bytes()
-            .all(|byte| byte.is_ascii_uppercase())
+        || config.currency != "USD"
     {
         return None;
     }

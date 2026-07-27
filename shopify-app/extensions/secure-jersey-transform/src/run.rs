@@ -10,6 +10,11 @@ const MAX_COMPONENTS_PER_GROUP: usize = 16;
 const MAX_OPERATIONS: usize = 32;
 const MAX_SUMMARY_VALUE_CODEPOINTS: usize = 255;
 const MAX_SUMMARY_VALUE_BYTES: usize = 1024;
+const MAX_OUTPUT_JSON_BYTES: usize = 19_000;
+const OUTPUT_FIXED_OVERHEAD_BYTES: usize = 64;
+const MERGE_FIXED_OVERHEAD_BYTES: usize = 512;
+const ATTRIBUTE_FIXED_OVERHEAD_BYTES: usize = 64;
+const CART_LINE_FIXED_OVERHEAD_BYTES: usize = 64;
 
 struct CandidateLine {
     id: String,
@@ -162,11 +167,24 @@ fn run(input: schema::run::Input) -> Result<schema::CartTransformRunResult> {
     }
 
     let mut operations = Vec::new();
+    let mut output_upper_bound = OUTPUT_FIXED_OVERHEAD_BYTES;
     for lines in groups.values() {
         if let Some(operation) = verified_merge(lines, &config) {
             if operations.len() >= MAX_OPERATIONS {
                 return Ok(empty_result());
             }
+            let Some(operation_upper_bound) = merge_output_upper_bound(&operation) else {
+                return Ok(empty_result());
+            };
+            let Some(next_output_upper_bound) =
+                output_upper_bound.checked_add(operation_upper_bound)
+            else {
+                return Ok(empty_result());
+            };
+            if next_output_upper_bound > MAX_OUTPUT_JSON_BYTES {
+                return Ok(empty_result());
+            }
+            output_upper_bound = next_output_upper_bound;
             operations.push(schema::Operation::LinesMerge(operation));
         }
     }
@@ -277,9 +295,6 @@ fn parent_summary(base: &CandidateLine) -> Option<Vec<schema::AttributeOutput>> 
     if base.summary.len() != 12 {
         return None;
     }
-    if base.summary[..7].iter().any(|(_, value)| value.is_none()) {
-        return None;
-    }
     let production_count = base.summary[7..]
         .iter()
         .filter(|(_, value)| value.is_some())
@@ -302,6 +317,30 @@ fn parent_summary(base: &CandidateLine) -> Option<Vec<schema::AttributeOutput>> 
             })
         })
         .collect()
+}
+
+fn merge_output_upper_bound(operation: &schema::LinesMergeOperation) -> Option<usize> {
+    let mut bytes = MERGE_FIXED_OVERHEAD_BYTES
+        .checked_add(json_string_content_bytes(&operation.parent_variant_id)?)?;
+    if let Some(title) = &operation.title {
+        bytes = bytes.checked_add(json_string_content_bytes(title)?)?;
+    }
+    if let Some(attributes) = &operation.attributes {
+        for attribute in attributes {
+            bytes = bytes.checked_add(ATTRIBUTE_FIXED_OVERHEAD_BYTES)?;
+            bytes = bytes.checked_add(json_string_content_bytes(&attribute.key)?)?;
+            bytes = bytes.checked_add(json_string_content_bytes(&attribute.value)?)?;
+        }
+    }
+    for line in &operation.cart_lines {
+        bytes = bytes.checked_add(CART_LINE_FIXED_OVERHEAD_BYTES)?;
+        bytes = bytes.checked_add(json_string_content_bytes(&line.cart_line_id)?)?;
+    }
+    Some(bytes)
+}
+
+fn json_string_content_bytes(value: &str) -> Option<usize> {
+    serde_json::to_string(value).ok()?.len().checked_sub(2)
 }
 
 fn decimal_to_minor(value: f64) -> Option<i64> {
@@ -336,6 +375,13 @@ mod tests {
             .join(name);
         let input = fs::read_to_string(path)?;
         run_function_with_input(run, &input)
+    }
+
+    fn serialized_output_len(output: &schema::CartTransformRunResult) -> Result<usize> {
+        let mut context =
+            shopify_function::wasm_api::Context::new_with_input(serde_json::json!({}));
+        shopify_function::wasm_api::Serialize::serialize(output, &mut context)?;
+        Ok(serde_json::to_vec(&context.finalize_output_and_return()?)?.len())
     }
 
     #[test]
@@ -409,6 +455,42 @@ mod tests {
             value("UV Atlas SHA-256"),
             Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn omitted_empty_display_summary_does_not_block_merge() -> Result<()> {
+        let output = run_fixture("empty-display-summary.json")?;
+        let schema::Operation::LinesMerge(merge) = &output.operations[0] else {
+            panic!("expected linesMerge");
+        };
+        assert_eq!(merge.attributes.as_ref().map(Vec::len), Some(5));
+        Ok(())
+    }
+
+    #[test]
+    fn oversized_combined_output_fails_closed() -> Result<()> {
+        let single = run_fixture("one-group-max-utf8-summary.json")?;
+        let schema::Operation::LinesMerge(single_merge) = &single.operations[0] else {
+            panic!("expected single linesMerge");
+        };
+        let single_upper_bound =
+            OUTPUT_FIXED_OVERHEAD_BYTES + merge_output_upper_bound(single_merge).unwrap();
+        assert!(serialized_output_len(&single)? <= single_upper_bound);
+        assert!(single_upper_bound <= MAX_OUTPUT_JSON_BYTES);
+
+        let output = run_fixture("two-groups-max-utf8-summary.json")?;
+        assert!(output.operations.is_empty());
+        assert!(
+            serialized_output_len(&output)? < 20_000,
+            "empty fail-closed response must remain below Shopify's limit"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn non_usd_store_config_is_rejected() -> Result<()> {
+        assert!(run_fixture("non-usd-config.json")?.operations.is_empty());
         Ok(())
     }
 

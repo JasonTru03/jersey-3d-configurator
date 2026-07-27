@@ -31,11 +31,18 @@ Its encoded value is capped at 255 bytes.
 
 `Size`, `Template`, `Colors`, `Print`, `Custom Text`, `Extras`, and `Artwork`
 (plus the all-or-none production-file fields) are copied only from the base
-component. They remain buyer-facing display data and are not part of the HMAC.
+component. Empty display values may be omitted by Shopify and therefore do not
+block a valid merge; production-file fields remain all-or-none. These strings
+remain buyer-facing display data and are not part of the HMAC.
 Fulfillment must ignore those strings and resolve the trusted Worker design
 record by the signed `designId`.
 
-The transform accepts only the configured currency and compares the
+The transform accepts only USD, matching the Worker's integer minor-unit
+contract, and compares the
 fixed-point sum of Shopify line totals with the signed `totalMinor`. It also
 caps cart lines, bundle groups, components per group, output operations, and
-attribute byte lengths before allocating merge output.
+attribute byte lengths before allocating merge output. A conservative,
+deterministic 19,000-byte JSON upper bound is accumulated across all merge
+operations; if any candidate would exceed it, the entire invocation returns no
+operations so Shopify's 20 KB Function output limit is never approached
+partially.

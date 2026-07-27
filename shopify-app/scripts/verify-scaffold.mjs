@@ -20,6 +20,7 @@ const requiredFiles = [
   "extensions/secure-jersey-transform/shopify.extension.toml",
   "extensions/secure-jersey-transform/schema.graphql",
   "extensions/secure-jersey-transform/src/main.rs",
+  "extensions/secure-jersey-transform/src/contract.rs",
   "extensions/secure-jersey-transform/src/run.graphql",
   "extensions/secure-jersey-transform/src/run.rs",
   "extensions/secure-jersey-validation/Cargo.lock",
@@ -28,6 +29,7 @@ const requiredFiles = [
   "extensions/secure-jersey-validation/shopify.extension.toml",
   "extensions/secure-jersey-validation/schema.graphql",
   "extensions/secure-jersey-validation/src/main.rs",
+  "extensions/secure-jersey-validation/src/contract.rs",
   "extensions/secure-jersey-validation/src/run.graphql",
   "extensions/secure-jersey-validation/src/run.rs",
 ];
@@ -157,7 +159,13 @@ const extensionChecks = new Map([
     handle: "secure-jersey-validation",
     target: "cart.validations.generate.run",
     resultType: "CartValidationsGenerateRunResult",
-    dependencies: {shopify_function: "=1.1.0"},
+    dependencies: {
+      base64: "=0.22.1",
+      hmac: "=0.12.1",
+      serde_json: "=1.0.151",
+      sha2: "=0.10.9",
+      shopify_function: "=1.1.0",
+    },
   }],
 ]);
 for (const [file, expected] of extensionChecks) {
@@ -213,6 +221,13 @@ for (const [file, expected] of extensionChecks) {
   if (/^Cargo\.lock$/m.test(contents.get(ignoreFile))) {
     throw new Error(`${ignoreFile} must not ignore Cargo.lock`);
   }
+}
+
+if (
+  contents.get("extensions/secure-jersey-validation/src/contract.rs")
+  !== contents.get("extensions/secure-jersey-transform/src/contract.rs")
+) {
+  throw new Error("Cart Transform and Validation quote contracts must stay byte-for-byte identical");
 }
 
 if (/^Cargo\.lock$/m.test(contents.get(".gitignore"))) {

@@ -1,7 +1,7 @@
 # Third-party template notice
 
-The Shopify Function extension scaffolds in this directory were rendered from
-the official `Shopify/function-examples` repository at commit
+The Shopify Function extension scaffolds in this directory retain files
+originally rendered from the official `Shopify/function-examples` repository at commit
 `19ccafceda1d0052c2c90c0a1e4db3fe37b16c27`:
 
 - `extensions/secure-jersey-transform` comes from
@@ -9,8 +9,15 @@ the official `Shopify/function-examples` repository at commit
 - `extensions/secure-jersey-validation` comes from
   `checkout/rust/cart-checkout-validation/default`.
 
-The Liquid template placeholders and conditional naming fields were rendered as
-follows:
+Those archived templates used the 2025-01 Function API. The Rust entry points,
+targets, result operations, and committed schema snapshots were rebuilt for the
+2026-07 API using Shopify's official references:
+
+- `https://shopify.dev/docs/api/functions/2026-07/cart-transform`
+- `https://shopify.dev/docs/api/functions/2026-07/cart-and-checkout-validation`
+
+The original Liquid placeholders and conditional naming fields were rendered
+as follows:
 
 - Transform `handle` and package/artifact name:
   `secure-jersey-transform`.
@@ -21,6 +28,12 @@ follows:
 - The optional `uid` line was omitted because no extension UID was supplied.
 - Files ending in `.liquid` were rendered to their corresponding scaffold
   filenames without the `.liquid` suffix.
+
+The 2026-07 rebuild changed the transform target to `cart.transform.run`, the
+validation target to `cart.validations.generate.run`, and the validation output
+to `CartValidationsGenerateRunResult.operations` with a `validationAdd`
+operation. Both Rust functions now use Shopify's `typegen`, `query`, and
+`shopify_function` macros.
 
 The source templates are licensed under the MIT license. The exact upstream
 license text from that commit is included as

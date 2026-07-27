@@ -1,3 +1,4 @@
+# schema-version: 2026-07
 schema {
   query: Input
   mutation: MutationRoot
@@ -2822,12 +2823,12 @@ enum DeliveryMethod {
 """
 A Function error for a path.
 """
-input FunctionError {
+input ValidationError {
   """
   A description of the validation error. For example, "The product is out of stock" or
   "The product isn't available for purchase in your region". The message is localized for the customer.
   """
-  localizedMessage: String!
+  message: String!
 
   """
   The [identifier](https://shopify.dev/docs/api/functions/reference/cart-checkout-validation/graphql#supported-checkout-field-targets)
@@ -2850,24 +2851,44 @@ input FunctionFetchResult {
 The output of the Function run target. The object contains the validation errors
 that display to customers and prevent them from proceeding through checkout. In
 API versions 2023-10 and beyond, this type is deprecated in favor of
-`FunctionRunResult`.
+`CartValidationsGenerateRunResult`.
 """
 input FunctionResult {
   """
   The validation errors that block a customer from proceeding through checkout.
   """
-  errors: [FunctionError!]!
+  errors: [ValidationError!]!
 }
 
 """
 The output of the Function run target. The object contains the validation errors
 that display to customers and prevent them from proceeding through checkout.
 """
-input FunctionRunResult {
+input Operation @oneOf {
+  """
+  An operation that adds validations to the cart and checkout.
+  """
+  validationAdd: ValidationAddOperation
+}
+
+"""
+An operation that adds validation errors to the cart and checkout.
+"""
+input ValidationAddOperation {
   """
   The validation errors that block a customer from proceeding through checkout.
   """
-  errors: [FunctionError!]!
+  errors: [ValidationError!]!
+}
+
+"""
+The output of the cart.validations.generate.run target.
+"""
+input CartValidationsGenerateRunResult {
+  """
+  An ordered list of validation operations.
+  """
+  operations: [Operation!]!
 }
 
 """
@@ -3099,7 +3120,7 @@ type Input {
   your fetch target, and that is passed as input to the run target. For more
   information, refer to [network access for Shopify Functions](https://shopify.dev/docs/apps/build/functions/input-output/network-access).
   """
-  fetchResult: HttpResponse @restrictTarget(only: ["purchase.validation.run"])
+  fetchResult: HttpResponse @restrictTarget(only: ["cart.validations.generate.run"])
 
   """
   The regional and language settings that determine how the Function
@@ -4401,7 +4422,7 @@ The root mutation for the API.
 """
 type MutationRoot {
   """
-  Handles the Function result for the purchase.validation.fetch target.
+  Handles the Function result for the cart.validations.generate.fetch target.
   """
   fetch(
     """
@@ -4421,13 +4442,13 @@ type MutationRoot {
   ): Void! @deprecated(reason: "Use the target-specific field instead.")
 
   """
-  Handles the Function result for the purchase.validation.run target.
+  Handles the Function result for the cart.validations.generate.run target.
   """
   run(
     """
     The result of the Function.
     """
-    result: FunctionRunResult!
+    result: CartValidationsGenerateRunResult!
   ): Void!
 }
 

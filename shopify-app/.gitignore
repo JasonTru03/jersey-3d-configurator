@@ -18,4 +18,3 @@ target/
 **/target/
 result/
 **/result/
-Cargo.lock

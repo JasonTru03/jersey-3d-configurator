@@ -11,10 +11,11 @@
     "test": "npm run verify:scaffold && npm run test:functions",
     "test:functions": "cargo test --manifest-path extensions/secure-jersey-transform/Cargo.toml && cargo test --manifest-path extensions/secure-jersey-validation/Cargo.toml",
     "verify:scaffold": "node scripts/verify-scaffold.mjs",
-    "deploy": "shopify app deploy"
+    "deploy": "node scripts/deploy.mjs"
   },
   "devDependencies": {
-    "@shopify/cli": "4.5.2"
+    "@shopify/cli": "4.5.2",
+    "smol-toml": "1.7.1"
   },
   "engines": {
     "node": ">=22.12.0"

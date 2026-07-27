@@ -1,3 +1,4 @@
+# schema-version: 2026-07
 schema {
   query: Input
   mutation: MutationRoot
@@ -226,13 +227,13 @@ its [bundled items](https://shopify.dev/docs/apps/build/product-merchandising/bu
 multiple cart lines into a single line representing a bundle, and update the presentation of line items
 in the cart to override their price, title, or image.
 """
-input CartOperation @oneOf {
+input Operation @oneOf {
   """
   An operation that expands a single cart line item to form a
   [bundle](https://shopify.dev/docs/apps/build/product-merchandising/bundles)
   of components.
   """
-  expand: ExpandOperation
+  lineExpand: LineExpandOperation
 
   """
   An operation that merges multiple cart line items into a
@@ -240,7 +241,7 @@ input CartOperation @oneOf {
   [bundle](https://shopify.dev/docs/apps/build/product-merchandising/bundles)
   of components.
   """
-  merge: MergeOperation
+  linesMerge: LinesMergeOperation
 
   """
   An operation that allows you to override the price, title,
@@ -248,7 +249,7 @@ input CartOperation @oneOf {
   [Shopify Plus plan](https://help.shopify.com/manual/intro-to-shopify/pricing-plans/plans-features/shopify-plus-plan)
   can use apps with `update` operations.
   """
-  update: UpdateOperation
+  lineUpdate: LineUpdateOperation
 }
 
 """
@@ -2673,7 +2674,7 @@ An operation that expands a single cart line item to form a
 [bundle](https://shopify.dev/docs/apps/build/product-merchandising/bundles)
 of components.
 """
-input ExpandOperation {
+input LineExpandOperation {
   """
   A [globally-unique ID](https://shopify.dev/docs/api/usage/gids)
   for a line item in a cart. A cart line represents a single unit of a
@@ -2776,7 +2777,7 @@ input ExpandedItemPriceAdjustmentValue @oneOf {
 """
 The output of the Function run target.
 The object contains the operations to change the pricing and presentation of items
-in a cart. In API versions 2023-10 and beyond, this type is deprecated in favor of `FunctionRunResult`.
+in a cart. In API versions 2023-10 and beyond, this type is deprecated in favor of `CartTransformRunResult`.
 """
 input FunctionResult {
   """
@@ -2785,7 +2786,7 @@ input FunctionResult {
   multiple cart lines into a single line representing a bundle, and update the presentation of line items
   in the cart to override their price, title, or image.
   """
-  operations: [CartOperation!]!
+  operations: [Operation!]!
 }
 
 """
@@ -2793,14 +2794,14 @@ The output of the Function run target.
 The object contains the operations to change the pricing and presentation of items
 in a cart.
 """
-input FunctionRunResult {
+input CartTransformRunResult {
   """
   The ordered list of operations to apply to the cart. For example, you can expand a cart line item to display
   its [bundled items](https://shopify.dev/docs/apps/build/product-merchandising/bundles), merge
   multiple cart lines into a single line representing a bundle, and update the presentation of line items
   in the cart to override their price, title, or image.
   """
-  operations: [CartOperation!]!
+  operations: [Operation!]!
 }
 
 """
@@ -3852,7 +3853,7 @@ single line, representing a
 [bundle](https://shopify.dev/docs/apps/build/product-merchandising/bundles)
 of components.
 """
-input MergeOperation {
+input LinesMergeOperation {
   """
   The custom attributes associated with a cart line to store additional information. Cart attributes
   allow you to collect specific information from customers on the **Cart** page, such as order notes,
@@ -3951,13 +3952,13 @@ type MutationRoot {
   ): Void! @deprecated(reason: "Use the target-specific field instead.")
 
   """
-  Handles the Function result for the purchase.cart-transform.run target.
+  Handles the Function result for the cart.transform.run target.
   """
   run(
     """
     The result of the Function.
     """
-    result: FunctionRunResult!
+    result: CartTransformRunResult!
   ): Void!
 }
 
@@ -4347,7 +4348,7 @@ and image of a cart line item. Only stores on a
 [Shopify Plus plan](https://help.shopify.com/manual/intro-to-shopify/pricing-plans/plans-features/shopify-plus-plan)
 can use apps with `update` operations.
 """
-input UpdateOperation {
+input LineUpdateOperation {
   """
   A [globally-unique ID](https://shopify.dev/docs/api/usage/gids)
   for a line item in a cart. A cart line represents a single unit of a
@@ -4366,7 +4367,7 @@ input UpdateOperation {
   price the customer pays. Price adjustments are often used for promotions, special offers, or any price changes
   for which the customer qualifies.
   """
-  price: UpdateOperationPriceAdjustment
+  price: LineUpdateOperationPriceAdjustment
 
   """
   The title that replaces the existing title for the cart line item.
@@ -4378,7 +4379,7 @@ input UpdateOperation {
 """
 A fixed price per unit adjustment to apply to a cart line.
 """
-input UpdateOperationFixedPricePerUnitAdjustment {
+input LineUpdateOperationFixedPricePerUnitAdjustment {
   """
   The fixed price amount per quantity of the cart line item in presentment currency.
   """
@@ -4390,21 +4391,21 @@ A change to an item's original price. Price adjustments include discounts or add
 price the customer pays. Price adjustments are often used for promotions, special offers, or any price changes
 for which the customer qualifies.
 """
-input UpdateOperationPriceAdjustment {
+input LineUpdateOperationPriceAdjustment {
   """
   The price adjustment per unit to apply to the cart line item.
   """
-  adjustment: UpdateOperationPriceAdjustmentValue!
+  adjustment: LineUpdateOperationPriceAdjustmentValue!
 }
 
 """
 The value of the price adjustment to apply to the updated item.
 """
-input UpdateOperationPriceAdjustmentValue @oneOf {
+input LineUpdateOperationPriceAdjustmentValue @oneOf {
   """
   A fixed price per unit adjustment to apply to a cart line.
   """
-  fixedPricePerUnit: UpdateOperationFixedPricePerUnitAdjustment
+  fixedPricePerUnit: LineUpdateOperationFixedPricePerUnitAdjustment
 }
 
 """

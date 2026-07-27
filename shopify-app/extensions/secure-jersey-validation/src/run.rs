@@ -1,86 +1,68 @@
+use crate::schema;
 use shopify_function::prelude::*;
 use shopify_function::Result;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Default, PartialEq)]
-#[allow(dead_code)]
-struct Config {}
-
-#[shopify_function_target(query_path = "src/run.graphql", schema_path = "schema.graphql")]
-fn run(input: input::ResponseData) -> Result<output::FunctionRunResult> {
-    let mut errors = Vec::new();
-
-    if input
-        .cart
-        .lines
+#[shopify_function]
+fn run(input: schema::run::Input) -> Result<schema::CartValidationsGenerateRunResult> {
+    let errors = input
+        .cart()
+        .lines()
         .iter()
-        .map(|line| line.quantity)
-        .any(|quantity| quantity > 1)
-    {
-        errors.push(output::FunctionError {
-            localized_message: "Not possible to order more than one of each".to_owned(),
-            target: "$.cart".to_owned(),
+        .filter(|line| *line.quantity() > 1)
+        .map(|_| schema::ValidationError {
+            message: "Not possible to order more than one of each".to_string(),
+            target: "$.cart".to_string(),
         })
-    }
-    Ok(output::FunctionRunResult { errors })
+        .collect();
+
+    Ok(schema::CartValidationsGenerateRunResult {
+        operations: vec![schema::Operation::ValidationAdd(
+            schema::ValidationAddOperation { errors },
+        )],
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shopify_function::{run_function_with_input, Result};
+    use shopify_function::run_function_with_input;
 
     #[test]
-    fn test_result_contains_single_error_when_quantity_exceeds_one() -> Result<()> {
-        use run::output::*;
-
+    fn adds_validation_when_quantity_exceeds_one() -> Result<()> {
         let result = run_function_with_input(
             run,
-            r#"
-                {
-                    "cart": {
-                        "lines": [
-                            {
-                                "quantity": 3
-                            }
-                        ]
-                    }
-                }
-            "#,
+            r#"{"cart":{"lines":[{"quantity":3}]}}"#,
         )?;
-        let expected = FunctionRunResult {
-            errors: vec![FunctionError {
-                localized_message: "Not possible to order more than one of each".to_owned(),
-                target: "$.cart".to_owned(),
-            }],
-        };
-
-        assert_eq!(result, expected);
+        assert_eq!(
+            result,
+            schema::CartValidationsGenerateRunResult {
+                operations: vec![schema::Operation::ValidationAdd(
+                    schema::ValidationAddOperation {
+                        errors: vec![schema::ValidationError {
+                            message: "Not possible to order more than one of each".to_string(),
+                            target: "$.cart".to_string(),
+                        }],
+                    },
+                )],
+            },
+        );
         Ok(())
     }
 
     #[test]
-    fn test_result_contains_no_errors_when_quantity_is_one() -> Result<()> {
-        use run::output::*;
-
+    fn adds_empty_validation_when_quantities_are_valid() -> Result<()> {
         let result = run_function_with_input(
             run,
-            r#"
-                {
-                    "cart": {
-                        "lines": [
-                            {
-                                "quantity": 1
-                            }
-                        ]
-                    }
-                }
-            "#,
+            r#"{"cart":{"lines":[{"quantity":1}]}}"#,
         )?;
-        let expected = FunctionRunResult { errors: vec![] };
-
-        assert_eq!(result, expected);
+        assert_eq!(
+            result,
+            schema::CartValidationsGenerateRunResult {
+                operations: vec![schema::Operation::ValidationAdd(
+                    schema::ValidationAddOperation { errors: vec![] },
+                )],
+            },
+        );
         Ok(())
     }
 }

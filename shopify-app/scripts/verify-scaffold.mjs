@@ -1,22 +1,32 @@
 import {readFile, readdir} from "node:fs/promises";
 import {createHash} from "node:crypto";
 import {resolve} from "node:path";
+import {parse} from "smol-toml";
 
 const root = resolve(import.meta.dirname, "..");
 const requiredFiles = [
   "package.json",
   "package-lock.json",
+  ".gitignore",
   "shopify.app.toml",
+  "rust-toolchain.toml",
   "LICENSE.shopify-function-examples.md",
   "NOTICE.md",
+  "scripts/deploy.mjs",
+  "extensions/secure-jersey-transform/Cargo.lock",
   "extensions/secure-jersey-transform/Cargo.toml",
+  "extensions/secure-jersey-transform/.gitignore",
   "extensions/secure-jersey-transform/shopify.extension.toml",
   "extensions/secure-jersey-transform/schema.graphql",
+  "extensions/secure-jersey-transform/src/main.rs",
   "extensions/secure-jersey-transform/src/run.graphql",
   "extensions/secure-jersey-transform/src/run.rs",
+  "extensions/secure-jersey-validation/Cargo.lock",
   "extensions/secure-jersey-validation/Cargo.toml",
+  "extensions/secure-jersey-validation/.gitignore",
   "extensions/secure-jersey-validation/shopify.extension.toml",
   "extensions/secure-jersey-validation/schema.graphql",
+  "extensions/secure-jersey-validation/src/main.rs",
   "extensions/secure-jersey-validation/src/run.graphql",
   "extensions/secure-jersey-validation/src/run.rs",
 ];
@@ -30,41 +40,58 @@ const packageJson = JSON.parse(contents.get("package.json"));
 if (packageJson.devDependencies?.["@shopify/cli"] !== "4.5.2") {
   throw new Error("@shopify/cli must be pinned exactly to 4.5.2");
 }
-
-const appConfig = contents.get("shopify.app.toml");
-const requiredConfig = [
-  'client_id = "TARGET_SHOPIFY_CLIENT_ID"',
-  'application_url = "https://TARGET_WORKER_DOMAIN"',
-  "embedded = false",
-  'api_version = "2026-07"',
-  'prefix = "apps"',
-  'subpath = "jersey-configurator"',
-  'url = "https://TARGET_WORKER_DOMAIN/apps/jersey-configurator"',
-  '"https://TARGET_WORKER_DOMAIN/auth/callback"',
-];
-for (const expected of requiredConfig) {
-  if (!appConfig.includes(expected)) throw new Error(`Missing app config: ${expected}`);
+if (packageJson.devDependencies?.["smol-toml"] !== "1.7.1") {
+  throw new Error("smol-toml must be pinned exactly to 1.7.1");
+}
+if (packageJson.scripts?.deploy !== "node scripts/deploy.mjs") {
+  throw new Error("deploy must run the guarded deployment script");
 }
 
-const scopesMatch = appConfig.match(/^\s*scopes\s*=\s*"([^"]*)"\s*$/m);
-if (!scopesMatch) throw new Error("Missing access_scopes.scopes app config");
+function assertEqual(actual, expected, label) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`${label} mismatch: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`);
+  }
+}
+
+const appConfigText = contents.get("shopify.app.toml");
+const appConfig = parse(appConfigText);
+assertEqual(appConfig.client_id, "TARGET_SHOPIFY_CLIENT_ID", "client_id");
+assertEqual(appConfig.application_url, "https://TARGET_WORKER_DOMAIN", "application_url");
+assertEqual(appConfig.embedded, false, "embedded");
+assertEqual(appConfig.webhooks, {api_version: "2026-07"}, "webhooks section");
+assertEqual(
+  appConfig.auth,
+  {redirect_urls: ["https://TARGET_WORKER_DOMAIN/auth/callback"]},
+  "auth section",
+);
+assertEqual(
+  appConfig.app_proxy,
+  {
+    prefix: "apps",
+    subpath: "jersey-configurator",
+    url: "https://TARGET_WORKER_DOMAIN/apps/jersey-configurator",
+  },
+  "app_proxy section",
+);
 
 const expectedScopes = [
   "write_app_proxy",
   "write_cart_transforms",
-  "write_cart_validations",
+  "write_validations",
 ];
-const configuredScopes = scopesMatch[1]
+const configuredScopes = appConfig.access_scopes?.scopes
   .split(",")
   .map((scope) => scope.trim())
   .filter(Boolean)
   .sort();
-if (
-  configuredScopes.length !== expectedScopes.length
-  || configuredScopes.some((scope, index) => scope !== expectedScopes[index])
-) {
-  throw new Error(`Access scopes must be exactly: ${expectedScopes.join(",")}`);
-}
+assertEqual(configuredScopes, expectedScopes, "access_scopes.scopes");
+
+const toolchain = parse(contents.get("rust-toolchain.toml"));
+assertEqual(
+  toolchain.toolchain,
+  {channel: "1.97.1", components: ["rustfmt", "clippy"], targets: ["wasm32-wasip1"], profile: "minimal"},
+  "rust toolchain",
+);
 
 const sourceCommit = "19ccafceda1d0052c2c90c0a1e4db3fe37b16c27";
 const sourcePaths = [
@@ -72,7 +99,11 @@ const sourcePaths = [
   "checkout/rust/cart-checkout-validation/default",
 ];
 const notice = contents.get("NOTICE.md");
-for (const traceabilityValue of [sourceCommit, ...sourcePaths, "MIT"]) {
+const sourceDocs = [
+  "https://shopify.dev/docs/api/functions/2026-07/cart-transform",
+  "https://shopify.dev/docs/api/functions/2026-07/cart-and-checkout-validation",
+];
+for (const traceabilityValue of [sourceCommit, ...sourcePaths, ...sourceDocs, "MIT"]) {
   if (!notice.includes(traceabilityValue)) {
     throw new Error(`NOTICE.md must identify upstream source: ${traceabilityValue}`);
   }
@@ -85,12 +116,75 @@ if (licenseHash !== "03fde3ca1c31000b50d86635cc982c2957a44c95f153901d538830224a0
   throw new Error("Shopify function-examples license must match the exact upstream LICENSE.md");
 }
 
-const targetChecks = new Map([
-  ["extensions/secure-jersey-transform/shopify.extension.toml", 'target = "purchase.cart-transform.run"'],
-  ["extensions/secure-jersey-validation/shopify.extension.toml", 'target = "purchase.validation.run"'],
+const extensionChecks = new Map([
+  ["extensions/secure-jersey-transform/shopify.extension.toml", {
+    handle: "secure-jersey-transform",
+    target: "cart.transform.run",
+    resultType: "CartTransformRunResult",
+  }],
+  ["extensions/secure-jersey-validation/shopify.extension.toml", {
+    handle: "secure-jersey-validation",
+    target: "cart.validations.generate.run",
+    resultType: "CartValidationsGenerateRunResult",
+  }],
 ]);
-for (const [file, target] of targetChecks) {
-  if (!contents.get(file).includes(target)) throw new Error(`Missing target in ${file}: ${target}`);
+for (const [file, expected] of extensionChecks) {
+  const extensionConfig = parse(contents.get(file));
+  assertEqual(extensionConfig.api_version, "2026-07", `${file} api_version`);
+  assertEqual(extensionConfig.extensions?.length, 1, `${file} extensions count`);
+  const extension = extensionConfig.extensions[0];
+  assertEqual(extension.handle, expected.handle, `${file} handle`);
+  assertEqual(extension.type, "function", `${file} type`);
+  assertEqual(extension.targeting, [{
+    target: expected.target,
+    input_query: "src/run.graphql",
+    export: "run",
+  }], `${file} targeting`);
+  assertEqual(extension.build, {
+    command: "cargo build --target=wasm32-wasip1 --release",
+    path: `target/wasm32-wasip1/release/${expected.handle}.wasm`,
+    watch: ["src/**/*.rs"],
+  }, `${file} build`);
+
+  const sourceFile = file.replace("shopify.extension.toml", "src/run.rs");
+  const source = contents.get(sourceFile);
+  for (const marker of ["#[shopify_function]", expected.resultType]) {
+    if (!source.includes(marker)) throw new Error(`${sourceFile} must use current Rust template marker: ${marker}`);
+  }
+
+  const mainFile = file.replace("shopify.extension.toml", "src/main.rs");
+  const main = contents.get(mainFile);
+  for (const marker of ['#[typegen("schema.graphql")]', '#[query("src/run.graphql")]']) {
+    if (!main.includes(marker)) throw new Error(`${mainFile} must use current Rust template marker: ${marker}`);
+  }
+
+  const schemaFile = file.replace("shopify.extension.toml", "schema.graphql");
+  const schema = contents.get(schemaFile);
+  const schemaMarkers = expected.handle.endsWith("validation")
+    ? ["input Operation @oneOf", "validationAdd: ValidationAddOperation", "operations: [Operation!]!"]
+    : ["input Operation @oneOf", "lineExpand:", "linesMerge:", "lineUpdate:"];
+  for (const marker of ["# schema-version: 2026-07", `input ${expected.resultType}`, ...schemaMarkers]) {
+    if (!schema.includes(marker)) throw new Error(`${schemaFile} must contain current schema marker: ${marker}`);
+  }
+  for (const legacyMarker of ["purchase.cart-transform.run", "purchase.validation.run", "FunctionRunResult"]) {
+    if (schema.includes(legacyMarker)) throw new Error(`${schemaFile} contains legacy schema marker: ${legacyMarker}`);
+  }
+
+  const cargoFile = file.replace("shopify.extension.toml", "Cargo.toml");
+  const cargoConfig = parse(contents.get(cargoFile));
+  assertEqual(cargoConfig.dependencies, {shopify_function: "=1.1.0"}, `${cargoFile} dependencies`);
+  const lockFile = file.replace("shopify.extension.toml", "Cargo.lock");
+  if (!/name = "shopify_function"\r?\nversion = "1\.1\.0"/.test(contents.get(lockFile))) {
+    throw new Error(`${lockFile} must lock shopify_function 1.1.0`);
+  }
+  const ignoreFile = file.replace("shopify.extension.toml", ".gitignore");
+  if (/^Cargo\.lock$/m.test(contents.get(ignoreFile))) {
+    throw new Error(`${ignoreFile} must not ignore Cargo.lock`);
+  }
+}
+
+if (/^Cargo\.lock$/m.test(contents.get(".gitignore"))) {
+  throw new Error("The app .gitignore must not ignore Cargo.lock");
 }
 
 async function collectFiles(directory) {
@@ -119,7 +213,7 @@ for (const file of await collectFiles(root)) {
   }
 }
 
-if (/\.myshopify\.com/i.test(appConfig)) {
+if (/\.myshopify\.com/i.test(appConfigText)) {
   throw new Error("A store-specific Shopify domain must not be committed");
 }
 

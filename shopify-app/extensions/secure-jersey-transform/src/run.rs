@@ -1,12 +1,21 @@
+use crate::schema;
 use shopify_function::prelude::*;
 use shopify_function::Result;
 
-#[allow(clippy::upper_case_acronyms)]
-type URL = String;
+#[shopify_function]
+fn run(_input: schema::run::Input) -> Result<schema::CartTransformRunResult> {
+    Ok(schema::CartTransformRunResult { operations: vec![] })
+}
 
-#[shopify_function_target(query_path = "src/run.graphql", schema_path = "schema.graphql")]
-fn run(_input: input::ResponseData) -> Result<output::FunctionRunResult> {
-    let no_changes = output::FunctionRunResult { operations: vec![] };
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shopify_function::run_function_with_input;
 
-    Ok(no_changes)
+    #[test]
+    fn returns_no_operations() -> Result<()> {
+        let result = run_function_with_input(run, r#"{"cart":{"lines":[]}}"#)?;
+        assert_eq!(result, schema::CartTransformRunResult { operations: vec![] });
+        Ok(())
+    }
 }

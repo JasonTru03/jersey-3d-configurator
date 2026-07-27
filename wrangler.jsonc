@@ -3,7 +3,13 @@
   "name": "jersey-3d-configurator",
   "compatibility_date": "2026-07-14",
   "main": "workers/index.js",
-  "vars": { "LOCAL_PRODUCTION_FILES": "true" },
+  // Deployment also requires DESIGN_QUOTES and CART_QUOTE_RATE_LIMIT KV bindings.
+  // Set CART_QUOTE_SIGNING_SECRET with `wrangler secret`; never place it in this file.
+  "vars": {
+    "LOCAL_PRODUCTION_FILES": "true",
+    "SHOPIFY_STORE_CONFIG_JSON": "{}",
+    "CART_QUOTE_RATE_LIMIT_PER_MINUTE": "10"
+  },
   "assets": {
     "directory": "./dist"
   }

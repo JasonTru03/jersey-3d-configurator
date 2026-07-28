@@ -287,8 +287,8 @@ export function renderHandoffHtml(items) {
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({ items: payload.items }),
         });
-        const result = await response.json();
-        if (!response.ok || !isCartAddResponseValid(payload.items, result)) {
+        await response.json();
+        if (!response.ok) {
           throw new Error('cart-add-failed');
         }
         navigateToCart();
@@ -318,10 +318,71 @@ export function isCartAddResponseValid(requestItems, result) {
     || !result
     || typeof result !== 'object'
     || !Array.isArray(result.items)
-    || result.items.length !== requestItems.length
   ) {
     return false;
   }
+
+  const responseIdMatches = (requestId, responseItem) => {
+    const responseId = Object.hasOwn(responseItem, 'variant_id')
+      ? responseItem.variant_id
+      : responseItem.id;
+    if (typeof responseId === 'number') {
+      return Number.isSafeInteger(responseId)
+        && Number.isSafeInteger(Number(requestId))
+        && String(responseId) === requestId;
+    }
+    return typeof responseId === 'string' && responseId === requestId;
+  };
+
+  if (requestItems.length > 1 && result.items.length === 1) {
+    const responseItem = result.items[0];
+    if (!responseItem || typeof responseItem !== 'object' || Array.isArray(responseItem)) return false;
+    const baseItems = requestItems.filter((item) => item?.properties?._jersey_component === 'base');
+    if (baseItems.length !== 1) return false;
+    const baseItem = baseItems[0];
+    if (
+      typeof baseItem.id !== 'string'
+      || responseItem.quantity !== baseItem.quantity
+      || !responseIdMatches(baseItem.id, responseItem)
+    ) {
+      return false;
+    }
+    const baseProperties = baseItem.properties;
+    const responseProperties = responseItem.properties;
+    if (
+      !baseProperties
+      || typeof baseProperties !== 'object'
+      || !responseProperties
+      || typeof responseProperties !== 'object'
+      || Array.isArray(responseProperties)
+    ) {
+      return false;
+    }
+    const bundleId = baseProperties._jersey_bundle_id;
+    if (typeof bundleId !== 'string' || responseProperties._jersey_bundle_id !== bundleId) return false;
+    const compactComponents = [];
+    for (const requestItem of requestItems) {
+      if (
+        !requestItem
+        || typeof requestItem !== 'object'
+        || typeof requestItem.id !== 'string'
+        || !Number.isSafeInteger(requestItem.quantity)
+        || requestItem.quantity <= 0
+        || !requestItem.properties
+        || typeof requestItem.properties !== 'object'
+        || Array.isArray(requestItem.properties)
+        || requestItem.properties._jersey_bundle_id !== bundleId
+      ) {
+        return false;
+      }
+      const role = requestItem.properties._jersey_component;
+      if (role !== 'base' && role !== 'surcharge') return false;
+      compactComponents.push([role === 'base' ? 'b' : 's', requestItem.id, requestItem.quantity]);
+    }
+    return responseProperties._jersey_components === JSON.stringify(compactComponents);
+  }
+
+  if (result.items.length !== requestItems.length) return false;
   return requestItems.every((requestItem, index) => {
     const responseItem = result.items[index];
     if (
@@ -331,21 +392,8 @@ export function isCartAddResponseValid(requestItems, result) {
       || !responseItem
       || typeof responseItem !== 'object'
       || Array.isArray(responseItem)
+      || !responseIdMatches(requestItem.id, responseItem)
     ) {
-      return false;
-    }
-    const responseId = Object.hasOwn(responseItem, 'variant_id')
-      ? responseItem.variant_id
-      : responseItem.id;
-    if (typeof responseId === 'number') {
-      if (
-        !Number.isSafeInteger(responseId)
-        || !Number.isSafeInteger(Number(requestItem.id))
-        || String(responseId) !== requestItem.id
-      ) {
-        return false;
-      }
-    } else if (typeof responseId !== 'string' || responseId !== requestItem.id) {
       return false;
     }
     if (responseItem.quantity !== requestItem.quantity) return false;
@@ -379,7 +427,6 @@ export function isCartAddResponseValid(requestItems, result) {
     });
   });
 }
-
 export function classifyCartBundle(requestItems, cartItems, validateResponse = isCartAddResponseValid) {
   if (!Array.isArray(requestItems) || requestItems.length === 0 || !Array.isArray(cartItems)) {
     return 'unknown';
@@ -405,6 +452,7 @@ export function classifyCartBundle(requestItems, cartItems, validateResponse = i
     && item.properties._jersey_bundle_id === bundleId
   ));
   if (matching.length === 0) return 'none';
+  if (validateResponse(requestItems, { items: matching })) return 'complete';
   if (matching.length !== requestItems.length) return 'partial';
 
   const unused = new Set(matching.map((_, index) => index));

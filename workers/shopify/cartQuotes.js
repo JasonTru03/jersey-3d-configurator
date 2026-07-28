@@ -134,7 +134,10 @@ export function createCartQuotesHandler(env, dependencies = {}) {
         issuedAt,
         expiresAt,
         components,
-        quote: priced.quote,
+        quote: {
+          total: priced.quote.total,
+          currency: priced.quote.currency,
+        },
         normalizedState: priced.normalizedState,
         productionFiles,
         summary,

@@ -186,6 +186,13 @@ test('builds the exact seven-field app-owned JSON config and redacts credentials
   assert.match(result.log.signingSecretSha256, /^[a-f0-9]{64}$/);
 });
 
+test('accepts Shopify authorization-code Admin tokens', () => {
+  const result = buildStoreConfig({
+    ...input(),
+    adminAccessToken: 'shpua_' + '0123456789abcdef0123456789abcdef',
+  });
+  assert.equal(result.metafield.namespace, '$app:secure_jersey');
+});
 test('uses the 2026-07 handle mutations and both registration-owned metafields', () => {
   assert.match(OPERATIONS.CreateSecureJerseyCartTransform, /functionHandle/u);
   assert.doesNotMatch(OPERATIONS.CreateSecureJerseyCartTransform, /functionId/u);

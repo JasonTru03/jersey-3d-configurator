@@ -147,6 +147,7 @@ describe('createCartQuotesHandler', () => {
         atlasFilename: 'fn8788-jersey-uv-atlas.png',
       },
     });
+    expect(Object.keys(record.quote)).toEqual(['total', 'currency']);
     expect(record.summary).toMatchObject({
       Size: 'xl',
       Template: 'solid',

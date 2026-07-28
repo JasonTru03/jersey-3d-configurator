@@ -275,7 +275,7 @@ describe('createCartItems', () => {
     }, token)).toThrow('property count');
     expect(() => createCartItems({
       ...record,
-      summary: { Size: '馃弳'.repeat(256) },
+      summary: { Size: '棣冨汲'.repeat(256) },
     }, token)).toThrow('property value');
   });
 
@@ -298,7 +298,7 @@ describe('renderHandoffHtml', () => {
         Print: '',
         'Custom Text': '',
         Extras: '',
-        Artwork: '</script><svg/onload=alert("x")>\\\u2028\u2029馃弳',
+        Artwork: '</script><svg/onload=alert("x")>\\\u2028\u2029棣冨汲',
       },
     });
     const items = createCartItems(record, token);
@@ -325,6 +325,29 @@ describe('renderHandoffHtml', () => {
 });
 
 describe('isCartAddResponseValid', () => {
+  it('accepts the single parent line returned after Cart Transform merges the components', async () => {
+    const { record, token } = await validFixture({
+      components: [
+        { role: 'base', variantId: '12345678901234', quantity: 1 },
+        { role: 'surcharge', variantId: '42', quantity: 3 },
+      ],
+    });
+    const items = createCartItems(record, token);
+    const base = items.find((item) => item.properties._jersey_component === 'base');
+    const merged = {
+      variant_id: Number(base.id),
+      quantity: base.quantity,
+      properties: {
+        _jersey_bundle_id: base.properties._jersey_bundle_id,
+        _jersey_components: JSON.stringify([
+          ['b', '12345678901234', 1],
+          ['s', '42', 3],
+        ]),
+      },
+    };
+
+    expect(isCartAddResponseValid(items, { items: [merged] })).toBe(true);
+  });
   it('requires matching variants, quantities, and every private bundle property', async () => {
     const { record, token } = await validFixture({
       components: [
@@ -700,6 +723,30 @@ describe('rendered handoff client', () => {
     }));
   }
 
+  function mergedResponseItem(items) {
+    const base = items.find((item) => item.properties._jersey_component === 'base');
+    return {
+      variant_id: Number(base.id),
+      quantity: base.quantity,
+      properties: {
+        _jersey_bundle_id: base.properties._jersey_bundle_id,
+        _jersey_components: JSON.stringify(items.map((item) => [
+          item.properties._jersey_component === 'base' ? 'b' : 's',
+          item.id,
+          item.quantity,
+        ])),
+      },
+    };
+  }
+
+  it('navigates after Cart Transform returns one merged parent line', async () => {
+    const items = await fixtureItems();
+    const fetchMock = vi.fn(async () => jsonResponse({ items: [{ id: 'opaque-transformed-parent' }] }));
+    const dom = await executeHandoff(items, fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(dom.window.document.documentElement.dataset.cartHandoff).toBe('complete');
+  });
+
   it('navigates after a fully validated cart/add response', async () => {
     const items = await fixtureItems();
     const fetchMock = vi.fn(async () => jsonResponse({ items: responseItems(items) }));
@@ -742,8 +789,18 @@ describe('rendered handoff client', () => {
     expect(dom.window.document.getElementById('retry').hidden).toBe(true);
   });
 
-  it('blocks retry and offers cart review when reconciliation finds a partial bundle', async () => {
+  it('reconciles one merged parent line as a complete bundle', async () => {
     const items = await fixtureItems();
+    const fetchMock = vi.fn(async (path) => {
+      if (path === '/cart/add.js') throw new TypeError('network');
+      return jsonResponse({ items: [mergedResponseItem(items)] });
+    });
+    const dom = await executeHandoff(items, fetchMock);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/cart/add.js', '/cart.js']);
+    expect(dom.window.document.documentElement.dataset.cartHandoff).toBe('complete');
+  });
+
+  it('blocks retry and offers cart review when reconciliation finds a partial bundle', async () => {    const items = await fixtureItems();
     const fetchMock = vi.fn(async (path) => {
       if (path === '/cart/add.js') throw new TypeError('network');
       return jsonResponse({ items: responseItems(items).slice(0, 1) });

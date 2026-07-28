@@ -99,3 +99,45 @@ credentials as current. No FKK or MTT store write is part of this project.
 - Rebind the Worker store configuration to the new store and deploy.
 - Install/configure Transform and Validation, then run hostile-cart acceptance.
 - Push to GitHub only after user storefront acceptance.
+## Test-store registration and hostile-cart acceptance — 2026-07-28
+
+### Remote registration read-back
+
+- Test store: `testcsj-secure-bundle.myshopify.com`.
+- Cart Transform registration: `gid://shopify/CartTransform/79495255`, `blockOnFailure: true`.
+- Checkout Validation registration: `gid://shopify/Validation/87294039`, enabled and `blockOnFailure: true`.
+- Both registration owners contain `json` configuration metafields with matching content and matching local install configuration.
+- Function handles resolve to `secure-jersey-transform` and `secure-jersey-validation`.
+- No secret value was printed or added to the repository.
+
+### Defects found and fixed during real acceptance
+
+1. Worker signing secrets uploaded through a PowerShell pipeline contained a trailing newline. Both Worker secrets were re-uploaded from exact files through stdin redirection.
+2. KV stored the full pricing breakdown while App Proxy required the signed record to contain only `total` and `currency`. `cartQuotes.js` now persists the exact admitted quote shape.
+3. Shopify Cart Transform returns an opaque merged `cart/add.js` response. The handoff page previously expected the two original component rows, displayed a false review error, and could add the same design again. The handoff now trusts a parseable same-origin Shopify 2xx response and uses strict reconciliation only after network/error paths.
+
+### Real storefront evidence
+
+- Normal M jersey plus long-sleeve customization: quote HTTP 201, App Proxy handoff succeeded, one merged cart line, quantity 1, total `$107.00`, and automatic redirect to `/cart`.
+- Direct surcharge deletion attempt against variant `44079399960663`: rejected by Shopify Validation; cart remained one `$107.00` line with surcharge 18.
+- Quantity change from 1 to 2: rejected with the secure-jersey validation message; quantity and total remained unchanged.
+- Low-price replacement attempt from surcharge 18 to surcharge 8: rejected; surcharge 18 remained and surcharge 8 was absent.
+- Parent-line deletion: succeeded and removed the whole bundle, not only its surcharge.
+- Valid bundle checkout: reached the Shopify checkout contact/delivery page with no secure-jersey validation error.
+- Final browser state was returned to `/cart` with one valid `$107.00`, quantity-1 merged bundle for manual inspection.
+
+### Deployment and verification
+
+- Current Worker version: `73484913-312c-42e9-b3a9-f9fb627af8c4`.
+- Root Vitest: 56 files, 629 tests passed.
+- Focused secure-cart tests: 53 passed.
+- Store-configuration Node tests: 12 passed.
+- Root production and Shopify bundle builds: passed.
+- `git diff --check`: passed after cleanup.
+- Existing Vite large-chunk and `inlineDynamicImports` warnings remain informational.
+
+### Documentation and remaining safeguards
+
+- Added `shopify-app/README.md` with second-store prerequisites, secret handling, installation order, registration read-back, hostile-cart acceptance, and rollback steps.
+- The surcharge product should be removed from storefront recommendations/navigation in every destination store; it is still protected from underpriced custom fulfillment because production must trust only a verified `designId`.
+- GitHub upload remains intentionally pending explicit user authorization.

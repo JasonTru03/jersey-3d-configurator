@@ -3,14 +3,34 @@
   "name": "jersey-3d-configurator",
   "compatibility_date": "2026-07-14",
   "main": "workers/index.js",
-  // Deployment requires a DESIGN_QUOTES KV binding plus CART_QUOTE_RATE_LIMIT and
-  // CART_HANDOFF_RATE_LIMIT Rate Limiting bindings. Configure the real bindings
-  // during test-store setup; don't place placeholder namespace IDs here.
-  // Set CART_QUOTE_SIGNING_SECRET with `wrangler secret`; never place it in this file.
   "vars": {
     "LOCAL_PRODUCTION_FILES": "true",
-    "SHOPIFY_STORE_CONFIG_JSON": "{}"
+    "SHOPIFY_STORE_CONFIG_JSON": "{\"testcsj.myshopify.com\":{\"productId\":\"fn8788-jersey\",\"currency\":\"USD\",\"jerseyVariants\":{\"s\":\"48039101890711\",\"m\":\"48039101923479\",\"l\":\"48039101956247\",\"xl\":\"48039101989015\"},\"surchargeVariants\":{\"8\":\"48046656028823\",\"10\":\"48046656061591\",\"12\":\"48046656094359\",\"18\":\"48046656127127\",\"20\":\"48046656159895\",\"22\":\"48046656192663\",\"24\":\"48046656225431\",\"26\":\"48046656258199\",\"28\":\"48046656290967\",\"30\":\"48046656323735\",\"32\":\"48046656356503\",\"34\":\"48046656389271\",\"36\":\"48046656422039\",\"38\":\"48046656454807\",\"40\":\"48046656487575\",\"42\":\"48046656520343\",\"44\":\"48046656553111\",\"46\":\"48046656585879\",\"48\":\"48046656618647\",\"50\":\"48046656651415\",\"52\":\"48046656684183\",\"54\":\"48046656716951\",\"56\":\"48046656749719\",\"58\":\"48046656782487\",\"60\":\"48046656815255\",\"62\":\"48046656848023\",\"64\":\"48046656880791\",\"66\":\"48046656913559\",\"68\":\"48046656946327\",\"70\":\"48046656979095\",\"72\":\"48046657011863\",\"74\":\"48046657044631\",\"80\":\"48046657077399\"}}}"
   },
+  "kv_namespaces": [
+    {
+      "binding": "DESIGN_QUOTES",
+      "id": "8e3657bf219f43d28c95eacafefad6e5"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "CART_QUOTE_RATE_LIMIT",
+      "namespace_id": "2026072801",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "CART_HANDOFF_RATE_LIMIT",
+      "namespace_id": "2026072802",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    }
+  ],
   "assets": {
     "directory": "./dist"
   }

@@ -458,11 +458,27 @@ describe('toMinorUnits', () => {
 });
 
 describe('wrangler cart quote configuration', () => {
-  it('keeps local production behavior and contains no signing secret value or fake KV ID', () => {
-    const config = readFileSync('wrangler.jsonc', 'utf8');
-    expect(config).toContain('"LOCAL_PRODUCTION_FILES": "true"');
-    expect(config).toContain('"SHOPIFY_STORE_CONFIG_JSON": "{}"');
-    expect(config).not.toMatch(/"CART_QUOTE_SIGNING_SECRET"\s*:/u);
-    expect(config).not.toMatch(/"(?:DESIGN_QUOTES|CART_QUOTE_RATE_LIMIT)"\s*,\s*"id"/u);
+  it('keeps local production behavior and declares the secure cart bindings without secrets', () => {
+    const configText = readFileSync('wrangler.jsonc', 'utf8');
+    const config = JSON.parse(configText);
+    const storeConfigs = JSON.parse(config.vars.SHOPIFY_STORE_CONFIG_JSON);
+    expect(config.vars.LOCAL_PRODUCTION_FILES).toBe('true');
+    expect(storeConfigs).toHaveProperty('testcsj.myshopify.com');
+    expect(config.kv_namespaces).toContainEqual({
+      binding: 'DESIGN_QUOTES',
+      id: expect.stringMatching(/^[0-9a-f]{32}$/u),
+    });
+    expect(config.ratelimits).toContainEqual({
+      name: 'CART_QUOTE_RATE_LIMIT',
+      namespace_id: expect.any(String),
+      simple: { limit: 10, period: 60 },
+    });
+    expect(config.ratelimits).toContainEqual({
+      name: 'CART_HANDOFF_RATE_LIMIT',
+      namespace_id: expect.any(String),
+      simple: { limit: 300, period: 60 },
+    });
+    expect(config.vars).not.toHaveProperty('CART_QUOTE_SIGNING_SECRET');
+    expect(config.vars).not.toHaveProperty('SHOPIFY_API_SECRET');
   });
 });

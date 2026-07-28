@@ -101,6 +101,8 @@ assertEqual(
 );
 
 const expectedScopes = [
+  "read_cart_transforms",
+  "read_validations",
   "write_app_proxy",
   "write_cart_transforms",
   "write_validations",

@@ -3,6 +3,7 @@ api_version = "2026-07"
 [[extensions]]
 name = "t:name"
 handle = "secure-jersey-validation"
+uid = "4c850366-42db-1ef2-8b8b-963d8302f0861e73efd6"
 type = "function"
 description = "t:description"
 
@@ -12,6 +13,6 @@ description = "t:description"
   export = "run"
 
   [extensions.build]
-  command = "cargo build --target=wasm32-wasip1 --release"
-  path = "target/wasm32-wasip1/release/secure-jersey-validation.wasm"
+  command = "cargo build --target=wasm32-unknown-unknown --release"
+  path = "target/wasm32-unknown-unknown/release/secure-jersey-validation.wasm"
   watch = ["src/**/*.rs"]

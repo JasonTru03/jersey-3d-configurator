@@ -32,8 +32,9 @@ as follows:
 The 2026-07 rebuild changed the transform target to `cart.transform.run`, the
 validation target to `cart.validations.generate.run`, and the validation output
 to `CartValidationsGenerateRunResult.operations` with a `validationAdd`
-operation. Both Rust functions now use Shopify's `typegen`, `query`, and
-`shopify_function` macros.
+operation. Both Rust functions use Shopify's `typegen`, `query`, and
+`shopify_function` macros. The deployable build uses `shopify_function` 2.2.0
+and the `wasm32-unknown-unknown` target required by Shopify's current Wasm API.
 
 The source templates are licensed under the MIT license. The exact upstream
 license text from that commit is included as

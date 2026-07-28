@@ -5,6 +5,7 @@
 !.env.example
 shopify.app.local.toml
 shopify.app.*.local.toml
+shopify.app.*.toml
 
 # Local secrets/configuration
 *.secret

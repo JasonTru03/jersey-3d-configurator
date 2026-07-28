@@ -39,6 +39,10 @@ for (const file of requiredFiles) {
   contents.set(file, await readFile(resolve(root, file), "utf8"));
 }
 
+if (!/^shopify\.app\.\*\.toml$/m.test(contents.get(".gitignore"))) {
+  throw new Error("The app .gitignore must keep named store configs local");
+}
+
 const packageJson = JSON.parse(contents.get("package.json"));
 if (packageJson.devDependencies?.["@shopify/cli"] !== "4.5.2") {
   throw new Error("@shopify/cli must be pinned exactly to 4.5.2");
@@ -117,7 +121,7 @@ assertEqual(configuredScopes, expectedScopes, "access_scopes.scopes");
 const toolchain = parse(contents.get("rust-toolchain.toml"));
 assertEqual(
   toolchain.toolchain,
-  {channel: "1.97.1", components: ["rustfmt", "clippy"], targets: ["wasm32-wasip1"], profile: "minimal"},
+  {channel: "1.97.1", components: ["rustfmt", "clippy"], targets: ["wasm32-unknown-unknown"], profile: "minimal"},
   "rust toolchain",
 );
 
@@ -154,7 +158,7 @@ const extensionChecks = new Map([
       hmac: "=0.12.1",
       serde_json: "=1.0.151",
       sha2: "=0.10.9",
-      shopify_function: "=1.1.0",
+      shopify_function: "=2.2.0",
     },
   }],
   ["extensions/secure-jersey-validation/shopify.extension.toml", {
@@ -166,7 +170,7 @@ const extensionChecks = new Map([
       hmac: "=0.12.1",
       serde_json: "=1.0.151",
       sha2: "=0.10.9",
-      shopify_function: "=1.1.0",
+      shopify_function: "=2.2.0",
     },
   }],
 ]);
@@ -183,8 +187,8 @@ for (const [file, expected] of extensionChecks) {
     export: "run",
   }], `${file} targeting`);
   assertEqual(extension.build, {
-    command: "cargo build --target=wasm32-wasip1 --release",
-    path: `target/wasm32-wasip1/release/${expected.handle}.wasm`,
+    command: "cargo build --target=wasm32-unknown-unknown --release",
+    path: `target/wasm32-unknown-unknown/release/${expected.handle}.wasm`,
     watch: ["src/**/*.rs"],
   }, `${file} build`);
 
@@ -216,8 +220,8 @@ for (const [file, expected] of extensionChecks) {
   const cargoConfig = parse(contents.get(cargoFile));
   assertEqual(cargoConfig.dependencies, expected.dependencies, `${cargoFile} dependencies`);
   const lockFile = file.replace("shopify.extension.toml", "Cargo.lock");
-  if (!/name = "shopify_function"\r?\nversion = "1\.1\.0"/.test(contents.get(lockFile))) {
-    throw new Error(`${lockFile} must lock shopify_function 1.1.0`);
+  if (!/name = "shopify_function"\r?\nversion = "2\.2\.0"/.test(contents.get(lockFile))) {
+    throw new Error(`${lockFile} must lock shopify_function 2.2.0`);
   }
   const ignoreFile = file.replace("shopify.extension.toml", ".gitignore");
   if (/^Cargo\.lock$/m.test(contents.get(ignoreFile))) {

@@ -3,6 +3,7 @@ api_version = "2026-07"
 [[extensions]]
 name = "t:name"
 handle = "secure-jersey-transform"
+uid = "3499b47a-717f-1c4e-bdfc-dd5c79ea3cbc68f0ac84"
 type = "function"
 description = "t:description"
 
@@ -12,8 +13,8 @@ description = "t:description"
   export = "run"
 
   [extensions.build]
-  command = "cargo build --target=wasm32-wasip1 --release"
-  path = "target/wasm32-wasip1/release/secure-jersey-transform.wasm"
+  command = "cargo build --target=wasm32-unknown-unknown --release"
+  path = "target/wasm32-unknown-unknown/release/secure-jersey-transform.wasm"
   watch = [ "src/**/*.rs" ]
 
   [extensions.ui.paths]

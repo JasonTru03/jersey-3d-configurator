@@ -20,6 +20,11 @@ import {
   patchPrintItem,
 } from '../config/printItems.js';
 
+const PERSONALIZATION_SIDE_PLACEMENTS = {
+  front: { x: 0, y: 0.36, z: 0.5, normal: { x: 0, y: 0, z: 1 } },
+  back: { x: 0, y: 0.36, z: -0.5, normal: { x: 0, y: 0, z: -1 } },
+};
+
 export function PersonalizePanel({
   deletePending,
   deletePersonalization,
@@ -258,9 +263,26 @@ function TextEditor({ disabled, item, overrides, updateState }) {
       customTextItems: patchCustomTextItem(customTextItems, item.sourceId, patch),
     },
   });
+  const activeSide = getPersonalizationSide(item.placement);
 
   return (
     <div className="custom-text-fields">
+      <fieldset>
+        <legend>Side</legend>
+        <div className="font-options">
+          {Object.entries(PERSONALIZATION_SIDE_PLACEMENTS).map(([side, placement]) => (
+            <button
+              aria-pressed={activeSide === side}
+              disabled={disabled}
+              key={side}
+              onClick={() => patchText({ placement: structuredClone(placement) })}
+              type="button"
+            >
+              {side === 'front' ? 'Front' : 'Back'}
+            </button>
+          ))}
+        </div>
+      </fieldset>
       <label>
         <span>Text</span>
         <input
@@ -333,6 +355,12 @@ function TextEditor({ disabled, item, overrides, updateState }) {
       </label>
     </div>
   );
+}
+
+function getPersonalizationSide(placement) {
+  const normalZ = Number(placement?.normal?.z);
+  if (Number.isFinite(normalZ) && normalZ < 0) return 'back';
+  return Number(placement?.z) < 0 ? 'back' : 'front';
 }
 
 function personalizationLabel(item) {

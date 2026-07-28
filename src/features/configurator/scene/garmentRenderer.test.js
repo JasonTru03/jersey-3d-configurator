@@ -563,6 +563,88 @@ describe('garment decoration mesh selection', () => {
     });
   });
 
+  it('projects the visible texture bounds instead of the full personalization plane', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 1));
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.set(0, 0, 1);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    camera.updateProjectionMatrix();
+    renderer.host = { getBoundingClientRect: () => ({ width: 200, height: 200 }) };
+    renderer.camera = camera;
+    renderer.activePrintId = 'text:text-1';
+    renderer.printLayers = new Map([['text:text-1', {
+      alphaMask: {
+        bounds: { minU: 0.25, maxU: 0.75, minV: 0.25, maxV: 0.75 },
+      },
+      plane,
+    }]]);
+    renderer.lastPrintAnchor = null;
+    renderer.onPrintAnchorChange = vi.fn();
+
+    renderer.syncPrintAnchor();
+
+    expect(renderer.onPrintAnchorChange).toHaveBeenCalledWith({
+      visible: true,
+      left: 50,
+      top: 75,
+      width: 100,
+      height: 50,
+    });
+  });
+
+  it('projects visible decal pixels after the print conforms to the jersey surface', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 1));
+    const decalGeometry = new THREE.BufferGeometry();
+    decalGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      -0.5, -0.5, 0,
+      1.5, -0.5, 0,
+      -0.5, 0.5, 0,
+      -0.5, 0.5, 0,
+      1.5, -0.5, 0,
+      1.5, 0.5, 0,
+    ], 3));
+    decalGeometry.setAttribute('uv', new THREE.Float32BufferAttribute([
+      0, 0,
+      1, 0,
+      0, 1,
+      0, 1,
+      1, 0,
+      1, 1,
+    ], 2));
+    const decal = new THREE.Mesh(decalGeometry);
+    decal.visible = true;
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.set(0, 0, 1);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    camera.updateProjectionMatrix();
+    renderer.host = { getBoundingClientRect: () => ({ width: 200, height: 200 }) };
+    renderer.camera = camera;
+    renderer.activePrintId = 'text:text-1';
+    renderer.printLayers = new Map([['text:text-1', {
+      alphaMask: {
+        bounds: { minU: 0.25, maxU: 0.75, minV: 0.25, maxV: 0.75 },
+      },
+      decal,
+      plane,
+    }]]);
+    renderer.lastPrintAnchor = null;
+    renderer.onPrintAnchorChange = vi.fn();
+
+    renderer.syncPrintAnchor();
+
+    expect(renderer.onPrintAnchorChange).toHaveBeenCalledWith({
+      visible: true,
+      left: 100,
+      top: 75,
+      width: 100,
+      height: 50,
+    });
+  });
+
   it('hides a selection rectangle when a plane corner is outside the camera view', () => {
     expect(getPrintSelectionRect([
       { x: -0.2, y: 0.3, z: 0 },

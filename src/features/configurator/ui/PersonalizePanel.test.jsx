@@ -72,6 +72,44 @@ describe('PersonalizePanel', () => {
       .getByRole('button', { name: 'YOUR TEXT' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('moves a selected custom text between the front and back defaults', async () => {
+    const onStateChange = vi.fn();
+    render(<PersonalizeHarness onStateChange={onStateChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
+    await screen.findByLabelText('Text content');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      overrides: expect.objectContaining({
+        customTextItems: [expect.objectContaining({
+          placement: {
+            normal: { x: 0, y: 0, z: -1 },
+            x: 0,
+            y: 0.36,
+            z: -0.5,
+          },
+        })],
+      }),
+    }));
+    expect(screen.getByRole('button', { name: 'Back' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Front' }));
+
+    expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      overrides: expect.objectContaining({
+        customTextItems: [expect.objectContaining({
+          placement: {
+            normal: { x: 0, y: 0, z: 1 },
+            x: 0,
+            y: 0.36,
+            z: 0.5,
+          },
+        })],
+      }),
+    }));
+  });
+
   it('adds a player set and keeps raised-print pricing selected', async () => {
     const state = {
       ...structuredClone(jerseyProduct.defaultState),

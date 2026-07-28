@@ -56,7 +56,7 @@ export function getNextPrintPlacement(candidates, occupiedPlacements) {
 }
 
 export function getPrintSelectionRect(projectedCorners, { width, height }) {
-  if (projectedCorners.length !== 4) return { visible: false };
+  if (projectedCorners.length < 3) return { visible: false };
   return getProjectedSelectionRect(projectedCorners, { width, height });
 }
 
@@ -173,11 +173,15 @@ export class GarmentRenderer {
     this.animate();
   }
 
-  get printPlane() {
+  get printLayer() {
     if (this.activePrintId !== null) {
-      return this.printLayers.get(this.activePrintId)?.plane ?? null;
+      return this.printLayers.get(this.activePrintId) ?? null;
     }
-    return this.printLayers.values().next().value?.plane ?? null;
+    return this.printLayers.values().next().value ?? null;
+  }
+
+  get printPlane() {
+    return this.printLayer?.plane ?? null;
   }
 
   setActivePrintId(id) {
@@ -575,9 +579,12 @@ export class GarmentRenderer {
   };
 
   syncPrintAnchor() {
-    const plane = this.printPlane;
-    const anchor = plane
-      ? getPrintSelectionRect(getPlaneProjectedCorners(plane, this.camera), this.host.getBoundingClientRect())
+    const layer = this.printLayer;
+    const anchor = layer?.plane
+      ? getPrintSelectionRect(
+          getPersonalizationProjectedPoints(layer, this.camera),
+          this.host.getBoundingClientRect(),
+        )
       : { visible: false };
     if (!hasPrintSelectionRectChanged(this.lastPrintAnchor, anchor)) return;
     this.lastPrintAnchor = anchor;
@@ -1414,16 +1421,113 @@ function placementsEqual(first, second) {
   return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
 }
 
-function getPlaneProjectedCorners(plane, camera) {
+function getPersonalizationProjectedPoints(layer, camera) {
+  if (layer.decal?.visible) {
+    const bounds = normalizeTextureBounds(layer.alphaMask?.bounds);
+    const projectionKey = JSON.stringify([
+      layer.decal.geometry?.uuid ?? null,
+      layer.renderKey ?? null,
+      bounds.minU,
+      bounds.maxU,
+      bounds.minV,
+      bounds.maxV,
+    ]);
+    if (layer.selectionProjectionKey !== projectionKey) {
+      layer.selectionProjectionKey = projectionKey;
+      layer.selectionLocalPoints = getDecalAlphaLocalPoints(layer.decal.geometry, bounds);
+    }
+    const decalPoints = (layer.selectionLocalPoints ?? []).map((point) => (
+      layer.decal.localToWorld(point.clone()).project(camera)
+    ));
+    if (decalPoints.length) return decalPoints;
+  }
+  return getPlaneProjectedCorners(layer.plane, camera, layer.alphaMask?.bounds);
+}
+
+function getDecalAlphaLocalPoints(geometry, bounds) {
+  const position = geometry?.getAttribute?.('position');
+  const uv = geometry?.getAttribute?.('uv');
+  if (!position?.count || !uv?.count || position.count !== uv.count) return [];
+
+  const points = [];
+  const index = geometry.getIndex?.();
+  const vertexIndex = (offset) => index ? index.getX(offset) : offset;
+  const vertexCount = index ? index.count : position.count;
+  for (let offset = 0; offset + 2 < vertexCount; offset += 3) {
+    let polygon = [0, 1, 2].map((corner) => {
+      const attributeIndex = vertexIndex(offset + corner);
+      return {
+        position: new THREE.Vector3().fromBufferAttribute(position, attributeIndex),
+        u: uv.getX(attributeIndex),
+        v: uv.getY(attributeIndex),
+      };
+    });
+    polygon = clipUvPolygon(polygon, 'u', bounds.minU, true);
+    polygon = clipUvPolygon(polygon, 'u', bounds.maxU, false);
+    polygon = clipUvPolygon(polygon, 'v', bounds.minV, true);
+    polygon = clipUvPolygon(polygon, 'v', bounds.maxV, false);
+    polygon.forEach((vertex) => points.push(vertex.position));
+  }
+  return points;
+}
+
+function clipUvPolygon(polygon, axis, boundary, keepGreater) {
+  if (!polygon.length) return polygon;
+  const clipped = [];
+  const isInside = (vertex) => keepGreater
+    ? vertex[axis] >= boundary - 0.000001
+    : vertex[axis] <= boundary + 0.000001;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const current = polygon[index];
+    const previous = polygon[(index + polygon.length - 1) % polygon.length];
+    const currentInside = isInside(current);
+    const previousInside = isInside(previous);
+    if (currentInside !== previousInside) {
+      const denominator = current[axis] - previous[axis];
+      const ratio = Math.abs(denominator) < 0.0000001
+        ? 0
+        : (boundary - previous[axis]) / denominator;
+      clipped.push({
+        position: previous.position.clone().lerp(current.position, ratio),
+        u: THREE.MathUtils.lerp(previous.u, current.u, ratio),
+        v: THREE.MathUtils.lerp(previous.v, current.v, ratio),
+      });
+    }
+    if (currentInside) clipped.push(current);
+  }
+  return clipped;
+}
+
+function normalizeTextureBounds(textureBounds) {
+  return {
+    minU: Number.isFinite(textureBounds?.minU) ? textureBounds.minU : 0,
+    maxU: Number.isFinite(textureBounds?.maxU) ? textureBounds.maxU : 1,
+    minV: Number.isFinite(textureBounds?.minV) ? textureBounds.minV : 0,
+    maxV: Number.isFinite(textureBounds?.maxV) ? textureBounds.maxV : 1,
+  };
+}
+
+function getPlaneProjectedCorners(plane, camera, textureBounds = null) {
   plane.geometry.computeBoundingBox();
   const bounds = plane.geometry.boundingBox;
   if (!bounds) return [];
 
+  const width = bounds.max.x - bounds.min.x;
+  const height = bounds.max.y - bounds.min.y;
+  const minU = Number.isFinite(textureBounds?.minU) ? textureBounds.minU : 0;
+  const maxU = Number.isFinite(textureBounds?.maxU) ? textureBounds.maxU : 1;
+  const minV = Number.isFinite(textureBounds?.minV) ? textureBounds.minV : 0;
+  const maxV = Number.isFinite(textureBounds?.maxV) ? textureBounds.maxV : 1;
+  const minX = bounds.min.x + width * minU;
+  const maxX = bounds.min.x + width * maxU;
+  const minY = bounds.min.y + height * minV;
+  const maxY = bounds.min.y + height * maxV;
+
   return [
-    new THREE.Vector3(bounds.min.x, bounds.min.y, 0),
-    new THREE.Vector3(bounds.max.x, bounds.min.y, 0),
-    new THREE.Vector3(bounds.min.x, bounds.max.y, 0),
-    new THREE.Vector3(bounds.max.x, bounds.max.y, 0),
+    new THREE.Vector3(minX, minY, 0),
+    new THREE.Vector3(maxX, minY, 0),
+    new THREE.Vector3(minX, maxY, 0),
+    new THREE.Vector3(maxX, maxY, 0),
   ].map((corner) => plane.localToWorld(corner).project(camera));
 }
 

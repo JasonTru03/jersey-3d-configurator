@@ -9,6 +9,7 @@ import { PersonalizePanel } from './PersonalizePanel.jsx';
 function PersonalizeHarness({
   initialState = jerseyProduct.defaultState,
   initialSelection = null,
+  onSideFocus = vi.fn(),
   onStateChange = vi.fn(),
   onUpdate = vi.fn(),
   updateDeferred = null,
@@ -48,6 +49,7 @@ function PersonalizeHarness({
         deletePending={deletion.deletePending}
         deletePersonalization={deletion.deletePersonalization}
         onSelect={setSelectedKey}
+        onSideFocus={onSideFocus}
         selectedKey={selectedKey}
         state={state}
         updateState={updateState}
@@ -73,41 +75,248 @@ describe('PersonalizePanel', () => {
   });
 
   it('moves a selected custom text between the front and back defaults', async () => {
+    const onSideFocus = vi.fn();
     const onStateChange = vi.fn();
-    render(<PersonalizeHarness onStateChange={onStateChange} />);
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [{
+      id: 'text-1',
+      text: 'CHELSEA FC',
+      fontPreset: 'block',
+      fillColor: '#c84f3d',
+      outlineEnabled: false,
+      outlineColor: '#1f5b4f',
+      letterSpacing: 6,
+      placement: { x: 0.24, y: 0.61, z: 0.48, normal: { x: 0, y: 0, z: 1 } },
+      rotation: 42,
+      scale: 1.35,
+    }];
+    render(
+      <PersonalizeHarness
+        initialSelection="text:text-1"
+        initialState={state}
+        onSideFocus={onSideFocus}
+        onStateChange={onStateChange}
+      />,
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
-    await screen.findByLabelText('Text content');
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
     expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({
-        customTextItems: [expect.objectContaining({
+        customTextItems: [{
+          id: 'text-1',
+          text: 'CHELSEA FC',
+          fontPreset: 'block',
+          fillColor: '#C84F3D',
+          outlineEnabled: false,
+          outlineColor: '#1F5B4F',
+          letterSpacing: 6,
           placement: {
             normal: { x: 0, y: 0, z: -1 },
             x: 0,
             y: 0.36,
             z: -0.5,
           },
-        })],
+          rotation: 42,
+          scale: 1.35,
+        }],
       }),
     }));
+    await waitFor(() => expect(onSideFocus).toHaveBeenNthCalledWith(1, 'back'));
     expect(screen.getByRole('button', { name: 'Back' })).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(screen.getByRole('button', { name: 'Front' }));
 
     expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({
       overrides: expect.objectContaining({
-        customTextItems: [expect.objectContaining({
+        customTextItems: [{
+          id: 'text-1',
+          text: 'CHELSEA FC',
+          fontPreset: 'block',
+          fillColor: '#C84F3D',
+          outlineEnabled: false,
+          outlineColor: '#1F5B4F',
+          letterSpacing: 6,
           placement: {
             normal: { x: 0, y: 0, z: 1 },
             x: 0,
             y: 0.36,
             z: 0.5,
           },
-        })],
+          rotation: 42,
+          scale: 1.35,
+        }],
       }),
     }));
+    await waitFor(() => expect(onSideFocus).toHaveBeenNthCalledWith(2, 'front'));
+    expect(onSideFocus).toHaveBeenCalledTimes(2);
+  });
+
+  it('moves a selected player set to the back default while preserving its content and transform', async () => {
+    const onSideFocus = vi.fn();
+    const onStateChange = vi.fn();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [{
+      id: 'player',
+      name: 'MASON',
+      number: '10',
+      placement: { x: 0.24, y: 0.61, z: 0.48, normal: { x: 0, y: 0, z: 1 } },
+      rotation: 28,
+      scale: 1.24,
+    }];
+    render(
+      <PersonalizeHarness
+        initialSelection="player:player"
+        initialState={state}
+        onSideFocus={onSideFocus}
+        onStateChange={onStateChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => expect(onStateChange).toHaveBeenCalled());
+    const nextPlayer = onStateChange.mock.lastCall[0].overrides.printItems[0];
+    expect(nextPlayer).toEqual({
+      id: 'player',
+      name: 'MASON',
+      number: '10',
+      placement: {
+        x: 0,
+        y: 0.36,
+        z: -0.5,
+        normal: { x: 0, y: 0, z: -1 },
+      },
+      rotation: 28,
+      scale: 1.24,
+    });
+    expect(onStateChange.mock.lastCall[0].overrides.printPlacement).toEqual(nextPlayer.placement);
+    expect(onStateChange.mock.lastCall[0].overrides.printName).toBe('MASON');
+    expect(onStateChange.mock.lastCall[0].overrides.printNumber).toBe('10');
+    await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('back'));
+  });
+
+  it('focuses an already active player side without resetting its custom placement', async () => {
+    const onSideFocus = vi.fn();
+    const onStateChange = vi.fn();
+    const onUpdate = vi.fn();
+    const customBackPlacement = {
+      x: 0.24,
+      y: 0.61,
+      z: -0.48,
+      normal: { x: 0, y: 0, z: -1 },
+    };
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [{
+      id: 'player',
+      name: 'MASON',
+      number: '10',
+      placement: customBackPlacement,
+      rotation: 28,
+      scale: 1.24,
+    }];
+    render(
+      <PersonalizeHarness
+        initialSelection="player:player"
+        initialState={state}
+        onSideFocus={onSideFocus}
+        onStateChange={onStateChange}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('back'));
+    expect(onStateChange).not.toHaveBeenCalled();
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(state.overrides.printItems[0].placement).toEqual(customBackPlacement);
+  });
+
+  it('locks side controls and does not request focus when a player side update fails', async () => {
+    const onSideFocus = vi.fn();
+    const onStateChange = vi.fn();
+    const onUpdate = vi.fn();
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [{
+      id: 'player',
+      name: 'MASON',
+      number: '10',
+      placement: { x: 0, y: 0.36, z: 0.5, normal: { x: 0, y: 0, z: 1 } },
+      rotation: 28,
+      scale: 1.24,
+    }];
+    render(
+      <PersonalizeHarness
+        initialSelection="player:player"
+        initialState={state}
+        onSideFocus={onSideFocus}
+        onStateChange={onStateChange}
+        onUpdate={onUpdate}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(onSideFocus).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Front' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Front' }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).toHaveBeenCalledWith({
+      overrides: {
+        printItems: [{
+          id: 'player',
+          name: 'MASON',
+          number: '10',
+          placement: {
+            x: 0,
+            y: 0.36,
+            z: -0.5,
+            normal: { x: 0, y: 0, z: -1 },
+          },
+          rotation: 28,
+          scale: 1.24,
+        }],
+        printName: 'MASON',
+        printNumber: '10',
+        printPlacement: {
+          x: 0,
+          y: 0.36,
+          z: -0.5,
+          normal: { x: 0, y: 0, z: -1 },
+        },
+      },
+    });
+
+    await act(async () => {
+      updateDeferred.resolve({ message: 'Quote failed', ok: false });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Front' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
+    });
+    expect(onStateChange).not.toHaveBeenCalled();
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(state.overrides.printItems[0].placement).toEqual({
+      x: 0,
+      y: 0.36,
+      z: 0.5,
+      normal: { x: 0, y: 0, z: 1 },
+    });
+    expect(state.overrides.printPlacement).toEqual({
+      x: 0,
+      y: 0.36,
+      z: 0.5,
+    });
   });
 
   it('adds a player set and keeps raised-print pricing selected', async () => {

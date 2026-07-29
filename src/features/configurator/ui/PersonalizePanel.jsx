@@ -1,5 +1,10 @@
 import { Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   CUSTOM_TEXT_FONT_PRESETS,
   MAX_CUSTOM_TEXT_ITEMS,
@@ -14,21 +19,22 @@ import {
   makePersonalizationKey,
 } from '../config/personalizationItems.js';
 import {
+  getPersonalizationSide,
+  getPersonalizationSidePlacement,
+} from '../config/personalizationSides.js';
+import {
   ensurePrintItems,
   getPrintItems,
   legacyFirstItemFields,
   patchPrintItem,
 } from '../config/printItems.js';
-
-const PERSONALIZATION_SIDE_PLACEMENTS = {
-  front: { x: 0, y: 0.36, z: 0.5, normal: { x: 0, y: 0, z: 1 } },
-  back: { x: 0, y: 0.36, z: -0.5, normal: { x: 0, y: 0, z: -1 } },
-};
+import { PersonalizationSideSelector } from './PersonalizationSideSelector.jsx';
 
 export function PersonalizePanel({
   deletePending,
   deletePersonalization,
   onSelect,
+  onSideFocus,
   selectedKey,
   state,
   updateState,
@@ -195,6 +201,7 @@ export function PersonalizePanel({
             <PlayerEditor
               disabled={deletePending}
               item={selectedItem}
+              onSideFocus={onSideFocus}
               overrides={state.overrides}
               updateState={updateState}
             />
@@ -202,6 +209,7 @@ export function PersonalizePanel({
             <TextEditor
               disabled={deletePending}
               item={selectedItem}
+              onSideFocus={onSideFocus}
               overrides={state.overrides}
               updateState={updateState}
             />
@@ -212,20 +220,41 @@ export function PersonalizePanel({
   );
 }
 
-function PlayerEditor({ disabled, item, overrides, updateState }) {
+function PlayerEditor({ disabled, item, onSideFocus, overrides, updateState }) {
+  const [sidePending, setSidePending] = useState(false);
   const printItems = getPrintItems(overrides);
   const patchPlayer = (patch) => {
     const nextItems = patchPrintItem(printItems, item.sourceId, patch);
-    updateState({
+    return updateState({
       overrides: {
         printItems: nextItems,
         ...legacyFirstItemFields(nextItems),
       },
     });
   };
+  const activeSide = getPersonalizationSide(item.placement);
+  const selectSide = async (side) => {
+    if (side !== activeSide) {
+      setSidePending(true);
+      try {
+        const result = await patchPlayer({
+          placement: getPersonalizationSidePlacement(side),
+        });
+        if (result?.ok === false) return;
+      } finally {
+        setSidePending(false);
+      }
+    }
+    onSideFocus?.(side);
+  };
 
   return (
     <div className="print-fields">
+      <PersonalizationSideSelector
+        disabled={disabled || sidePending}
+        onSelect={selectSide}
+        side={activeSide}
+      />
       <label>
         <span>Name</span>
         <input
@@ -256,7 +285,8 @@ function PlayerEditor({ disabled, item, overrides, updateState }) {
   );
 }
 
-function TextEditor({ disabled, item, overrides, updateState }) {
+function TextEditor({ disabled, item, onSideFocus, overrides, updateState }) {
+  const [sidePending, setSidePending] = useState(false);
   const customTextItems = getCustomTextItems(overrides);
   const patchText = (patch) => updateState({
     overrides: {
@@ -264,25 +294,28 @@ function TextEditor({ disabled, item, overrides, updateState }) {
     },
   });
   const activeSide = getPersonalizationSide(item.placement);
+  const selectSide = async (side) => {
+    if (side !== activeSide) {
+      setSidePending(true);
+      try {
+        const result = await patchText({
+          placement: getPersonalizationSidePlacement(side),
+        });
+        if (result?.ok === false) return;
+      } finally {
+        setSidePending(false);
+      }
+    }
+    onSideFocus?.(side);
+  };
 
   return (
     <div className="custom-text-fields">
-      <fieldset>
-        <legend>Side</legend>
-        <div className="font-options">
-          {Object.entries(PERSONALIZATION_SIDE_PLACEMENTS).map(([side, placement]) => (
-            <button
-              aria-pressed={activeSide === side}
-              disabled={disabled}
-              key={side}
-              onClick={() => patchText({ placement: structuredClone(placement) })}
-              type="button"
-            >
-              {side === 'front' ? 'Front' : 'Back'}
-            </button>
-          ))}
-        </div>
-      </fieldset>
+      <PersonalizationSideSelector
+        disabled={disabled || sidePending}
+        onSelect={selectSide}
+        side={activeSide}
+      />
       <label>
         <span>Text</span>
         <input
@@ -355,12 +388,6 @@ function TextEditor({ disabled, item, overrides, updateState }) {
       </label>
     </div>
   );
-}
-
-function getPersonalizationSide(placement) {
-  const normalZ = Number(placement?.normal?.z);
-  if (Number.isFinite(normalZ) && normalZ < 0) return 'back';
-  return Number(placement?.z) < 0 ? 'back' : 'front';
 }
 
 function personalizationLabel(item) {

@@ -30,17 +30,27 @@ export function usePersonalizationDeletion({
   const deletePersonalization = useCallback(async (key, options = {}) => {
     if (inFlightRef.current) return { ok: false, reason: 'pending' };
     const current = latestRef.current;
-    const patch = getPersonalizationRemovalPatch(current.state, key);
-    if (!patch) return { ok: false, reason: 'missing' };
+    if (!getPersonalizationRemovalPatch(current.state, key)) {
+      return { ok: false, reason: 'missing' };
+    }
 
     inFlightRef.current = true;
     setDeletePending(true);
     options.onStart?.();
     try {
-      const result = await current.updateState(patch, { transactional: true });
+      let targetFound = false;
+      const result = await current.updateState((latestState) => {
+        const patch = getPersonalizationRemovalPatch(latestState, key);
+        targetFound = Boolean(patch);
+        return patch ?? {};
+      }, { transactional: true });
       if (result?.ok === false) {
         options.onFailure?.();
         return result;
+      }
+      if (!targetFound) {
+        options.onFailure?.();
+        return { ok: false, reason: 'missing' };
       }
       if (mountedRef.current && latestRef.current.selectedKey === key) {
         latestRef.current.onSelectionChange?.(null);

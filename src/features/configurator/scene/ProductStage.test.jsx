@@ -9,6 +9,7 @@ const rendererHarness = vi.hoisted(() => ({
   rotationGestureStarts: [],
   rotationPreviews: [],
   rotationCancels: [],
+  constrainedRotationItem: null,
   finalRotationItem: null,
   finalResizeItem: null,
   resizePreviews: [],
@@ -18,6 +19,11 @@ const rendererHarness = vi.hoisted(() => ({
   normalizationForUpdate: null,
   updateArgs: null,
 }));
+
+function resolveLastStatePatch(onStatePatch, state) {
+  const patch = onStatePatch.mock.calls.at(-1)[0];
+  return typeof patch === 'function' ? patch(state) : patch;
+}
 
 vi.mock('./garmentRenderer.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -58,6 +64,10 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
 
       cancelPersonalizationRotationPreview() {
         rendererHarness.rotationCancels.push(true);
+      }
+
+      constrainPersonalizationItem() {
+        return rendererHarness.constrainedRotationItem;
       }
 
       beginPersonalizationResize() {}
@@ -102,6 +112,7 @@ beforeEach(() => {
   rendererHarness.rotationGestureStarts = [];
   rendererHarness.rotationPreviews = [];
   rendererHarness.rotationCancels = [];
+  rendererHarness.constrainedRotationItem = null;
   rendererHarness.finalRotationItem = null;
   rendererHarness.finalResizeItem = null;
   rendererHarness.resizePreviews = [];
@@ -145,23 +156,37 @@ describe('ProductStage print toolbar', () => {
     expect(screen.queryByRole('group', { name: 'Selected personalization controls' })).not.toBeInTheDocument();
   });
 
-  it('stores a five-degree rotation from the rotate handle keyboard control', () => {
+  it('accumulates two queued five-degree rotations from the keyboard control', () => {
     const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
+    rendererHarness.constrainedRotationItem = {
+      placement: { x: 0, y: 0.36, z: 0.5 },
+      rotation: 5,
+      scale: 1,
+    };
+    const state = { lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to rotate personalization' }), { key: 'ArrowLeft' });
+    const rotate = screen.getByRole('button', { name: 'Drag to rotate personalization' });
+    fireEvent.keyDown(rotate, { key: 'ArrowLeft' });
+    fireEvent.keyDown(rotate, { key: 'ArrowLeft' });
 
-    expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
-      overrides: expect.objectContaining({
-        printItems: [expect.objectContaining({ id: 'print-1', rotation: 5 })],
-      }),
-    }));
+    let latestState = state;
+    for (const [patch] of onStatePatch.mock.calls) {
+      expect(patch).toEqual(expect.any(Function));
+      const resolved = patch(latestState);
+      latestState = {
+        ...latestState,
+        ...resolved,
+        overrides: { ...latestState.overrides, ...resolved.overrides },
+      };
+    }
+    expect(latestState.overrides.printItems[0].rotation).toBe(10);
   });
 
   it('previews 60 drag moves transiently and commits the final rotation once', () => {
     const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+    const state = {
       lighting: 'none',
       overrides: {
         customTextItems: [{
@@ -172,7 +197,8 @@ describe('ProductStage print toolbar', () => {
           scale: 1,
         }],
       },
-    }} />);
+    };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
     act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
 
@@ -188,7 +214,7 @@ describe('ProductStage print toolbar', () => {
     expect(rendererHarness.rotationPreviews).toHaveLength(60);
     fireEvent.pointerUp(handle, { pointerId: 29, clientX: 280, clientY: 247 });
 
-    const finalRotation = onStatePatch.mock.calls.at(-1)[0].overrides.customTextItems[0].rotation;
+    const finalRotation = resolveLastStatePatch(onStatePatch, state).overrides.customTextItems[0].rotation;
     expect(rendererHarness.rotationGestureStarts).toEqual(['text:custom-id']);
     expect(rendererHarness.rotationGestureEnds).toEqual([['text:custom-id', finalRotation]]);
     expect(onStatePatch).toHaveBeenCalledOnce();
@@ -201,7 +227,7 @@ describe('ProductStage print toolbar', () => {
       rotation: 15,
       scale: 1.0261,
     };
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+    const state = {
       lighting: 'none',
       overrides: {
         customTextItems: [{
@@ -212,7 +238,8 @@ describe('ProductStage print toolbar', () => {
           scale: 1.0676,
         }],
       },
-    }} />);
+    };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
     act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
     const handle = screen.getByRole('button', { name: 'Drag to rotate personalization' });
 
@@ -222,7 +249,7 @@ describe('ProductStage print toolbar', () => {
     fireEvent.pointerUp(handle, { pointerId: 81, clientX: 280, clientY: 247 });
 
     expect(onStatePatch).toHaveBeenCalledOnce();
-    expect(onStatePatch).toHaveBeenCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, state)).toEqual({
       overrides: {
         customTextItems: [expect.objectContaining({
           placement: { x: 0, y: 0.36, z: 0.5 },
@@ -248,12 +275,13 @@ describe('ProductStage print toolbar', () => {
 
   it('duplicates the active print at a distinct placement', async () => {
     const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', placement: { x: 0, y: 0.36, z: 0.5 } }] } }} />);
+    const state = { lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', placement: { x: 0, y: 0.36, z: 0.5 } }] } };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate personalization' }));
 
-    expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
+    expect(resolveLastStatePatch(onStatePatch, state)).toEqual(expect.objectContaining({
       overrides: expect.objectContaining({ printItems: expect.arrayContaining([expect.objectContaining({ id: 'print-2' })]) }),
     }));
 
@@ -279,7 +307,8 @@ describe('ProductStage print toolbar', () => {
       rotation: 0,
       scale: 1.0676,
     };
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{ lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } }} />);
+    const state = { lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
     const handle = screen.getByRole('button', { name: 'Resize personalization' });
@@ -292,7 +321,7 @@ describe('ProductStage print toolbar', () => {
     fireEvent.pointerUp(handle, { pointerId: 83, clientX: 109, clientY: 10 });
 
     expect(onStatePatch).toHaveBeenCalledOnce();
-    expect(onStatePatch).toHaveBeenCalledWith(expect.objectContaining({
+    expect(resolveLastStatePatch(onStatePatch, state)).toEqual(expect.objectContaining({
       overrides: expect.objectContaining({ printItems: [expect.objectContaining({ id: 'print-1', scale: 1.0676 })] }),
     }));
   });
@@ -348,15 +377,16 @@ describe('ProductStage print toolbar', () => {
 
   it('rotates a custom text personalization by five degrees from the keyboard', () => {
     const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+    const state = {
       lighting: 'none',
       overrides: { customTextItems: [{ id: 'custom-id', text: 'MASON', rotation: 0 }] },
-    }} />);
+    };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
     fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to rotate personalization' }), { key: 'ArrowLeft' });
 
-    expect(onStatePatch).toHaveBeenCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, state)).toEqual({
       overrides: {
         customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 5 })],
       },
@@ -365,18 +395,19 @@ describe('ProductStage print toolbar', () => {
 
   it('duplicates custom text away from every personalization placement and selects the copy', async () => {
     const onStatePatch = vi.fn();
-    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={{
+    const state = {
       lighting: 'name-number',
       overrides: {
         printItems: [{ id: 'player-id', name: 'PLAYER', number: '16', placement: { x: 0.3, y: 0.36, z: 0.5 } }],
         customTextItems: [{ id: 'custom-id', text: 'MASON', placement: { x: 0, y: 0.36, z: 0.5 } }],
       },
-    }} />);
+    };
+    render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
     act(() => rendererHarness.options.onPrintSelectionChange('text:custom-id'));
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate personalization' }));
 
-    expect(onStatePatch).toHaveBeenCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, state)).toEqual({
       overrides: {
         customTextItems: expect.arrayContaining([
           expect.objectContaining({ id: 'text-2', placement: { x: -0.3, y: 0.36, z: 0.5 } }),
@@ -515,7 +546,7 @@ describe('ProductStage print toolbar', () => {
 
     act(() => rendererHarness.options.onPrintSelectionChange('text:same-id'));
     fireEvent.keyDown(screen.getByRole('button', { name: 'Drag to rotate personalization' }), { key: 'ArrowLeft' });
-    expect(onStatePatch).toHaveBeenLastCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, state)).toEqual({
       overrides: {
         customTextItems: [expect.objectContaining({ id: 'same-id', rotation: 5 })],
       },
@@ -664,10 +695,14 @@ describe('ProductStage print toolbar', () => {
       });
       latestState = stageState;
       return <ProductStage
-        onStatePatch={(patch) => setStageState((current) => ({
-          ...current,
-          overrides: { ...current.overrides, ...patch.overrides },
-        }))}
+        onStatePatch={(patch) => setStageState((current) => {
+          const resolvedPatch = typeof patch === 'function' ? patch(current) : patch;
+          return {
+            ...current,
+            ...resolvedPatch,
+            overrides: { ...current.overrides, ...resolvedPatch.overrides },
+          };
+        })}
         product={product}
         selected={selected}
         state={stageState}

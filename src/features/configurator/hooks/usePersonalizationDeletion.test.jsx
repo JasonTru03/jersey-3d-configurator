@@ -23,8 +23,14 @@ function CoordinatedDeletionHarness({ deferred, onError = vi.fn(), onUpdate = vi
   const updateState = (patch) => {
     onUpdate(patch);
     return deferred.promise.then((result) => {
-      if (result?.ok !== false) setState((current) => mergeConfiguratorState(current, patch));
-      return result;
+      if (result?.ok === false) return result;
+      return new Promise((resolve) => {
+        setState((current) => {
+          const resolvedPatch = typeof patch === 'function' ? patch(current) : patch;
+          queueMicrotask(() => resolve(result));
+          return mergeConfiguratorState(current, resolvedPatch);
+        });
+      });
     });
   };
   const deletion = usePersonalizationDeletion({
@@ -124,21 +130,19 @@ describe('usePersonalizationDeletion coordination', () => {
     await settle(deferred, { ok: true });
   });
 
-  it('builds the shared removal patch from the latest state at execution time', () => {
+  it('builds the shared removal patch from the latest state at execution time', async () => {
     const deferred = createDeferred();
     const onUpdate = vi.fn();
     render(<CoordinatedDeletionHarness deferred={deferred} onUpdate={onUpdate} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add latest state' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete personalization' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add latest state' }));
+    expect(onUpdate).toHaveBeenCalledWith(expect.any(Function));
+    await settle(deferred, { ok: true });
 
-    expect(onUpdate).toHaveBeenCalledWith({
-      overrides: {
-        customTextItems: [
-          expect.objectContaining({ id: 'text-2' }),
-          expect.objectContaining({ id: 'text-3' }),
-        ],
-      },
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete text BACK (text-2)' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Delete text LATEST (text-3)' })).toBeInTheDocument();
     });
   });
 

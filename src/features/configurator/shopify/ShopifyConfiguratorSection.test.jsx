@@ -105,6 +105,32 @@ describe('ShopifyConfiguratorSection', () => {
     });
   });
 
+  it('applies two queued clicks on the same extra as two toggles', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    const originalQuote = productApi.quoteConfiguration.bind(productApi);
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockImplementationOnce(() => firstQuote.promise)
+      .mockImplementation(originalQuote);
+    const extra = screen.getByRole('button', { name: /League sleeve badge/i });
+
+    fireEvent.click(extra);
+    fireEvent.click(extra);
+    await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      firstQuote.resolve(await originalQuote('fn8788-jersey', quoteSpy.mock.calls[0][1]));
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(2));
+    });
+
+    expect(readSubmittedState().extras.sleeveBadge).toBe(false);
+    expect(quoteSpy.mock.calls[1][1]).toEqual(readSubmittedState());
+  });
+
   it('serializes preset artwork into the native product form', async () => {
     document.body.innerHTML = `
       <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>

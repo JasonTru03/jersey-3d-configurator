@@ -304,7 +304,9 @@ function ExtrasGroup({ extras, state, updateState }) {
               aria-pressed={enabled}
               className={enabled ? 'pc3d-option active' : 'pc3d-option'}
               key={extra.id}
-              onClick={() => updateState({ extras: { [extra.id]: !enabled } })}
+              onClick={() => updateState((latestState) => ({
+                extras: { [extra.id]: !Boolean(latestState.extras?.[extra.id]) },
+              }))}
               type="button"
             >
               <span>

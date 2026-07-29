@@ -41,8 +41,6 @@ export function ProductStage({
   const reportedNullSelectionRef = useRef(null);
   const reconciliationInputRef = useRef({ focusId: Symbol('initial-focus'), keys: null });
   const [view, setView] = useState('orbit');
-  const printItems = state?.lighting && state.lighting !== 'none' ? getPrintItems(state.overrides) : [];
-  const customTextItems = getCustomTextItems(state?.overrides);
   const selectablePersonalizationItems = useMemo(
     () => getSelectablePersonalizationItems(state),
     [state],
@@ -125,16 +123,35 @@ export function ProductStage({
     selectedPrintId,
   ]);
 
-  const patchPrint = (id, patch) => {
+  const patchPrint = (id, createPatch) => {
     if (personalizationMutationDisabled) return;
-    const item = findPersonalizationItem(selectablePersonalizationItems, id);
-    if (!item) return;
-    if (item.itemKind === 'text') {
-      onStatePatch({ overrides: { customTextItems: patchCustomTextItem(customTextItems, item.sourceId, patch) } });
-      return;
-    }
-    const nextItems = patchPrintItem(printItems, item.sourceId, patch);
-    onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
+    if (!findPersonalizationItem(selectablePersonalizationItems, id)) return;
+    return onStatePatch((latestState) => {
+      const latestItem = findPersonalizationItem(
+        getSelectablePersonalizationItems(latestState),
+        id,
+      );
+      if (!latestItem) return {};
+      const patch = typeof createPatch === 'function'
+        ? createPatch(latestItem)
+        : createPatch;
+      if (latestItem.itemKind === 'text') {
+        const latestItems = getCustomTextItems(latestState.overrides);
+        return {
+          overrides: {
+            customTextItems: patchCustomTextItem(latestItems, latestItem.sourceId, patch),
+          },
+        };
+      }
+      const latestItems = getPrintItems(latestState.overrides);
+      const nextItems = patchPrintItem(latestItems, latestItem.sourceId, patch);
+      return {
+        overrides: {
+          printItems: nextItems,
+          ...legacyFirstItemFields(nextItems),
+        },
+      };
+    });
   };
 
   useEffect(() => {
@@ -236,35 +253,57 @@ export function ProductStage({
           item={findPersonalizationItem(renderablePersonalizationItems, selectedPrintId)}
           onCopy={(id) => {
             if (personalizationMutationDisabled) return;
-            const item = findPersonalizationItem(selectablePersonalizationItems, id);
-            if (!item) return;
-            const placement = getNextPrintPlacement(
-              PERSONALIZATION_COPY_CANDIDATES,
-              selectablePersonalizationItems.map((entry) => entry.placement).filter(Boolean),
-            );
-            const copy = item.itemKind === 'text'
-              ? duplicateCustomTextItem(customTextItems, item.sourceId, placement)
-              : duplicatePrintItem(printItems, item.sourceId, placement);
-            if (!copy) return;
-            if (item.itemKind === 'text') {
-              onStatePatch({ overrides: { customTextItems: [...customTextItems, copy] } });
-            } else {
-              const nextItems = [...printItems, copy];
-              onStatePatch({ overrides: { printItems: nextItems, ...legacyFirstItemFields(nextItems) } });
-            }
-            const copyKey = makePersonalizationKey(item.itemKind, copy.id);
-            setActivePrintId(copyKey);
-            setSelectedPrintId(copyKey);
-            onPersonalizationSelect?.(copyKey);
+            if (!findPersonalizationItem(selectablePersonalizationItems, id)) return;
+            let copyKey = null;
+            void Promise.resolve(onStatePatch((latestState) => {
+              const latestItems = getSelectablePersonalizationItems(latestState);
+              const item = findPersonalizationItem(latestItems, id);
+              if (!item) return {};
+              const placement = getNextPrintPlacement(
+                PERSONALIZATION_COPY_CANDIDATES,
+                latestItems.map((entry) => entry.placement).filter(Boolean),
+              );
+              if (item.itemKind === 'text') {
+                const textItems = getCustomTextItems(latestState.overrides);
+                const copy = duplicateCustomTextItem(textItems, item.sourceId, placement);
+                if (!copy) return {};
+                copyKey = makePersonalizationKey(item.itemKind, copy.id);
+                return { overrides: { customTextItems: [...textItems, copy] } };
+              }
+              const playerItems = getPrintItems(latestState.overrides);
+              const copy = duplicatePrintItem(playerItems, item.sourceId, placement);
+              if (!copy) return {};
+              copyKey = makePersonalizationKey(item.itemKind, copy.id);
+              const nextItems = [...playerItems, copy];
+              return {
+                overrides: {
+                  printItems: nextItems,
+                  ...legacyFirstItemFields(nextItems),
+                },
+              };
+            })).then((result) => {
+              if (result?.ok === false || !copyKey) return;
+              setActivePrintId(copyKey);
+              setSelectedPrintId(copyKey);
+              onPersonalizationSelect?.(copyKey);
+            });
           }}
           onDelete={onDeletePersonalization}
           onEdit={(id) => onEditPersonalization?.(id)}
           onRotate={(id, rotation) => {
+            const currentItem = findPersonalizationItem(selectablePersonalizationItems, id);
+            const rotationDelta = currentItem
+              ? normalizeRotationDelta(rotation - (currentItem.rotation ?? 0))
+              : 0;
             const finalItem = rendererRef.current?.constrainPersonalizationItem?.(
               id,
               { rotation },
             );
-            patchPrint(id, personalizationTransformPatch(finalItem, { rotation }));
+            const constrainedPatch = personalizationTransformPatch(finalItem, {});
+            patchPrint(id, (latestItem) => ({
+              ...constrainedPatch,
+              rotation: (latestItem.rotation ?? 0) + rotationDelta,
+            }));
           }}
           onRotationPreview={(id, rotation) => {
             rendererRef.current?.previewPersonalizationRotation?.(id, rotation);
@@ -310,6 +349,10 @@ function personalizationTransformPatch(item, fallback) {
     rotation: item.rotation,
     scale: item.scale,
   };
+}
+
+function normalizeRotationDelta(value) {
+  return ((Number(value) + 180) % 360 + 360) % 360 - 180;
 }
 
 function BoxIcon() {

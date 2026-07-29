@@ -23,6 +23,20 @@ function createDeferred() {
 }
 
 describe('DecorationPanel', () => {
+  function applyQueuedUpdates(initialState, updateState) {
+    return updateState.mock.calls.reduce((latestState, [patch]) => {
+      const resolved = typeof patch === 'function' ? patch(latestState) : patch;
+      return {
+        ...latestState,
+        ...resolved,
+        overrides: {
+          ...latestState.overrides,
+          ...resolved.overrides,
+        },
+      };
+    }, initialState);
+  }
+
   it('does not expose artwork region controls and creates presets on the front', () => {
     const updateState = vi.fn();
 
@@ -79,13 +93,12 @@ describe('DecorationPanel', () => {
 
       fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [file] } });
 
-      await waitFor(() => {
-        expect(updateState).toHaveBeenCalledWith({
-          overrides: {
-            decorations: [expect.objectContaining({ kind: 'upload', region: 'front', source: result })],
-            activeDecorationId: expect.any(String),
-          },
-        });
+      await waitFor(() => expect(updateState).toHaveBeenCalledWith(expect.any(Function)));
+      expect(updateState.mock.lastCall[0]({ overrides: { decorations: [] } })).toEqual({
+        overrides: {
+          decorations: [expect.objectContaining({ kind: 'upload', region: 'front', source: result })],
+          activeDecorationId: expect.any(String),
+        },
       });
     } finally {
       vi.unstubAllGlobals();
@@ -116,13 +129,15 @@ describe('DecorationPanel', () => {
     expect(updateState).not.toHaveBeenCalled();
   });
 
-  it('shows the added artwork library and changes only the active artwork when selecting another item', () => {
-    const updateState = vi.fn();
+  it('shows the added artwork library and changes only the active artwork when selecting another item', async () => {
     const onArtworkSelect = vi.fn();
     const decorations = [
       createDecoration({ id: 'crest-1', kind: 'badge', source: 'crest', label: 'Crest Badge', region: 'front' }),
       createDecoration({ id: 'roundel-1', kind: 'badge', source: 'roundel', label: 'Roundel Badge', region: 'front' }),
     ];
+    const updateState = vi.fn((patch) => Promise.resolve({
+      ok: Boolean(patch({ overrides: { decorations, activeDecorationId: 'crest-1' } })),
+    }));
 
     render(
       <DecorationPanel
@@ -143,10 +158,11 @@ describe('DecorationPanel', () => {
     expect(library.querySelector('img')).not.toBeInTheDocument();
     fireEvent.click(within(library).getByRole('button', { name: 'Roundel Badge' }));
 
-    expect(updateState).toHaveBeenCalledWith({
-      overrides: { decorations, activeDecorationId: 'roundel-1' },
+    expect(updateState).toHaveBeenCalledWith(expect.any(Function));
+    expect(updateState.mock.lastCall[0]({ overrides: { decorations, activeDecorationId: 'crest-1' } })).toEqual({
+      overrides: { activeDecorationId: 'roundel-1' },
     });
-    expect(onArtworkSelect).toHaveBeenCalledWith('roundel-1');
+    await waitFor(() => expect(onArtworkSelect).toHaveBeenCalledWith('roundel-1'));
     expect(updateState.mock.invocationCallOrder[0]).toBeLessThan(onArtworkSelect.mock.invocationCallOrder[0]);
   });
 
@@ -167,12 +183,16 @@ describe('DecorationPanel', () => {
 
     const library = screen.getByLabelText('Added artwork');
     fireEvent.click(within(library).getByRole('button', { name: 'Delete Roundel Badge' }));
-    expect(updateState).toHaveBeenLastCalledWith({
+    expect(updateState.mock.lastCall[0]({
+      overrides: { decorations: [first, second], activeDecorationId: 'crest-1' },
+    })).toEqual({
       overrides: { decorations: [first], activeDecorationId: 'crest-1' },
     });
 
     fireEvent.click(within(library).getByRole('button', { name: 'Delete Crest Badge' }));
-    expect(updateState).toHaveBeenLastCalledWith({
+    expect(updateState.mock.lastCall[0]({
+      overrides: { decorations: [first, second], activeDecorationId: 'crest-1' },
+    })).toEqual({
       overrides: { decorations: [second], activeDecorationId: null },
     });
     expect(onArtworkSelect).not.toHaveBeenCalled();
@@ -564,5 +584,111 @@ describe('DecorationPanel', () => {
     });
 
     expect(onSideFocus).not.toHaveBeenCalled();
+  });
+
+  it('accumulates two queued rotations against the latest artwork state', () => {
+    const active = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const state = { overrides: { decorations: [active], activeDecorationId: active.id } };
+    const updateState = vi.fn();
+    render(
+      <DecorationPanel
+        product={{ decorationPresets: [] }}
+        state={state}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate right' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate right' }));
+
+    expect(updateState.mock.calls.map(([patch]) => patch)).toEqual([
+      expect.any(Function),
+      expect.any(Function),
+    ]);
+    expect(applyQueuedUpdates(state, updateState).overrides.decorations[0].rotation).toBe(30);
+  });
+
+  it('does not resurrect either artwork when two queued deletions run', () => {
+    const first = createDecoration({ id: 'crest-1', kind: 'badge', source: 'crest', label: 'Crest', region: 'front' });
+    const second = createDecoration({ id: 'roundel-1', kind: 'badge', source: 'roundel', label: 'Roundel', region: 'front' });
+    const state = { overrides: { decorations: [first, second], activeDecorationId: first.id } };
+    const updateState = vi.fn();
+    render(
+      <DecorationPanel
+        product={{ decorationPresets: [] }}
+        state={state}
+        updateState={updateState}
+      />,
+    );
+
+    const library = screen.getByLabelText('Added artwork');
+    fireEvent.click(within(library).getByRole('button', { name: 'Delete Crest' }));
+    fireEvent.click(within(library).getByRole('button', { name: 'Delete Roundel' }));
+
+    expect(applyQueuedUpdates(state, updateState).overrides.decorations).toEqual([]);
+  });
+
+  it('preserves an uploaded artwork when another queued artwork update follows it', () => {
+    const state = { overrides: { decorations: [] } };
+    const updateState = vi.fn();
+    let finishRead;
+    vi.stubGlobal('FileReader', class {
+      readAsDataURL() {
+        this.result = 'data:image/png;base64,uploaded';
+        finishRead = () => this.onload();
+      }
+    });
+
+    try {
+      const { container } = render(
+        <DecorationPanel
+          product={product}
+          state={state}
+          updateState={updateState}
+        />,
+      );
+      fireEvent.change(container.querySelector('input[type="file"]'), {
+        target: { files: [new File(['image'], 'upload.png', { type: 'image/png' })] },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Crest Badge' }));
+      finishRead();
+
+      expect(applyQueuedUpdates(state, updateState).overrides.decorations).toEqual([
+        expect.objectContaining({ label: 'Crest Badge' }),
+        expect.objectContaining({ kind: 'upload' }),
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('enforces the artwork capacity inside two queued additions', () => {
+    const decorations = Array.from({ length: 7 }, (_, index) => createDecoration({
+      id: `badge-${index}`,
+      kind: 'badge',
+      source: 'crest',
+      label: `Crest ${index}`,
+      region: 'front',
+    }));
+    const state = { overrides: { decorations } };
+    const updateState = vi.fn();
+    render(
+      <DecorationPanel
+        product={product}
+        state={state}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crest Badge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Crest Badge' }));
+
+    expect(applyQueuedUpdates(state, updateState).overrides.decorations).toHaveLength(8);
   });
 });

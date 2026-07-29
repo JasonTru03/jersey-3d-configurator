@@ -26,10 +26,6 @@ export function DecorationPanel({
     selectedKey: active?.id ?? active?.sourceId ?? null,
   });
 
-  function updateDecorations(next, nextActiveId = activeId) {
-    updateState({ overrides: { decorations: next, activeDecorationId: nextActiveId } });
-  }
-
   function addPreset(preset) {
     if (isFull) {
       setMessage(`You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
@@ -37,18 +33,41 @@ export function DecorationPanel({
     }
     const id = `preset-${preset.id}-${Date.now()}`;
     const next = createDecoration({ ...preset, id, region: 'front' });
-    updateState((latestState) => ({
-      overrides: {
-        decorations: [...(latestState.overrides?.decorations ?? []), next],
-        activeDecorationId: id,
-      },
-    }));
-    setMessage(`${preset.label} added`);
+    let added = false;
+    void Promise.resolve(updateState((latestState) => {
+      const latestDecorations = latestState.overrides?.decorations ?? [];
+      if (latestDecorations.length >= MAX_DECORATIONS) {
+        return { overrides: { decorations: latestDecorations } };
+      }
+      added = true;
+      return {
+        overrides: {
+          decorations: [...latestDecorations, next],
+          activeDecorationId: id,
+        },
+      };
+    })).then((result) => {
+      if (result?.ok === false) return;
+      setMessage(added
+        ? `${preset.label} added`
+        : `You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
+    });
   }
 
-  function updateActive(patch) {
+  function updateActive(createPatch) {
     if (!active) return;
-    updateDecorations(decorations.map((item) => item.id === active.id ? patchDecoration(item, patch) : item));
+    updateState((latestState) => {
+      const latestDecorations = latestState.overrides?.decorations ?? [];
+      const targetIndex = findDecorationTargetIndex(latestDecorations, active);
+      if (targetIndex < 0) return { overrides: { decorations: latestDecorations } };
+      const nextDecorations = [...latestDecorations];
+      const latestActive = nextDecorations[targetIndex];
+      const patch = typeof createPatch === 'function'
+        ? createPatch(latestActive)
+        : createPatch;
+      nextDecorations[targetIndex] = patchDecoration(latestActive, patch);
+      return { overrides: { decorations: nextDecorations } };
+    });
   }
 
   function selectActiveSide(side) {
@@ -86,15 +105,36 @@ export function DecorationPanel({
   }
 
   function selectArtwork(id) {
-    updateDecorations(decorations, id);
-    onArtworkSelect?.(id);
+    let targetFound = false;
+    void Promise.resolve(updateState((latestState) => {
+      const latestDecorations = latestState.overrides?.decorations ?? [];
+      targetFound = latestDecorations.some((item) => item.id === id);
+      return targetFound
+        ? { overrides: { activeDecorationId: id } }
+        : { overrides: { decorations: latestDecorations } };
+    })).then((result) => {
+      if (result?.ok !== false && targetFound) onArtworkSelect?.(id);
+    });
   }
 
   function removeArtwork(id) {
     const decoration = decorations.find((item) => item.id === id);
     if (!decoration) return;
-    updateDecorations(removeDecoration(decorations, id), id === activeId ? null : activeId);
-    setMessage(`${decoration.label} removed`);
+    let targetFound = false;
+    void Promise.resolve(updateState((latestState) => {
+      const latestDecorations = latestState.overrides?.decorations ?? [];
+      const latestActiveId = latestState.overrides?.activeDecorationId ?? null;
+      targetFound = latestDecorations.some((item) => item.id === id);
+      if (!targetFound) return { overrides: { decorations: latestDecorations } };
+      return {
+        overrides: {
+          decorations: removeDecoration(latestDecorations, id),
+          activeDecorationId: id === latestActiveId ? null : latestActiveId,
+        },
+      };
+    })).then((result) => {
+      if (result?.ok !== false && targetFound) setMessage(`${decoration.label} removed`);
+    });
   }
 
   function handleUpload(event) {
@@ -113,8 +153,25 @@ export function DecorationPanel({
     reader.onload = () => {
       const id = `upload-${Date.now()}`;
       const next = createDecoration({ id, kind: 'upload', source: String(reader.result), label: file.name, region: 'front' });
-      updateDecorations([...decorations, next], id);
-      setMessage(`${file.name} added`);
+      let added = false;
+      void Promise.resolve(updateState((latestState) => {
+        const latestDecorations = latestState.overrides?.decorations ?? [];
+        if (latestDecorations.length >= MAX_DECORATIONS) {
+          return { overrides: { decorations: latestDecorations } };
+        }
+        added = true;
+        return {
+          overrides: {
+            decorations: [...latestDecorations, next],
+            activeDecorationId: id,
+          },
+        };
+      })).then((result) => {
+        if (result?.ok === false) return;
+        setMessage(added
+          ? `${file.name} added`
+          : `You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
+      });
     };
     reader.onerror = () => setMessage('Image cannot be read. Please choose another file.');
     reader.readAsDataURL(file);
@@ -158,10 +215,10 @@ export function DecorationPanel({
             side={activeSide}
           />
           <div>
-            <button aria-label="Rotate left" onClick={() => updateActive({ rotation: active.rotation - 15 })} type="button"><RotateCcw size={16} /></button>
-            <button aria-label="Rotate right" onClick={() => updateActive({ rotation: active.rotation + 15 })} type="button"><RotateCw size={16} /></button>
-            <button onClick={() => updateActive({ scale: active.scale - 0.15 })} type="button">Smaller</button>
-            <button onClick={() => updateActive({ scale: active.scale + 0.15 })} type="button">Larger</button>
+            <button aria-label="Rotate left" onClick={() => updateActive((item) => ({ rotation: item.rotation - 15 }))} type="button"><RotateCcw size={16} /></button>
+            <button aria-label="Rotate right" onClick={() => updateActive((item) => ({ rotation: item.rotation + 15 }))} type="button"><RotateCw size={16} /></button>
+            <button onClick={() => updateActive((item) => ({ scale: item.scale - 0.15 }))} type="button">Smaller</button>
+            <button onClick={() => updateActive((item) => ({ scale: item.scale + 0.15 }))} type="button">Larger</button>
             <button aria-label="Delete artwork" className="delete-artwork" onClick={removeActive} type="button"><Trash2 size={16} /></button>
           </div>
         </div>

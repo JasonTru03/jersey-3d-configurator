@@ -1,5 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
+import {
+  startTransition,
+  Suspense,
+  useState,
+} from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { mergeConfiguratorState } from '../config/state.js';
 import { jerseyProduct } from '../config/productDefinitions.js';
@@ -10,6 +14,7 @@ function PersonalizeHarness({
   initialState = jerseyProduct.defaultState,
   initialSelection = null,
   onSideFocus = vi.fn(),
+  onSidePendingChange = vi.fn(),
   onStateChange = vi.fn(),
   onUpdate = vi.fn(),
   updateDeferred = null,
@@ -50,6 +55,7 @@ function PersonalizeHarness({
         deletePersonalization={deletion.deletePersonalization}
         onSelect={setSelectedKey}
         onSideFocus={onSideFocus}
+        onSidePendingChange={onSidePendingChange}
         selectedKey={selectedKey}
         state={state}
         updateState={updateState}
@@ -154,7 +160,9 @@ describe('PersonalizePanel', () => {
 
   it('moves a selected player set to the back default while preserving its content and transform', async () => {
     const onSideFocus = vi.fn();
+    const onSidePendingChange = vi.fn();
     const onStateChange = vi.fn();
+    const updateDeferred = createDeferred();
     const state = structuredClone(jerseyProduct.defaultState);
     state.lighting = 'name-number';
     state.overrides.printItems = [{
@@ -170,11 +178,21 @@ describe('PersonalizePanel', () => {
         initialSelection="player:player"
         initialState={state}
         onSideFocus={onSideFocus}
+        onSidePendingChange={onSidePendingChange}
         onStateChange={onStateChange}
+        updateDeferred={updateDeferred}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(onStateChange).not.toHaveBeenCalled();
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(onSidePendingChange).toHaveBeenCalledWith(true);
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
 
     await waitFor(() => expect(onStateChange).toHaveBeenCalled());
     const nextPlayer = onStateChange.mock.lastCall[0].overrides.printItems[0];
@@ -195,6 +213,191 @@ describe('PersonalizePanel', () => {
     expect(onStateChange.mock.lastCall[0].overrides.printName).toBe('MASON');
     expect(onStateChange.mock.lastCall[0].overrides.printNumber).toBe('10');
     await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('back'));
+    expect(onSidePendingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('keeps another player and first-player legacy fields unchanged when switching the second player', async () => {
+    const onSideFocus = vi.fn();
+    const onStateChange = vi.fn();
+    const onUpdate = vi.fn();
+    const updateDeferred = createDeferred();
+    const firstPlacement = {
+      x: -0.24,
+      y: 0.61,
+      z: 0.48,
+      normal: { x: 0, y: 0, z: 1 },
+    };
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [
+      {
+        id: 'first',
+        name: 'FIRST',
+        number: '10',
+        placement: firstPlacement,
+        rotation: 12,
+        scale: 1.1,
+      },
+      {
+        id: 'second',
+        name: 'SECOND',
+        number: '20',
+        placement: { x: 0.24, y: 0.61, z: 0.48, normal: { x: 0, y: 0, z: 1 } },
+        rotation: 28,
+        scale: 1.24,
+      },
+    ];
+    render(
+      <PersonalizeHarness
+        initialSelection="player:second"
+        initialState={state}
+        onSideFocus={onSideFocus}
+        onStateChange={onStateChange}
+        onUpdate={onUpdate}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    const addPlayer = screen.getByRole('button', { name: 'Add player set' });
+    const addText = screen.getByRole('button', { name: 'Add text' });
+    const deleteButtons = screen.getAllByRole('button', { name: /^Delete player set/ });
+    expect(addPlayer).toBeDisabled();
+    expect(addText).toBeDisabled();
+    deleteButtons.forEach((button) => {
+      expect(button).toBeDisabled();
+    });
+    fireEvent.click(addPlayer);
+    fireEvent.click(addText);
+    deleteButtons.forEach((button) => fireEvent.click(button));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'FIRST · 10' }));
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('player:first');
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'SECOND · 20' }));
+    expect(screen.getByTestId('selected-key')).toHaveTextContent('player:second');
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => expect(onStateChange).toHaveBeenCalled());
+    const nextOverrides = onStateChange.mock.lastCall[0].overrides;
+    expect(nextOverrides.printItems).toEqual([
+      {
+        id: 'first',
+        name: 'FIRST',
+        number: '10',
+        placement: firstPlacement,
+        rotation: 12,
+        scale: 1.1,
+      },
+      {
+        id: 'second',
+        name: 'SECOND',
+        number: '20',
+        placement: {
+          x: 0,
+          y: 0.36,
+          z: -0.5,
+          normal: { x: 0, y: 0, z: -1 },
+        },
+        rotation: 28,
+        scale: 1.24,
+      },
+    ]);
+    expect(nextOverrides.printName).toBe('FIRST');
+    expect(nextOverrides.printNumber).toBe('10');
+    expect(nextOverrides.printPlacement).toEqual(firstPlacement);
+    expect(onSideFocus).not.toHaveBeenCalled();
+  });
+
+  it('keeps a side operation current when an uncommitted selection render is interrupted', async () => {
+    const onSideFocus = vi.fn();
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [
+      {
+        id: 'first',
+        name: 'FIRST',
+        number: '10',
+        placement: { x: -0.24, y: 0.61, z: 0.48, normal: { x: 0, y: 0, z: 1 } },
+      },
+      {
+        id: 'second',
+        name: 'SECOND',
+        number: '20',
+        placement: { x: 0.24, y: 0.61, z: 0.48, normal: { x: 0, y: 0, z: 1 } },
+      },
+    ];
+    render(
+      <InterruptiblePersonalizeHarness
+        initialState={state}
+        onSideFocus={onSideFocus}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Interrupt selection render' }));
+
+    expect(screen.getByRole('button', { name: 'SECOND · 20' }))
+      .toHaveAttribute('aria-pressed', 'true');
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('back'));
+  });
+
+  it('unlocks without stale focus when a pending panel is hidden and restored', async () => {
+    const onSideFocus = vi.fn();
+    const onSidePendingChange = vi.fn();
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [{
+      id: 'player',
+      name: 'MASON',
+      number: '10',
+      placement: { x: 0, y: 0.36, z: 0.5, normal: { x: 0, y: 0, z: 1 } },
+    }];
+    render(
+      <SuspenseVisibilityHarness
+        initialState={state}
+        onSideFocus={onSideFocus}
+        onSidePendingChange={onSidePendingChange}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(onSidePendingChange).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide personalize panel' }));
+    expect(screen.getByText('Loading selection')).toBeInTheDocument();
+
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(onSidePendingChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show personalize panel' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Add player set' })).toBeEnabled();
+      expect(screen.getByLabelText('Name')).toBeEnabled();
+    });
+    expect(onSideFocus).not.toHaveBeenCalled();
   });
 
   it('focuses an already active player side without resetting its custom placement', async () => {
@@ -317,6 +520,44 @@ describe('PersonalizePanel', () => {
       y: 0.36,
       z: 0.5,
     });
+  });
+
+  it('does not request focus when a custom text side update fails', async () => {
+    const onSideFocus = vi.fn();
+    const onSidePendingChange = vi.fn();
+    const onStateChange = vi.fn();
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [{
+      id: 'text-1',
+      text: 'MASON',
+      placement: { x: 0, y: 0.36, z: 0.5, normal: { x: 0, y: 0, z: 1 } },
+      rotation: 42,
+      scale: 1.35,
+    }];
+    render(
+      <PersonalizeHarness
+        initialSelection="text:text-1"
+        initialState={state}
+        onSideFocus={onSideFocus}
+        onSidePendingChange={onSidePendingChange}
+        onStateChange={onStateChange}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(onSidePendingChange).toHaveBeenCalledWith(true);
+    await act(async () => {
+      updateDeferred.resolve({ message: 'Quote failed', ok: false });
+      await updateDeferred.promise;
+    });
+
+    expect(onStateChange).not.toHaveBeenCalled();
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(onSidePendingChange).toHaveBeenLastCalledWith(false);
   });
 
   it('adds a player set and keeps raised-print pricing selected', async () => {
@@ -655,4 +896,89 @@ function createDeferred() {
     resolve = next;
   });
   return { promise, resolve };
+}
+
+function InterruptiblePersonalizeHarness({
+  initialState,
+  onSideFocus,
+  updateDeferred,
+}) {
+  const [selectedKey, setSelectedKey] = useState('player:second');
+  const [state, setState] = useState(initialState);
+  const [suspendSelection, setSuspendSelection] = useState(false);
+  const updateState = (patch) => updateDeferred.promise.then((result) => {
+    if (result?.ok !== false) {
+      setState((current) => mergeConfiguratorState(current, patch));
+    }
+    return result;
+  });
+
+  return (
+    <>
+      <Suspense fallback={<p>Loading selection</p>}>
+        <PersonalizePanel
+          deletePending={false}
+          onSelect={setSelectedKey}
+          onSideFocus={onSideFocus}
+          selectedKey={selectedKey}
+          state={state}
+          updateState={updateState}
+        />
+        <SuspendSelectionRender suspend={suspendSelection} />
+      </Suspense>
+      <button
+        onClick={() => {
+          startTransition(() => {
+            setSelectedKey('player:first');
+            setSuspendSelection(true);
+          });
+        }}
+        type="button"
+      >
+        Interrupt selection render
+      </button>
+    </>
+  );
+}
+
+function SuspendSelectionRender({ suspend }) {
+  if (suspend) throw interruptedSelectionRender;
+  return null;
+}
+
+const interruptedSelectionRender = new Promise(() => {});
+
+function SuspenseVisibilityHarness({
+  initialState,
+  onSideFocus,
+  onSidePendingChange,
+  updateDeferred,
+}) {
+  const [state, setState] = useState(initialState);
+  const [suspend, setSuspend] = useState(false);
+  const updateState = (patch) => updateDeferred.promise.then((result) => {
+    if (result?.ok !== false) {
+      setState((current) => mergeConfiguratorState(current, patch));
+    }
+    return result;
+  });
+
+  return (
+    <>
+      <Suspense fallback={<p>Loading selection</p>}>
+        <PersonalizePanel
+          deletePending={false}
+          onSelect={vi.fn()}
+          onSideFocus={onSideFocus}
+          onSidePendingChange={onSidePendingChange}
+          selectedKey="player:player"
+          state={state}
+          updateState={updateState}
+        />
+        <SuspendSelectionRender suspend={suspend} />
+      </Suspense>
+      <button onClick={() => setSuspend(true)} type="button">Hide personalize panel</button>
+      <button onClick={() => setSuspend(false)} type="button">Show personalize panel</button>
+    </>
+  );
 }

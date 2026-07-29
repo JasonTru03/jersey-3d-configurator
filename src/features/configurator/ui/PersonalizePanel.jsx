@@ -1,6 +1,7 @@
 import { Trash2 } from 'lucide-react';
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -35,7 +36,9 @@ export function PersonalizePanel({
   deletePersonalization,
   onSelect,
   onSideFocus,
+  onSidePendingChange,
   selectedKey,
+  sidePending = false,
   state,
   updateState,
 }) {
@@ -46,6 +49,15 @@ export function PersonalizePanel({
   const items = useMemo(() => getSelectablePersonalizationItems(state), [state]);
   const customTextItems = getCustomTextItems(state.overrides);
   const selectedItem = findPersonalizationItem(items, selectedKey);
+  const {
+    selectSide,
+    sidePending: localSidePending,
+  } = usePersonalizationSideMutation({
+    onSideFocus,
+    onSidePendingChange,
+    selectedKey,
+  });
+  const mutationDisabled = deletePending || sidePending || localSidePending;
 
   useEffect(() => {
     const selectionClearedByDeletion = previousDeletePendingRef.current && !selectedKey;
@@ -101,6 +113,7 @@ export function PersonalizePanel({
   }, [deletePending]);
 
   const addPlayerSet = async () => {
+    if (mutationDisabled) return;
     const printItems = ensurePrintItems(getPrintItems(state.overrides));
     const firstKey = makePersonalizationKey('player', printItems[0].id);
     const hasRawItems = Array.isArray(state.overrides?.printItems)
@@ -119,7 +132,7 @@ export function PersonalizePanel({
   };
 
   const addText = async () => {
-    if (customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS) return;
+    if (mutationDisabled || customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS) return;
     const item = createCustomTextItem({
       id: nextTextId(customTextItems),
       text: 'YOUR TEXT',
@@ -131,7 +144,7 @@ export function PersonalizePanel({
 
   const removeItem = (event, item) => {
     event.stopPropagation();
-    if (deletePending || !deletePersonalization) return;
+    if (mutationDisabled || !deletePersonalization) return;
     const trigger = event.currentTarget;
     const rows = Array.from(listRef.current?.children ?? []);
     const pendingFocus = {
@@ -154,13 +167,13 @@ export function PersonalizePanel({
   return (
     <section aria-label="Personalize jersey" className="personalize-panel">
       <div className="personalize-actions">
-        <button aria-label="Add player set" className="soft-button" disabled={deletePending} onClick={addPlayerSet} type="button">
+        <button aria-label="Add player set" className="soft-button" disabled={mutationDisabled} onClick={addPlayerSet} type="button">
           + Player set
         </button>
         <button
           aria-label="Add text"
           className="soft-button"
-          disabled={deletePending || customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS}
+          disabled={mutationDisabled || customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS}
           onClick={addText}
           type="button"
         >
@@ -186,7 +199,7 @@ export function PersonalizePanel({
             <button
               aria-label={personalizationDeleteLabel(item)}
               className="personalize-element-delete"
-              disabled={deletePending}
+              disabled={mutationDisabled}
               onClick={(event) => removeItem(event, item)}
               type="button"
             >
@@ -199,18 +212,18 @@ export function PersonalizePanel({
         <div className="personalize-editor">
           {selectedItem.itemKind === 'player' ? (
             <PlayerEditor
-              disabled={deletePending}
+              disabled={mutationDisabled}
               item={selectedItem}
-              onSideFocus={onSideFocus}
               overrides={state.overrides}
+              selectSide={selectSide}
               updateState={updateState}
             />
           ) : (
             <TextEditor
-              disabled={deletePending}
+              disabled={mutationDisabled}
               item={selectedItem}
-              onSideFocus={onSideFocus}
               overrides={state.overrides}
+              selectSide={selectSide}
               updateState={updateState}
             />
           )}
@@ -220,8 +233,13 @@ export function PersonalizePanel({
   );
 }
 
-function PlayerEditor({ disabled, item, onSideFocus, overrides, updateState }) {
-  const [sidePending, setSidePending] = useState(false);
+function PlayerEditor({
+  disabled,
+  item,
+  overrides,
+  selectSide,
+  updateState,
+}) {
   const printItems = getPrintItems(overrides);
   const patchPlayer = (patch) => {
     const nextItems = patchPrintItem(printItems, item.sourceId, patch);
@@ -233,26 +251,18 @@ function PlayerEditor({ disabled, item, onSideFocus, overrides, updateState }) {
     });
   };
   const activeSide = getPersonalizationSide(item.placement);
-  const selectSide = async (side) => {
-    if (side !== activeSide) {
-      setSidePending(true);
-      try {
-        const result = await patchPlayer({
-          placement: getPersonalizationSidePlacement(side),
-        });
-        if (result?.ok === false) return;
-      } finally {
-        setSidePending(false);
-      }
-    }
-    onSideFocus?.(side);
-  };
+  const selectItemSide = (side) => selectSide({
+    activeSide,
+    itemKey: item.key,
+    side,
+    updatePlacement: (placement) => patchPlayer({ placement }),
+  });
 
   return (
     <div className="print-fields">
       <PersonalizationSideSelector
-        disabled={disabled || sidePending}
-        onSelect={selectSide}
+        disabled={disabled}
+        onSelect={selectItemSide}
         side={activeSide}
       />
       <label>
@@ -285,8 +295,13 @@ function PlayerEditor({ disabled, item, onSideFocus, overrides, updateState }) {
   );
 }
 
-function TextEditor({ disabled, item, onSideFocus, overrides, updateState }) {
-  const [sidePending, setSidePending] = useState(false);
+function TextEditor({
+  disabled,
+  item,
+  overrides,
+  selectSide,
+  updateState,
+}) {
   const customTextItems = getCustomTextItems(overrides);
   const patchText = (patch) => updateState({
     overrides: {
@@ -294,26 +309,18 @@ function TextEditor({ disabled, item, onSideFocus, overrides, updateState }) {
     },
   });
   const activeSide = getPersonalizationSide(item.placement);
-  const selectSide = async (side) => {
-    if (side !== activeSide) {
-      setSidePending(true);
-      try {
-        const result = await patchText({
-          placement: getPersonalizationSidePlacement(side),
-        });
-        if (result?.ok === false) return;
-      } finally {
-        setSidePending(false);
-      }
-    }
-    onSideFocus?.(side);
-  };
+  const selectItemSide = (side) => selectSide({
+    activeSide,
+    itemKey: item.key,
+    side,
+    updatePlacement: (placement) => patchText({ placement }),
+  });
 
   return (
     <div className="custom-text-fields">
       <PersonalizationSideSelector
-        disabled={disabled || sidePending}
-        onSelect={selectSide}
+        disabled={disabled}
+        onSelect={selectItemSide}
         side={activeSide}
       />
       <label>
@@ -388,6 +395,83 @@ function TextEditor({ disabled, item, onSideFocus, overrides, updateState }) {
       </label>
     </div>
   );
+}
+
+function usePersonalizationSideMutation({
+  onSideFocus,
+  onSidePendingChange,
+  selectedKey,
+}) {
+  const activeOperationRef = useRef(null);
+  const mountedRef = useRef(false);
+  const nextTokenRef = useRef(0);
+  const onSideFocusRef = useRef(onSideFocus);
+  const onSidePendingChangeRef = useRef(onSidePendingChange);
+  const selectionRef = useRef({ key: selectedKey, version: 0 });
+  const [sidePending, setSidePending] = useState(false);
+
+  useLayoutEffect(() => {
+    onSideFocusRef.current = onSideFocus;
+    onSidePendingChangeRef.current = onSidePendingChange;
+    if (selectionRef.current.key !== selectedKey) {
+      selectionRef.current = {
+        key: selectedKey,
+        version: selectionRef.current.version + 1,
+      };
+    }
+  }, [onSideFocus, onSidePendingChange, selectedKey]);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    if (!activeOperationRef.current) setSidePending(false);
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const selectSide = async ({
+    activeSide,
+    itemKey,
+    side,
+    updatePlacement,
+  }) => {
+    if (activeOperationRef.current) return { ok: false, reason: 'pending' };
+    if (side === activeSide) {
+      onSideFocusRef.current?.(side);
+      return { ok: true };
+    }
+
+    const operation = {
+      itemKey,
+      selectionVersion: selectionRef.current.version,
+      token: ++nextTokenRef.current,
+    };
+    activeOperationRef.current = operation;
+    onSidePendingChangeRef.current?.(true);
+    setSidePending(true);
+    try {
+      const result = await updatePlacement(getPersonalizationSidePlacement(side));
+      if (result?.ok === false) return result;
+      if (
+        !mountedRef.current
+        || activeOperationRef.current?.token !== operation.token
+        || selectionRef.current.key !== operation.itemKey
+        || selectionRef.current.version !== operation.selectionVersion
+      ) {
+        return result ?? { ok: true };
+      }
+      onSideFocusRef.current?.(side);
+      return result ?? { ok: true };
+    } finally {
+      if (activeOperationRef.current?.token === operation.token) {
+        activeOperationRef.current = null;
+        onSidePendingChangeRef.current?.(false);
+        if (mountedRef.current) setSidePending(false);
+      }
+    }
+  };
+
+  return { selectSide, sidePending };
 }
 
 function personalizationLabel(item) {

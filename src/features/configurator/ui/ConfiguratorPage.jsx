@@ -66,6 +66,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   } = useConfigurator(shopifyContext?.initialLayout ? { layout: shopifyContext.initialLayout } : undefined);
   const fileInputRef = useRef(null);
   const [selectedPersonalizationKey, setSelectedPersonalizationKey] = useState(null);
+  const [personalizationSidePending, setPersonalizationSidePending] = useState(false);
   const [artworkFocusId, setArtworkFocusId] = useState(null);
   const [section, setSection] = useState('layout');
   const [theme, setTheme] = useState('light');
@@ -268,7 +269,9 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             onPersonalizationSelect={setSelectedPersonalizationKey}
             onStatePatch={updateState}
             personalizationFocusId={selectedPersonalizationKey}
-            personalizationMutationDisabled={personalizationDeletion.deletePending}
+            personalizationMutationDisabled={
+              personalizationDeletion.deletePending || personalizationSidePending
+            }
             product={product}
             state={state}
             selected={selected}
@@ -278,6 +281,8 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             deletePersonalization={personalizationDeletion.deletePersonalization}
             onArtworkSelect={setArtworkFocusId}
             onReview={handleOpenReview}
+            onPersonalizationSidePendingChange={setPersonalizationSidePending}
+            personalizationSidePending={personalizationSidePending}
             product={product}
             quote={quote}
             section={section}
@@ -406,7 +411,9 @@ function ConfigPanel({
   deletePersonalization,
   onArtworkSelect,
   onPersonalizationSelect,
+  onPersonalizationSidePendingChange,
   onReview,
+  personalizationSidePending,
   product,
   quote,
   section,
@@ -474,7 +481,9 @@ function ConfigPanel({
             deletePending={deletePending}
             deletePersonalization={deletePersonalization}
             onSelect={onPersonalizationSelect}
+            onSidePendingChange={onPersonalizationSidePendingChange}
             selectedKey={selectedPersonalizationKey}
+            sidePending={personalizationSidePending}
             state={state}
             updateState={updateState}
           />

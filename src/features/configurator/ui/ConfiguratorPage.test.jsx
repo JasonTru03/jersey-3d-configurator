@@ -7,6 +7,7 @@ const rendererHarness = vi.hoisted(() => ({
   configurationError: '',
   focusedDecorationId: null,
   options: null,
+  personalizationMutationDisabled: null,
   updateStates: [],
   finalRotationItem: null,
   normalizationForUpdate: null,
@@ -51,6 +52,9 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       previewPersonalizationScale() {}
       endPersonalizationResize() {}
       cancelPersonalizationResizePreview() {}
+      setPersonalizationMutationDisabled(disabled) {
+        rendererHarness.personalizationMutationDisabled = disabled;
+      }
 
       setView() {}
 
@@ -92,6 +96,7 @@ beforeEach(() => {
   vi.useRealTimers();
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
+  rendererHarness.personalizationMutationDisabled = null;
   rendererHarness.updateStates = [];
   rendererHarness.finalRotationItem = null;
   rendererHarness.normalizationForUpdate = null;
@@ -149,6 +154,60 @@ describe('ConfiguratorPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('$97').length).toBeGreaterThan(0));
     expect(await screen.findByLabelText('Text content')).toHaveValue('YOUR TEXT');
+  });
+
+  it('locks panel and stage personalization mutations while a side update is pending', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
+    await screen.findByLabelText('Name');
+    const stageDelete = await screen.findByRole('button', { name: 'Delete personalization' });
+    const quoteDeferred = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(quoteDeferred.promise);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    try {
+      await waitFor(() => {
+        expect(rendererHarness.personalizationMutationDisabled).toBe(true);
+        expect(screen.getByLabelText('Name')).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Add player set' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Add text' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^Delete player set/ })).toBeDisabled();
+        expect(stageDelete).toBeDisabled();
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+      await waitFor(() => {
+        expect(screen.getByLabelText('Name')).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Add text' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^Delete player set/ })).toBeDisabled();
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
+      expect(quoteSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        quoteDeferred.resolve({
+          basePrice: 89,
+          merchandisePrice: 89,
+          customizationTotal: 18,
+          optionAdjustments: [],
+          total: 107,
+          currency: 'USD',
+        });
+        await quoteDeferred.promise;
+      });
+      quoteSpy.mockRestore();
+    }
+
+    await waitFor(() => {
+      expect(rendererHarness.personalizationMutationDisabled).toBe(false);
+      expect(screen.getByLabelText('Name')).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Add text' })).toBeEnabled();
+      expect(stageDelete).toBeEnabled();
+    });
   });
 
   it('shows total and review action in a fixed footer instead of the top bar', async () => {
@@ -819,4 +878,12 @@ function secureCartResponse(overrides = {}) {
     status: 201,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }

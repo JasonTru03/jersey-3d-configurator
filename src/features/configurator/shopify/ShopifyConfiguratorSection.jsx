@@ -169,7 +169,14 @@ function useShopifyConfigurator(settings) {
   ) => {
     const currentState = stateRef.current;
     if (!product || !currentState) return { message: 'The configurator is still loading.', ok: false };
-    const resolvedPatch = resolveShopifyStatePatch(currentState, patch);
+    let resolvedPatch;
+    try {
+      resolvedPatch = resolveShopifyStatePatch(currentState, patch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Configuration update failed.';
+      setConfigurationError(message);
+      return { message, ok: false };
+    }
     const nextState = mergeConfiguratorState(currentState, resolvedPatch);
     if (!shouldQuote) {
       stateRef.current = nextState;
@@ -213,8 +220,12 @@ function useShopifyConfigurator(settings) {
 
 function resolveShopifyStatePatch(currentState, patch) {
   const resolvedPatch = typeof patch === 'function' ? patch(currentState) : patch;
-  if (Object.prototype.toString.call(resolvedPatch) !== '[object Object]') {
-    throw new TypeError('Configuration patch must be an object.');
+  if (
+    resolvedPatch === null
+    || typeof resolvedPatch !== 'object'
+    || Object.getPrototypeOf(resolvedPatch) !== Object.prototype
+  ) {
+    throw new TypeError('Configuration patch must be a plain object.');
   }
   return resolvedPatch;
 }

@@ -213,10 +213,17 @@ describe('ShopifyConfiguratorSection', () => {
     render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
     await screen.findByText('Customize your match jersey');
     await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    const previousState = readSubmittedState();
+    let result;
 
-    await expect(rendererHarness.options.onStatePatch(() => {
-      throw new Error('Updater failed');
-    }, { quote: false })).rejects.toThrow('Updater failed');
+    await act(async () => {
+      result = await rendererHarness.options.onStatePatch(() => {
+        throw new Error('Updater failed');
+      }, { quote: false });
+    });
+
+    expect(result).toEqual({ message: 'Updater failed', ok: false });
+    expect(readSubmittedState()).toEqual(previousState);
   });
 
   it('rejects an invalid functional updater result instead of reporting success', async () => {
@@ -227,10 +234,48 @@ describe('ShopifyConfiguratorSection', () => {
     render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
     await screen.findByText('Customize your match jersey');
     await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    const previousState = readSubmittedState();
+    let result;
 
-    await expect(
-      rendererHarness.options.onStatePatch(() => null, { quote: false }),
-    ).rejects.toThrow('Configuration patch must be an object.');
+    await act(async () => {
+      result = await rendererHarness.options.onStatePatch(() => null, { quote: false });
+    });
+
+    expect(result).toEqual({
+      message: 'Configuration patch must be a plain object.',
+      ok: false,
+    });
+    expect(readSubmittedState()).toEqual(previousState);
+  });
+
+  it('rejects a class instance returned by a functional updater', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    class InvalidPatch {
+      constructor() {
+        this.layout = 'xl';
+      }
+    }
+    const previousState = readSubmittedState();
+    let result;
+
+    await act(async () => {
+      result = await rendererHarness.options.onStatePatch(
+        () => new InvalidPatch(),
+        { quote: false },
+      );
+    });
+
+    expect(result).toEqual({
+      message: 'Configuration patch must be a plain object.',
+      ok: false,
+    });
+    expect(readSubmittedState()).toEqual(previousState);
   });
 
   it('forwards an artwork list click to the 3D stage without focusing on add', async () => {

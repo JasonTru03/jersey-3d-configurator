@@ -1,118 +1,118 @@
-# Unified Personalization Sides Design
+# 个性化元素正背面统一设计方案
 
-Date: 2026-07-29
-Status: Approved design, pending implementation
+日期：2026-07-29
+状态：方案已确认，等待实施
 
-## Goal
+## 目标
 
-Allow every customer-added personalization element to be placed on either the front or back of the jersey through one consistent interaction:
+所有由顾客添加的个性化元素都采用统一操作方式，可选择放在球衣正面或背面，包括：
 
-- player name and number sets;
-- custom text;
-- preset artwork;
-- uploaded artwork.
+- 球员姓名和号码组合；
+- 自定义文字；
+- 预设图片；
+- 用户上传的图片。
 
-Switching sides also rotates the 3D jersey to the selected side so the customer can immediately see and continue editing the element.
+切换正背面时，3D 球衣同时自动旋转到对应视角，让顾客可以立即看到并继续编辑该元素。
 
-## Confirmed interaction
+## 已确认的交互
 
-- The selected element's editor shows a `Front / Back` control.
-- Selecting `Back` moves only that element to the center of the back and rotates the jersey to the back view.
-- Selecting `Front` moves only that element to the center of the front and rotates the jersey to the front view.
-- After switching sides, existing drag, rotate, resize, duplicate, and delete interactions remain available.
-- Other personalization elements keep their current side and placement.
-- Selecting the already active side does not reset the element's current placement.
+- 当前选中元素的编辑区域显示 `Front / Back` 控件。
+- 点击 `Back` 后，只把当前元素移动到背面中央，并将球衣自动旋转到背面。
+- 点击 `Front` 后，只把当前元素移动到正面中央，并将球衣自动旋转到正面。
+- 切换后仍可继续拖动、旋转、缩放、复制和删除。
+- 其他个性化元素保持原来的位置和所在面，不受影响。
+- 如果点击的面已经是当前面，不重置用户拖动后的现有位置。
 
-## Design
+## 设计方案
 
-### Shared side model
+### 统一的正背面数据规则
 
-Use the existing placement and region data rather than introducing a new saved-document field:
+继续使用项目现有的位置和区域数据，不新增保存文件字段：
 
-- player sets and custom text identify their side from placement position and surface normal;
-- artwork continues to use its existing `region` and mesh placement;
-- front and back default placements remain explicit and deterministic.
+- 球员姓名号码和自定义文字，通过位置坐标及表面法线判断所在面；
+- 图片继续使用现有的 `region` 和网格投影位置；
+- 正面和背面使用明确、固定的默认中央位置。
 
-A shared side helper owns:
+建立共用的正背面工具，统一管理：
 
-- supported sides (`front`, `back`);
-- display labels;
-- default front and back placements for print-based personalization;
-- deriving the active side from a saved placement.
+- 支持的面：`front`、`back`；
+- 界面显示名称；
+- 文字类元素在正面和背面的默认位置；
+- 根据已保存的位置判断当前所在面。
 
-This prevents the player and text editors from developing different side rules.
+这样可以避免球员姓名号码和自定义文字分别维护不同规则。
 
-### Personalize panel
+### 个性化文字面板
 
-Player sets and custom text use the same side selector.
+球员姓名号码和自定义文字共用同一个正背面选择控件。
 
-When a player or text element changes side:
+当球员姓名号码或自定义文字切换面时：
 
-1. replace its placement with the default center placement for the selected side;
-2. preserve its content, colors, font, rotation, and scale;
-3. keep that element selected;
-4. request the corresponding camera view.
+1. 将其位置替换为目标面的默认中央位置；
+2. 保留文字内容、颜色、字体、旋转角度和缩放大小；
+3. 保持该元素处于选中状态；
+4. 请求切换到对应的相机视角。
 
-The existing custom-text-only side selector is replaced by the shared control.
+现有仅供自定义文字使用的正背面控件将被统一控件替代。
 
-### Artwork panel
+### 图片面板
 
-The selected preset or uploaded artwork receives the same `Front / Back` selector.
+当前选中的预设图片或上传图片显示相同的 `Front / Back` 控件。
 
-When artwork changes side:
+图片切换面时：
 
-1. patch its `region`;
-2. clear its old mesh placement so the renderer projects it onto the new surface;
-3. preserve its source, label, rotation, and scale;
-4. keep it selected;
-5. request the corresponding camera view.
+1. 更新图片的 `region`；
+2. 清除旧面的网格投影位置，让渲染器在新表面重新投影；
+3. 保留图片来源、名称、旋转角度和缩放大小；
+4. 保持图片处于选中状态；
+5. 请求切换到对应的相机视角。
 
-New artwork remains front by default. Customers can switch it to the back after adding it.
+新添加的图片默认仍放在正面，顾客添加后可切换到背面。
 
-### Camera coordination
+### 相机联动
 
-The panels emit a side-focus request through the existing configurator page and stage boundary. The renderer moves the camera to a stable front or back preset without changing personalization data.
+编辑面板通过现有配置页面和 3D 舞台边界发送视角请求，由渲染器将相机移动到稳定的正面或背面预设位置，不修改个性化数据。
 
-Side switching and camera movement are separate responsibilities:
+职责保持分离：
 
-- panels update the selected element;
-- the stage controls the view;
-- the renderer owns camera animation.
+- 编辑面板负责更新当前元素；
+- 3D 舞台负责控制当前视角；
+- 渲染器负责执行相机动画。
 
-This keeps saved designs independent from the current viewing angle.
+因此保存的设计不会依赖顾客当前正在观看的角度。
 
-## Compatibility and error handling
+## 兼容和异常处理
 
-- Existing saved designs remain valid because no document schema changes.
-- Legacy placements without a surface normal derive their side from the position's Z value.
-- If the garment mesh is not ready, the state still records the selected side; the existing normalization path projects the element when the model becomes available.
-- If artwork projection cannot find the requested surface, it retains the selected region and does not reuse the old side's placement.
-- Switching sides does not change pricing or Shopify cart properties beyond the already serialized placement data.
+- 不修改设计文件结构，现有已保存设计继续兼容。
+- 旧位置如果没有表面法线，则根据 Z 坐标判断正面或背面。
+- 如果球衣模型尚未加载完成，仍先记录顾客选择的面，模型就绪后由现有标准化流程完成投影。
+- 如果图片暂时无法投影到目标表面，保留顾客选择的区域，不复用旧面的无效位置。
+- 切换正背面不改变价格；购物车继续使用现有个性化位置数据。
 
-## Test strategy
+## 测试方案
 
-Add failing tests before implementation for:
+实施前先添加失败测试，覆盖：
 
-- player sets showing the shared side selector and moving to the back default;
-- custom text continuing to use the same selector;
-- selected artwork changing from front to back and clearing its old mesh placement;
-- uploaded and preset artwork remaining front by default;
-- side changes emitting the correct front or back camera request;
-- selecting the already active side preserving the current dragged placement;
-- unrelated elements remaining unchanged;
-- saved-design round trips preserving front and back placements.
+- 球员姓名号码显示统一正背面控件，并能移动到背面默认位置；
+- 自定义文字继续使用相同控件；
+- 选中图片从正面切换到背面时，会清除旧网格位置；
+- 新上传图片和预设图片仍默认放在正面；
+- 切换正背面会发出正确的正面或背面相机请求；
+- 再次点击当前所在面时，不重置用户拖动后的位置；
+- 未选中的其他元素不发生变化；
+- 设计文件保存并重新打开后，正背面位置保持不变。
 
-Run the focused component and renderer tests, the complete test suite, production builds, and browser acceptance for both desktop and mobile layouts.
+验证范围包括：相关组件和渲染器测试、完整测试套件、生产构建，以及桌面端和移动端的浏览器真实操作。
 
-## Browser acceptance
+## 浏览器验收
 
-1. Add a player set, switch it to `Back`, and confirm the jersey rotates to the back with the name and number visible.
-2. Drag, resize, and rotate the player set on the back.
-3. Add preset and uploaded artwork, switch each to `Back`, and confirm both are visible and editable.
-4. Switch each element back to `Front` and confirm the camera and element move together.
-5. Confirm switching one element does not move other elements.
-6. Save and reopen the design and confirm every element remains on its selected side.
+1. 添加球员姓名号码，切换到 `Back`，确认球衣自动转到背面，并显示姓名和号码。
+2. 在背面拖动、缩放和旋转球员姓名号码。
+3. 分别添加预设图片和上传图片，切换到 `Back`，确认两者都可见且可编辑。
+4. 将各元素重新切回 `Front`，确认相机和元素同步切换。
+5. 确认切换一个元素不会移动其他元素。
+6. 保存并重新打开设计，确认每个元素仍位于原来选择的面。
 
-## Scope boundary
+## 本次不做的范围
 
-This change does not add sleeve placement for print-based personalization, allow dragging through the model from one side to another, change pricing, change item limits, change the design schema, or redesign unrelated controls.
+本次不增加文字类元素的袖子放置功能，不支持把元素直接拖过球衣边缘切换正背面，不修改价格、元素数量上限、设计文件结构，也不重新设计无关控件。

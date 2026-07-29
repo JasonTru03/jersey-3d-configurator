@@ -169,7 +169,8 @@ function useShopifyConfigurator(settings) {
   ) => {
     const currentState = stateRef.current;
     if (!product || !currentState) return { message: 'The configurator is still loading.', ok: false };
-    const nextState = mergeConfiguratorState(currentState, patch);
+    const resolvedPatch = resolveShopifyStatePatch(currentState, patch);
+    const nextState = mergeConfiguratorState(currentState, resolvedPatch);
     if (!shouldQuote) {
       stateRef.current = nextState;
       setState(nextState);
@@ -208,6 +209,14 @@ function useShopifyConfigurator(settings) {
   }, [product, state]);
 
   return { configurationError, product, quote, selected, state, updateState };
+}
+
+function resolveShopifyStatePatch(currentState, patch) {
+  const resolvedPatch = typeof patch === 'function' ? patch(currentState) : patch;
+  if (Object.prototype.toString.call(resolvedPatch) !== '[object Object]') {
+    throw new TypeError('Configuration patch must be an object.');
+  }
+  return resolvedPatch;
 }
 
 function OptionGroup({ disabled = false, label, options, selectedId, onSelect }) {

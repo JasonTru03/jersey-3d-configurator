@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { productApi } from '../api/productApi.js';
+import { createDecoration } from '../config/decorations.js';
 import { ShopifyConfiguratorSection } from './ShopifyConfiguratorSection.jsx';
 
 const rendererHarness = vi.hoisted(() => ({
@@ -118,6 +119,118 @@ describe('ShopifyConfiguratorSection', () => {
         region: 'front',
       });
     });
+  });
+
+  it('moves only the active artwork to the back from the latest Shopify state', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Roundel Badge$/ }));
+    await waitFor(() => {
+      expect(readSubmittedState().overrides.decorations).toHaveLength(2);
+    });
+
+    const [crest, roundel] = readSubmittedState().overrides.decorations;
+    fireEvent.click(
+      within(screen.getByLabelText('Added artwork'))
+        .getByRole('button', { name: 'Crest Badge' }),
+    );
+    await act(async () => {
+      await rendererHarness.options.onStatePatch({
+        overrides: {
+          decorations: [
+            { ...crest, placement: { x: 0.2, y: 0.4, z: 0.5 } },
+            roundel,
+          ],
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => {
+      const decorations = readSubmittedState().overrides.decorations;
+      expect(decorations[0]).toMatchObject({
+        id: crest.id,
+        placement: null,
+        region: 'back',
+      });
+      expect(decorations[1]).toEqual(roundel);
+    });
+  });
+
+  it('resolves consecutive functional updates against the latest Shopify state', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    const crest = createDecoration({
+      id: 'queued-crest',
+      kind: 'badge',
+      source: 'crest-badge',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const roundel = createDecoration({
+      id: 'queued-roundel',
+      kind: 'badge',
+      source: 'roundel-badge',
+      label: 'Roundel Badge',
+      region: 'front',
+    });
+
+    await act(async () => {
+      await Promise.all([
+        rendererHarness.options.onStatePatch((current) => ({
+          overrides: {
+            decorations: [...current.overrides.decorations, crest],
+          },
+        }), { quote: false }),
+        rendererHarness.options.onStatePatch((current) => ({
+          overrides: {
+            decorations: [...current.overrides.decorations, roundel],
+          },
+        }), { quote: false }),
+      ]);
+    });
+
+    expect(readSubmittedState().overrides.decorations).toEqual([crest, roundel]);
+  });
+
+  it('rejects a functional updater that throws instead of reporting success', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+
+    await expect(rendererHarness.options.onStatePatch(() => {
+      throw new Error('Updater failed');
+    }, { quote: false })).rejects.toThrow('Updater failed');
+  });
+
+  it('rejects an invalid functional updater result instead of reporting success', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+
+    await expect(
+      rendererHarness.options.onStatePatch(() => null, { quote: false }),
+    ).rejects.toThrow('Configuration patch must be an object.');
   });
 
   it('forwards an artwork list click to the 3D stage without focusing on add', async () => {
@@ -251,3 +364,9 @@ describe('ShopifyConfiguratorSection', () => {
     expect(quoteSpy).not.toHaveBeenCalled();
   });
 });
+
+function readSubmittedState() {
+  return JSON.parse(
+    document.querySelector('input[name="properties[_3D Config JSON]"]').value,
+  ).state;
+}

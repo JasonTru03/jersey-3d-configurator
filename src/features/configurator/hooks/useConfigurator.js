@@ -104,7 +104,10 @@ export function useConfigurator(initialStateOverride, { onMutationStart } = {}) 
         if (!currentState) {
           return { message: 'The configurator is still loading.', ok: false };
         }
-        const nextState = mergeConfiguratorState(currentState, patch);
+        const resolvedPatch = typeof patch === 'function'
+          ? patch(currentState)
+          : patch;
+        const nextState = mergeConfiguratorState(currentState, resolvedPatch);
         try {
           const nextQuote = shouldQuote
             ? await productApi.quoteConfiguration(product.id, nextState)
@@ -137,8 +140,10 @@ export function useConfigurator(initialStateOverride, { onMutationStart } = {}) 
     commitQuote(await productApi.quoteConfiguration(product.id, nextState));
   }), [commitHistory, commitQuote, enqueueMutation, product]);
 
-  const saveDesignFile = useCallback((bakeMetadata) => {
-    const currentState = getCurrentDesignState(history);
+  const saveDesignFile = useCallback((bakeMetadata, stateSnapshot) => {
+    const currentState = stateSnapshot
+      ? structuredClone(stateSnapshot)
+      : getCurrentDesignState(history);
     if (!product || !currentState) return null;
 
     const stateForExport = bakeMetadata && currentState.overrides?.bottomPattern?.enabled

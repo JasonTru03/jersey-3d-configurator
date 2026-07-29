@@ -4,6 +4,7 @@ import { ConfiguratorPage, createLocalProductionFiles, shouldPrepareBottomPatter
 import { productApi } from '../api/productApi.js';
 
 const rendererHarness = vi.hoisted(() => ({
+  bakeResult: null,
   configurationError: '',
   focusedDecorationId: null,
   options: null,
@@ -59,7 +60,7 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       setView() {}
 
       ensureLatestBottomPatternBake() {
-        return {
+        return rendererHarness.bakeResult ?? {
           blob: new Blob(['atlas'], { type: 'image/png' }),
           metadata: { bakeKey: 'bottom-pattern-atlas:test', atlasSize: 2048 },
         };
@@ -94,6 +95,7 @@ afterAll(() => {
 
 beforeEach(() => {
   vi.useRealTimers();
+  rendererHarness.bakeResult = null;
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
@@ -256,6 +258,72 @@ describe('ConfiguratorPage', () => {
     });
   });
 
+  it('preserves a queued drag transform when a later player side change runs', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
+    await screen.findByLabelText('Name');
+    const currentItems = structuredClone(
+      rendererHarness.updateStates.at(-1).overrides.printItems,
+    );
+    const quoteDeferred = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(quoteDeferred.promise);
+    let dragUpdate;
+
+    try {
+      act(() => {
+        dragUpdate = rendererHarness.options.onStatePatch({
+          overrides: {
+            printItems: currentItems.map((item) => (
+              item.id === 'print-1' ? { ...item, rotation: 37 } : item
+            )),
+          },
+        });
+      });
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+      expect(quoteSpy).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        quoteDeferred.resolve({
+          basePrice: 89,
+          merchandisePrice: 89,
+          customizationTotal: 18,
+          optionAdjustments: [],
+          total: 107,
+          currency: 'USD',
+        });
+        await dragUpdate;
+      });
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(2));
+    } finally {
+      quoteDeferred.resolve({
+        basePrice: 89,
+        merchandisePrice: 89,
+        customizationTotal: 18,
+        optionAdjustments: [],
+        total: 107,
+        currency: 'USD',
+      });
+      await Promise.allSettled([quoteDeferred.promise, dragUpdate]);
+      quoteSpy.mockRestore();
+    }
+
+    await waitFor(() => {
+      const player = rendererHarness.updateStates.at(-1).overrides.printItems
+        .find((item) => item.id === 'print-1');
+      expect(player.rotation).toBe(37);
+      expect(player.placement).toMatchObject({
+        normal: { x: 0, y: 0, z: -1 },
+        x: 0,
+        y: 0.36,
+        z: -0.5,
+      });
+    });
+  });
+
   it('restores snapshot actions when a side update fails', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
@@ -407,6 +475,68 @@ describe('ConfiguratorPage', () => {
     const statusRegion = screen.getByRole('region', { name: 'Configurator status' });
     expect(statusRegion).toContainElement(download);
     expect(statusRegion.nextElementSibling).toHaveClass('workspace-grid');
+  });
+
+  it('discards a patterned save when the design changes while its bake is pending', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    await waitFor(() => expect(
+      screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }),
+    ).toBeChecked());
+    const bakeDeferred = createDeferred();
+    rendererHarness.bakeResult = bakeDeferred.promise;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+    fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
+    await waitFor(() => expect(
+      document.querySelector('[data-option-group="layout"][data-option-id="xl"]'),
+    ).toHaveAttribute('aria-pressed', 'true'));
+
+    await act(async () => {
+      bakeDeferred.resolve({
+        blob: new Blob(['atlas'], { type: 'image/png' }),
+        metadata: { bakeKey: 'bottom-pattern-atlas:stale', atlasSize: 2048 },
+      });
+      await bakeDeferred.promise;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.queryByRole('link', { name: 'Download production ZIP' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Download design JSON' })).not.toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('discards a patterned save when the page unmounts while its bake is pending', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { unmount } = render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
+    await waitFor(() => expect(
+      screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }),
+    ).toBeChecked());
+    const bakeDeferred = createDeferred();
+    rendererHarness.bakeResult = bakeDeferred.promise;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    unmount();
+    await act(async () => {
+      bakeDeferred.resolve({
+        blob: new Blob(['atlas'], { type: 'image/png' }),
+        metadata: { bakeKey: 'bottom-pattern-atlas:unmounted', atlasSize: 2048 },
+      });
+      await bakeDeferred.promise;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(
+      /state update.*unmounted|unmounted component/i,
+    );
+    consoleError.mockRestore();
   });
 
   it('only requires a baked asset when the bottom pattern is enabled', () => {

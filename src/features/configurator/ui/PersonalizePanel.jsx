@@ -214,7 +214,6 @@ export function PersonalizePanel({
             <PlayerEditor
               disabled={mutationDisabled}
               item={selectedItem}
-              overrides={state.overrides}
               selectSide={selectSide}
               updateState={updateState}
             />
@@ -222,7 +221,6 @@ export function PersonalizePanel({
             <TextEditor
               disabled={mutationDisabled}
               item={selectedItem}
-              overrides={state.overrides}
               selectSide={selectSide}
               updateState={updateState}
             />
@@ -236,20 +234,22 @@ export function PersonalizePanel({
 function PlayerEditor({
   disabled,
   item,
-  overrides,
   selectSide,
   updateState,
 }) {
-  const printItems = getPrintItems(overrides);
-  const patchPlayer = (patch) => {
-    const nextItems = patchPrintItem(printItems, item.sourceId, patch);
-    return updateState({
+  const patchPlayer = (patch) => updateState((latestState) => {
+    const nextItems = patchPrintItem(
+      getPrintItems(latestState.overrides),
+      item.sourceId,
+      patch,
+    );
+    return {
       overrides: {
         printItems: nextItems,
         ...legacyFirstItemFields(nextItems),
       },
-    });
-  };
+    };
+  });
   const activeSide = getPersonalizationSide(item.placement);
   const selectItemSide = (side) => selectSide({
     activeSide,
@@ -298,16 +298,18 @@ function PlayerEditor({
 function TextEditor({
   disabled,
   item,
-  overrides,
   selectSide,
   updateState,
 }) {
-  const customTextItems = getCustomTextItems(overrides);
-  const patchText = (patch) => updateState({
+  const patchText = (patch) => updateState((latestState) => ({
     overrides: {
-      customTextItems: patchCustomTextItem(customTextItems, item.sourceId, patch),
+      customTextItems: patchCustomTextItem(
+        getCustomTextItems(latestState.overrides),
+        item.sourceId,
+        patch,
+      ),
     },
-  });
+  }));
   const activeSide = getPersonalizationSide(item.placement);
   const selectItemSide = (side) => selectSide({
     activeSide,

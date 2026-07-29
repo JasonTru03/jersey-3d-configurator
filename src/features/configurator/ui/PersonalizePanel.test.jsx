@@ -24,7 +24,7 @@ function PersonalizeHarness({
 
   const applyPatch = (patch) => {
     setState((current) => {
-      const next = mergeConfiguratorState(current, patch);
+      const next = mergeConfiguratorState(current, resolveStatePatch(current, patch));
       onStateChange(next);
       return next;
     });
@@ -66,6 +66,10 @@ function PersonalizeHarness({
       <output data-testid="text-count">{state.overrides.customTextItems.length}</output>
     </>
   );
+}
+
+function resolveStatePatch(state, patch) {
+  return typeof patch === 'function' ? patch(structuredClone(state)) : patch;
 }
 
 describe('PersonalizePanel', () => {
@@ -214,6 +218,118 @@ describe('PersonalizePanel', () => {
     expect(onStateChange.mock.lastCall[0].overrides.printNumber).toBe('10');
     await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('back'));
     expect(onSidePendingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('preserves a queued player name edit and other players when a later side change runs', async () => {
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.lighting = 'name-number';
+    state.overrides.printItems = [
+      {
+        id: 'first',
+        name: 'FIRST',
+        number: '11',
+        placement: { x: 0, y: 0.36, z: 0.5 },
+        rotation: 5,
+        scale: 1.1,
+      },
+      {
+        id: 'second',
+        name: 'SECOND',
+        number: '22',
+        placement: { x: 0.2, y: 0.45, z: 0.48 },
+        rotation: 10,
+        scale: 1.2,
+      },
+    ];
+    const firstBefore = structuredClone(state.overrides.printItems[0]);
+    const onStateChange = vi.fn();
+    render(
+      <PersonalizeHarness
+        initialSelection="player:second"
+        initialState={state}
+        onStateChange={onStateChange}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'UPDATED' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => expect(onStateChange).toHaveBeenCalledTimes(2));
+    const finalItems = onStateChange.mock.lastCall[0].overrides.printItems;
+    expect(finalItems[0]).toMatchObject(firstBefore);
+    expect(finalItems[1]).toMatchObject({
+      id: 'second',
+      name: 'UPDATED',
+      number: '22',
+      placement: {
+        normal: { x: 0, y: 0, z: -1 },
+        x: 0,
+        y: 0.36,
+        z: -0.5,
+      },
+      rotation: 10,
+      scale: 1.2,
+    });
+  });
+
+  it('preserves a queued text edit and other text items when a later side change runs', async () => {
+    const updateDeferred = createDeferred();
+    const state = structuredClone(jerseyProduct.defaultState);
+    state.overrides.customTextItems = [
+      {
+        id: 'first',
+        text: 'FIRST',
+        placement: { x: -0.2, y: 0.45, z: 0.48 },
+        rotation: 5,
+        scale: 1.1,
+      },
+      {
+        id: 'second',
+        text: 'SECOND',
+        placement: { x: 0.2, y: 0.45, z: 0.48 },
+        rotation: 10,
+        scale: 1.2,
+      },
+    ];
+    const firstBefore = structuredClone(state.overrides.customTextItems[0]);
+    const onStateChange = vi.fn();
+    render(
+      <PersonalizeHarness
+        initialSelection="text:second"
+        initialState={state}
+        onStateChange={onStateChange}
+        updateDeferred={updateDeferred}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Text content'), { target: { value: 'UPDATED' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await act(async () => {
+      updateDeferred.resolve({ ok: true });
+      await updateDeferred.promise;
+    });
+
+    await waitFor(() => expect(onStateChange).toHaveBeenCalledTimes(2));
+    const finalItems = onStateChange.mock.lastCall[0].overrides.customTextItems;
+    expect(finalItems[0]).toMatchObject(firstBefore);
+    expect(finalItems[1]).toMatchObject({
+      id: 'second',
+      text: 'UPDATED',
+      placement: {
+        normal: { x: 0, y: 0, z: -1 },
+        x: 0,
+        y: 0.36,
+        z: -0.5,
+      },
+      rotation: 10,
+      scale: 1.2,
+    });
   });
 
   it('keeps another player and first-player legacy fields unchanged when switching the second player', async () => {
@@ -472,7 +588,9 @@ describe('PersonalizePanel', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Front' }));
     expect(onUpdate).toHaveBeenCalledTimes(1);
-    expect(onUpdate).toHaveBeenCalledWith({
+    const queuedPatch = onUpdate.mock.lastCall[0];
+    expect(queuedPatch).toEqual(expect.any(Function));
+    expect(queuedPatch(state)).toEqual({
       overrides: {
         printItems: [{
           id: 'player',
@@ -908,7 +1026,7 @@ function InterruptiblePersonalizeHarness({
   const [suspendSelection, setSuspendSelection] = useState(false);
   const updateState = (patch) => updateDeferred.promise.then((result) => {
     if (result?.ok !== false) {
-      setState((current) => mergeConfiguratorState(current, patch));
+      setState((current) => mergeConfiguratorState(current, resolveStatePatch(current, patch)));
     }
     return result;
   });
@@ -958,7 +1076,7 @@ function SuspenseVisibilityHarness({
   const [suspend, setSuspend] = useState(false);
   const updateState = (patch) => updateDeferred.promise.then((result) => {
     if (result?.ok !== false) {
-      setState((current) => mergeConfiguratorState(current, patch));
+      setState((current) => mergeConfiguratorState(current, resolveStatePatch(current, patch)));
     }
     return result;
   });

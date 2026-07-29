@@ -261,6 +261,73 @@ describe('useConfigurator mutation serialization', () => {
     }
   });
 
+  it('resolves a functional patch against the latest committed array state', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const initialItems = [
+      {
+        id: 'first',
+        name: 'FIRST',
+        placement: { x: -0.2, y: 0.45, z: 0.48 },
+      },
+      {
+        id: 'second',
+        name: 'SECOND',
+        placement: { x: 0.2, y: 0.45, z: 0.48 },
+      },
+    ];
+    await act(async () => {
+      await result.current.updateState(
+        { overrides: { printItems: initialItems } },
+        { quote: false },
+      );
+    });
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(firstQuote.promise);
+    let nameUpdate;
+    let sideUpdate;
+
+    try {
+      act(() => {
+        nameUpdate = result.current.updateState({
+          overrides: {
+            printItems: initialItems.map((item) => (
+              item.id === 'second' ? { ...item, name: 'UPDATED' } : item
+            )),
+          },
+        });
+        sideUpdate = result.current.updateState((latestState) => ({
+          overrides: {
+            printItems: latestState.overrides.printItems.map((item) => (
+              item.id === 'second'
+                ? { ...item, placement: { x: 0, y: 0.36, z: -0.5 } }
+                : item
+            )),
+          },
+        }));
+      });
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+      firstQuote.resolve(result.current.quote);
+      await act(async () => {
+        await Promise.all([nameUpdate, sideUpdate]);
+      });
+
+      expect(result.current.state.overrides.printItems).toEqual([
+        initialItems[0],
+        {
+          ...initialItems[1],
+          name: 'UPDATED',
+          placement: { x: 0, y: 0.36, z: -0.5 },
+        },
+      ]);
+    } finally {
+      firstQuote.resolve(result.current.quote);
+      await Promise.allSettled([firstQuote.promise, nameUpdate, sideUpdate]);
+      quoteSpy.mockRestore();
+    }
+  });
+
   it.each([
     ['rejects', () => Promise.reject(new Error('Quote rejected.'))],
     ['throws', () => { throw new Error('Quote threw.'); }],

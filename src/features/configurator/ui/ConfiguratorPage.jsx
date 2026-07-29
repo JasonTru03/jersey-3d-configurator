@@ -67,7 +67,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     updateState,
   } = useConfigurator(
     shopifyContext?.initialLayout ? { layout: shopifyContext.initialLayout } : undefined,
-    { onMutationStart: cancelActiveCartRequest },
+    { onMutationStart: handleMutationStart },
   );
   const fileInputRef = useRef(null);
   const [selectedPersonalizationKey, setSelectedPersonalizationKey] = useState(null);
@@ -89,6 +89,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const latestStateRef = useRef(state);
   const mountedRef = useRef(false);
   const reviewOpenRef = useRef(reviewOpen);
+  const saveRequestIdRef = useRef(0);
   latestStateRef.current = state;
   reviewOpenRef.current = reviewOpen;
   const snapshotMutationPending = personalizationSidePending || mutationPending;
@@ -114,10 +115,16 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     if (updateUi && mountedRef.current) setCartPending(false);
   }
 
+  function handleMutationStart() {
+    saveRequestIdRef.current += 1;
+    cancelActiveCartRequest();
+  }
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      saveRequestIdRef.current += 1;
       cancelActiveCartRequest({ updateUi: false });
     };
   }, []);
@@ -137,12 +144,19 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
 
   const handleSaveDesign = async () => {
     if (personalizationSidePendingRef.current || hasPendingMutation()) return;
+    const requestId = saveRequestIdRef.current + 1;
+    const stateSnapshot = latestStateRef.current;
+    saveRequestIdRef.current = requestId;
+    const isCurrentRequest = () => (
+      mountedRef.current && saveRequestIdRef.current === requestId
+    );
     try {
       setFileError('');
-      const productionFiles = shouldPrepareBottomPatternAsset(state)
+      const productionFiles = shouldPrepareBottomPatternAsset(stateSnapshot)
         ? await createLocalProductionFiles({ bake: await getLatestPatternBake(bakeProviderRef), productId: product.id })
         : null;
-      const download = saveDesignFile(productionFiles?.bakeMetadata);
+      if (!isCurrentRequest()) return;
+      const download = saveDesignFile(productionFiles?.bakeMetadata, stateSnapshot);
       if (!download) return;
       let artifact = download;
       let receipt = null;
@@ -152,12 +166,14 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           design: download,
           atlas: { blob: productionFiles.atlas, filename: productionFiles.atlasFilename },
         });
+        if (!isCurrentRequest()) return;
         artifact = bundle;
         receipt = createLocalProductionReceipt({
-          state,
+          state: stateSnapshot,
           productionFiles: { ...productionFiles, bundleFilename: bundle.filename },
         });
       }
+      if (!isCurrentRequest()) return;
       setLocalProductionReceipt(null);
       setPreparedDownload({
         ...createBrowserDownload(artifact),
@@ -165,6 +181,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         receipt,
       });
     } catch (error) {
+      if (!isCurrentRequest()) return;
       setFileError(error instanceof Error ? error.message : 'Design file preparation failed.');
     }
   };

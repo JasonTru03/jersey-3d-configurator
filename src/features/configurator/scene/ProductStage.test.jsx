@@ -10,6 +10,7 @@ const rendererHarness = vi.hoisted(() => ({
   rotationPreviews: [],
   rotationCancels: [],
   constrainedRotationItem: null,
+  constrainedRotationPatches: [],
   finalRotationItem: null,
   finalResizeItem: null,
   resizePreviews: [],
@@ -66,8 +67,11 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
         rendererHarness.rotationCancels.push(true);
       }
 
-      constrainPersonalizationItem() {
-        return rendererHarness.constrainedRotationItem;
+      constrainPersonalizationItem(id, patch) {
+        rendererHarness.constrainedRotationPatches.push([id, patch]);
+        return typeof rendererHarness.constrainedRotationItem === 'function'
+          ? rendererHarness.constrainedRotationItem(patch)
+          : rendererHarness.constrainedRotationItem;
       }
 
       beginPersonalizationResize() {}
@@ -113,6 +117,7 @@ beforeEach(() => {
   rendererHarness.rotationPreviews = [];
   rendererHarness.rotationCancels = [];
   rendererHarness.constrainedRotationItem = null;
+  rendererHarness.constrainedRotationPatches = [];
   rendererHarness.finalRotationItem = null;
   rendererHarness.finalResizeItem = null;
   rendererHarness.resizePreviews = [];
@@ -158,11 +163,10 @@ describe('ProductStage print toolbar', () => {
 
   it('accumulates two queued five-degree rotations from the keyboard control', () => {
     const onStatePatch = vi.fn();
-    rendererHarness.constrainedRotationItem = {
-      placement: { x: 0, y: 0.36, z: 0.5 },
-      rotation: 5,
-      scale: 1,
-    };
+    rendererHarness.constrainedRotationItem = (patch) => ({
+      ...patch,
+      placement: { x: patch.rotation / 100, y: 0.36, z: 0.5 },
+    });
     const state = { lighting: 'name-number', overrides: { printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', scale: 1, rotation: 0 }] } };
     render(<ProductStage onStatePatch={onStatePatch} product={product} selected={selected} state={state} />);
 
@@ -182,6 +186,8 @@ describe('ProductStage print toolbar', () => {
       };
     }
     expect(latestState.overrides.printItems[0].rotation).toBe(10);
+    expect(latestState.overrides.printItems[0].placement).toEqual({ x: 0.1, y: 0.36, z: 0.5 });
+    expect(rendererHarness.constrainedRotationPatches.map(([, patch]) => patch.rotation)).toEqual([5, 10]);
   });
 
   it('previews 60 drag moves transiently and commits the final rotation once', () => {
@@ -391,6 +397,42 @@ describe('ProductStage print toolbar', () => {
         customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 5 })],
       },
     });
+  });
+
+  it('does not let a late copy completion reclaim a newer personalization selection', async () => {
+    const deferred = createDeferred();
+    const onPersonalizationSelect = vi.fn();
+    const state = {
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{ id: 'print-1', name: 'PLAYER', number: '16', placement: { x: 0, y: 0.36, z: 0.5 } }],
+        customTextItems: [{ id: 'text-1', text: 'MASON', placement: { x: 0.3, y: 0.36, z: 0.5 } }],
+      },
+    };
+    const onStatePatch = vi.fn((patch) => {
+      patch(state);
+      return deferred.promise;
+    });
+    render(
+      <ProductStage
+        onPersonalizationSelect={onPersonalizationSelect}
+        onStatePatch={onStatePatch}
+        product={product}
+        selected={selected}
+        state={state}
+      />,
+    );
+    act(() => rendererHarness.options.onPrintSelectionChange('player:print-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate personalization' }));
+    act(() => rendererHarness.options.onPrintSelectionChange('text:text-1'));
+
+    await act(async () => {
+      deferred.resolve({ ok: true });
+      await deferred.promise;
+    });
+
+    expect(rendererHarness.activePrintId).toBe('text:text-1');
+    expect(onPersonalizationSelect).not.toHaveBeenCalledWith('player:print-2');
   });
 
   it('duplicates custom text away from every personalization placement and selects the copy', async () => {
@@ -728,3 +770,11 @@ describe('ProductStage print toolbar', () => {
     expect(latestState.overrides.customTextItems).toHaveLength(8);
   });
 });
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((onResolve) => {
+    resolve = onResolve;
+  });
+  return { promise, resolve };
+}

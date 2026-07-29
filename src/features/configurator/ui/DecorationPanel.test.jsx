@@ -691,4 +691,37 @@ describe('DecorationPanel', () => {
 
     expect(applyQueuedUpdates(state, updateState).overrides.decorations).toHaveLength(8);
   });
+
+  it('does not focus artwork after its queued selection completes post-unmount', async () => {
+    const deferred = createDeferred();
+    const decoration = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+    });
+    const onArtworkSelect = vi.fn();
+    const updateState = vi.fn((patch) => {
+      patch({ overrides: { decorations: [decoration] } });
+      return deferred.promise;
+    });
+    const { unmount } = render(
+      <DecorationPanel
+        onArtworkSelect={onArtworkSelect}
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [decoration] } }}
+        updateState={updateState}
+      />,
+    );
+    fireEvent.click(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Crest' }));
+    unmount();
+
+    await act(async () => {
+      deferred.resolve({ ok: true });
+      await deferred.promise;
+    });
+
+    expect(onArtworkSelect).not.toHaveBeenCalled();
+  });
 });

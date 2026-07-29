@@ -38,6 +38,9 @@ export function ProductStage({
 }) {
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
+  const mountedRef = useRef(false);
+  const copyTokenRef = useRef(0);
+  const selectionIntentRef = useRef(null);
   const reportedNullSelectionRef = useRef(null);
   const reconciliationInputRef = useRef({ focusId: Symbol('initial-focus'), keys: null });
   const [view, setView] = useState('orbit');
@@ -62,6 +65,7 @@ export function ProductStage({
 
   const handlePrintSelectionChange = useCallback((id) => {
     reportedNullSelectionRef.current = id === null ? reportedNullSelectionRef.current : null;
+    selectionIntentRef.current = id;
     setActivePrintId(id);
     setSelectedPrintId(id);
     onPersonalizationSelect?.(id);
@@ -70,6 +74,13 @@ export function ProductStage({
     (patch) => onStatePatch(patch, { quote: false, recordHistory: false }),
     [onStatePatch],
   );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const previousInput = reconciliationInputRef.current;
@@ -104,6 +115,7 @@ export function ProductStage({
       return;
     }
 
+    selectionIntentRef.current = nextSelectedId;
     setSelectedPrintId(nextSelectedId);
     if (nextSelectedId !== null) {
       reportedNullSelectionRef.current = null;
@@ -254,6 +266,7 @@ export function ProductStage({
           onCopy={(id) => {
             if (personalizationMutationDisabled) return;
             if (!findPersonalizationItem(selectablePersonalizationItems, id)) return;
+            const operationToken = ++copyTokenRef.current;
             let copyKey = null;
             void Promise.resolve(onStatePatch((latestState) => {
               const latestItems = getSelectablePersonalizationItems(latestState);
@@ -282,7 +295,14 @@ export function ProductStage({
                 },
               };
             })).then((result) => {
-              if (result?.ok === false || !copyKey) return;
+              if (
+                result?.ok === false
+                || !copyKey
+                || !mountedRef.current
+                || copyTokenRef.current !== operationToken
+                || selectionIntentRef.current !== id
+              ) return;
+              selectionIntentRef.current = copyKey;
               setActivePrintId(copyKey);
               setSelectedPrintId(copyKey);
               onPersonalizationSelect?.(copyKey);
@@ -295,15 +315,19 @@ export function ProductStage({
             const rotationDelta = currentItem
               ? normalizeRotationDelta(rotation - (currentItem.rotation ?? 0))
               : 0;
-            const finalItem = rendererRef.current?.constrainPersonalizationItem?.(
-              id,
-              { rotation },
-            );
-            const constrainedPatch = personalizationTransformPatch(finalItem, {});
-            patchPrint(id, (latestItem) => ({
-              ...constrainedPatch,
-              rotation: (latestItem.rotation ?? 0) + rotationDelta,
-            }));
+            patchPrint(id, (latestItem) => {
+              const nextItem = {
+                ...latestItem,
+                rotation: (latestItem.rotation ?? 0) + rotationDelta,
+              };
+              const finalItem = rendererRef.current?.constrainPersonalizationItem?.(
+                id,
+                nextItem,
+              );
+              return personalizationTransformPatch(finalItem, {
+                rotation: nextItem.rotation,
+              });
+            });
           }}
           onRotationPreview={(id, rotation) => {
             rendererRef.current?.previewPersonalizationRotation?.(id, rotation);

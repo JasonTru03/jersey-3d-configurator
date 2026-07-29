@@ -12,6 +12,8 @@ export function DecorationPanel({
   updateState,
 }) {
   const inputRef = useRef(null);
+  const mountedRef = useRef(false);
+  const selectionIntentVersionRef = useRef(0);
   const [message, setMessage] = useState('');
   const decorations = state.overrides?.decorations ?? [];
   const activeId = state.overrides?.activeDecorationId ?? null;
@@ -26,11 +28,19 @@ export function DecorationPanel({
     selectedKey: active?.id ?? active?.sourceId ?? null,
   });
 
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   function addPreset(preset) {
     if (isFull) {
       setMessage(`You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
       return;
     }
+    const intentVersion = ++selectionIntentVersionRef.current;
     const id = `preset-${preset.id}-${Date.now()}`;
     const next = createDecoration({ ...preset, id, region: 'front' });
     let added = false;
@@ -43,11 +53,17 @@ export function DecorationPanel({
       return {
         overrides: {
           decorations: [...latestDecorations, next],
-          activeDecorationId: id,
+          ...(selectionIntentVersionRef.current === intentVersion
+            ? { activeDecorationId: id }
+            : {}),
         },
       };
     })).then((result) => {
-      if (result?.ok === false) return;
+      if (
+        result?.ok === false
+        || !mountedRef.current
+        || selectionIntentVersionRef.current !== intentVersion
+      ) return;
       setMessage(added
         ? `${preset.label} added`
         : `You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
@@ -105,6 +121,7 @@ export function DecorationPanel({
   }
 
   function selectArtwork(id) {
+    const intentVersion = ++selectionIntentVersionRef.current;
     let targetFound = false;
     void Promise.resolve(updateState((latestState) => {
       const latestDecorations = latestState.overrides?.decorations ?? [];
@@ -113,13 +130,19 @@ export function DecorationPanel({
         ? { overrides: { activeDecorationId: id } }
         : { overrides: { decorations: latestDecorations } };
     })).then((result) => {
-      if (result?.ok !== false && targetFound) onArtworkSelect?.(id);
+      if (
+        result?.ok !== false
+        && targetFound
+        && mountedRef.current
+        && selectionIntentVersionRef.current === intentVersion
+      ) onArtworkSelect?.(id);
     });
   }
 
   function removeArtwork(id) {
     const decoration = decorations.find((item) => item.id === id);
     if (!decoration) return;
+    const intentVersion = ++selectionIntentVersionRef.current;
     let targetFound = false;
     void Promise.resolve(updateState((latestState) => {
       const latestDecorations = latestState.overrides?.decorations ?? [];
@@ -133,7 +156,12 @@ export function DecorationPanel({
         },
       };
     })).then((result) => {
-      if (result?.ok !== false && targetFound) setMessage(`${decoration.label} removed`);
+      if (
+        result?.ok !== false
+        && targetFound
+        && mountedRef.current
+        && selectionIntentVersionRef.current === intentVersion
+      ) setMessage(`${decoration.label} removed`);
     });
   }
 
@@ -149,6 +177,7 @@ export function DecorationPanel({
       setMessage(`You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
       return;
     }
+    const intentVersion = ++selectionIntentVersionRef.current;
     const reader = new FileReader();
     reader.onload = () => {
       const id = `upload-${Date.now()}`;
@@ -163,17 +192,28 @@ export function DecorationPanel({
         return {
           overrides: {
             decorations: [...latestDecorations, next],
-            activeDecorationId: id,
+            ...(selectionIntentVersionRef.current === intentVersion
+              ? { activeDecorationId: id }
+              : {}),
           },
         };
       })).then((result) => {
-        if (result?.ok === false) return;
+        if (
+          result?.ok === false
+          || !mountedRef.current
+          || selectionIntentVersionRef.current !== intentVersion
+        ) return;
         setMessage(added
           ? `${file.name} added`
           : `You can add up to ${MAX_DECORATIONS} artworks. Remove one to continue.`);
       });
     };
-    reader.onerror = () => setMessage('Image cannot be read. Please choose another file.');
+    reader.onerror = () => {
+      if (
+        mountedRef.current
+        && selectionIntentVersionRef.current === intentVersion
+      ) setMessage('Image cannot be read. Please choose another file.');
+    };
     reader.readAsDataURL(file);
   }
 

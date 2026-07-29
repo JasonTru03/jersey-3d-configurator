@@ -2,9 +2,9 @@ import { PERSONALIZATION_SIDES } from '../config/personalizationSides.js';
 
 export function PersonalizationSideSelector({ disabled = false, onSelect, side }) {
   return (
-    <fieldset>
+    <fieldset className="personalization-side-selector">
       <legend>Side</legend>
-      <div className="font-options">
+      <div className="personalization-side-options">
         {PERSONALIZATION_SIDES.map((option) => (
           <button
             aria-pressed={side === option.id}

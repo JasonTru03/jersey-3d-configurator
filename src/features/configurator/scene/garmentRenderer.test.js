@@ -477,6 +477,57 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
+  it.each([
+    ['front', { x: 0, y: 1.8, z: 5.4 }],
+    ['back', { x: 0, y: 1.8, z: -5.4 }],
+  ])('uses the %s camera preset requested by ProductStage', (view, position) => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.camera = {
+      position: new THREE.Vector3(),
+      lookAt: vi.fn(),
+    };
+    renderer.controls = { target: new THREE.Vector3() };
+    gsap.to.mockClear();
+
+    renderer.setView(view);
+
+    expect(gsap.to).toHaveBeenNthCalledWith(1, renderer.camera.position, expect.objectContaining({
+      ...position,
+      duration: 0.55,
+      ease: 'power2.out',
+    }));
+    expect(gsap.to).toHaveBeenNthCalledWith(2, renderer.controls.target, expect.objectContaining({
+      x: 0,
+      y: 0.7,
+      z: 0,
+      duration: 0.55,
+      ease: 'power2.out',
+    }));
+    const cameraTween = gsap.to.mock.calls[0][1];
+    cameraTween.onUpdate();
+    expect(renderer.camera.lookAt).toHaveBeenCalledWith(renderer.controls.target);
+  });
+
+  it('keeps an unknown view on the orbit fallback preset', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.camera = { position: new THREE.Vector3(), lookAt: vi.fn() };
+    renderer.controls = { target: new THREE.Vector3() };
+    gsap.to.mockClear();
+
+    renderer.setView('unknown');
+
+    expect(gsap.to).toHaveBeenNthCalledWith(1, renderer.camera.position, expect.objectContaining({
+      x: 0,
+      y: 1.8,
+      z: 5.4,
+    }));
+    expect(gsap.to).toHaveBeenNthCalledWith(2, renderer.controls.target, expect.objectContaining({
+      x: 0,
+      y: 0.7,
+      z: 0,
+    }));
+  });
+
   it('does not start a focus tween when the decoration has no center', () => {
     const host = document.createElement('div');
     document.body.append(host);

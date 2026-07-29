@@ -219,6 +219,8 @@ export class GarmentRenderer {
 
   setView(view) {
     const targets = {
+      front: { position: { x: 0, y: 1.8, z: 5.4 }, target: { x: 0, y: 0.7, z: 0 } },
+      back: { position: { x: 0, y: 1.8, z: -5.4 }, target: { x: 0, y: 0.7, z: 0 } },
       orbit: { position: { x: 0, y: 1.8, z: 5.4 }, target: { x: 0, y: 0.7, z: 0 } },
       top: { position: { x: 0, y: 5.4, z: 0.05 }, target: { x: 0, y: 0.4, z: 0 } },
       detail: { position: { x: 0.85, y: 1.35, z: 2.35 }, target: { x: 0, y: 0.78, z: 0 } },

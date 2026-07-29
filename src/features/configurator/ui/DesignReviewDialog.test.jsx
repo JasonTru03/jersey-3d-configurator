@@ -127,6 +127,35 @@ describe('DesignReviewDialog', () => {
     expect(ready).toHaveAttribute('aria-busy', 'false');
   });
 
+  it('disables snapshot actions while a configuration mutation is pending', () => {
+    const onAddToCart = vi.fn();
+    const onSave = vi.fn();
+    render(
+      <DesignReviewDialog
+        mutationPending
+        onAddToCart={onAddToCart}
+        onClose={() => {}}
+        onSave={onSave}
+        open
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ total: 107 }}
+        selected={{}}
+        shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+        state={{ overrides: {} }}
+      />,
+    );
+
+    const save = screen.getByRole('button', { name: 'Save design file' });
+    const addToCart = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    expect(save).toBeDisabled();
+    expect(addToCart).toBeDisabled();
+    expect(addToCart).toHaveAttribute('aria-busy', 'false');
+    fireEvent.click(save);
+    fireEvent.click(addToCart);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onAddToCart).not.toHaveBeenCalled();
+  });
+
   it('explains that bottom-pattern production uses the downloaded local files', () => {
     render(
       <DesignReviewDialog

@@ -183,3 +183,264 @@ describe('useConfigurator design files', () => {
     quoteSpy.mockRestore();
   });
 });
+
+describe('useConfigurator mutation serialization', () => {
+  it('keeps a later personalization-side update when an earlier configuration quote is pending', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(firstQuote.promise);
+    let layoutUpdate;
+    let sideUpdate;
+
+    try {
+      act(() => {
+        layoutUpdate = result.current.updateState({ layout: 'xl' });
+        sideUpdate = result.current.updateState({
+          overrides: {
+            customTextItems: [{
+              id: 'custom-text',
+              placement: { side: 'back' },
+              text: 'MASON',
+            }],
+          },
+        });
+      });
+
+      expect(result.current.hasPendingMutation()).toBe(true);
+      await waitFor(() => expect(result.current.mutationPending).toBe(true));
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+      firstQuote.resolve(result.current.quote);
+      await act(async () => {
+        await Promise.all([layoutUpdate, sideUpdate]);
+      });
+
+      expect(result.current.hasPendingMutation()).toBe(false);
+      expect(result.current.mutationPending).toBe(false);
+      expect(result.current.state.layout).toBe('xl');
+      expect(result.current.state.overrides.customTextItems[0].placement.side).toBe('back');
+    } finally {
+      quoteSpy.mockRestore();
+    }
+  });
+
+  it('keeps a later configuration update when an earlier personalization-side quote is pending', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(firstQuote.promise);
+    let sideUpdate;
+    let layoutUpdate;
+
+    try {
+      act(() => {
+        sideUpdate = result.current.updateState({
+          overrides: {
+            customTextItems: [{
+              id: 'custom-text',
+              placement: { side: 'back' },
+              text: 'MASON',
+            }],
+          },
+        });
+        layoutUpdate = result.current.updateState({ layout: 'xl' });
+      });
+
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+      firstQuote.resolve(result.current.quote);
+      await act(async () => {
+        await Promise.all([sideUpdate, layoutUpdate]);
+      });
+
+      expect(result.current.state.layout).toBe('xl');
+      expect(result.current.state.overrides.customTextItems[0].placement.side).toBe('back');
+    } finally {
+      quoteSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ['rejects', () => Promise.reject(new Error('Quote rejected.'))],
+    ['throws', () => { throw new Error('Quote threw.'); }],
+  ])('continues with the next update when the first quote %s', async (_label, failQuote) => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const firstQuoteStarted = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockImplementationOnce((...args) => {
+        firstQuoteStarted.resolve();
+        return failQuote(...args);
+      });
+    let failedUpdate;
+    let nextUpdate;
+
+    try {
+      act(() => {
+        failedUpdate = result.current.updateState({ material: 'pro' });
+        nextUpdate = result.current.updateState({ layout: 'xl' });
+      });
+
+      await firstQuoteStarted.promise;
+      await act(async () => {
+        expect(await failedUpdate).toEqual({
+          message: expect.stringMatching(/^Quote (rejected|threw)\.$/),
+          ok: false,
+        });
+        expect(await nextUpdate).toEqual({ ok: true });
+      });
+
+      expect(quoteSpy).toHaveBeenCalledTimes(2);
+      expect(result.current.state.material).not.toBe('pro');
+      expect(result.current.state.layout).toBe('xl');
+    } finally {
+      quoteSpy.mockRestore();
+    }
+  });
+
+  it('records queued updates in invocation order so undo removes one committed update at a time', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(firstQuote.promise);
+    let layoutUpdate;
+    let sideUpdate;
+
+    try {
+      act(() => {
+        layoutUpdate = result.current.updateState({ layout: 'xl' });
+        sideUpdate = result.current.updateState({
+          overrides: {
+            customTextItems: [{
+              id: 'custom-text',
+              placement: { side: 'back' },
+              text: 'MASON',
+            }],
+          },
+        });
+      });
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+      firstQuote.resolve(result.current.quote);
+      await act(async () => {
+        await Promise.all([layoutUpdate, sideUpdate]);
+      });
+
+      await act(async () => result.current.undo());
+      expect(result.current.state.layout).toBe('xl');
+      expect(result.current.state.overrides.customTextItems).toEqual([]);
+
+      await act(async () => result.current.undo());
+      expect(result.current.state.layout).toBe('m');
+      expect(result.current.canUndo).toBe(false);
+    } finally {
+      quoteSpy.mockRestore();
+    }
+  });
+
+  it('applies undo after an earlier pending update commits', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(firstQuote.promise);
+    let update;
+    let undo;
+
+    try {
+      act(() => {
+        update = result.current.updateState({ layout: 'xl' });
+        undo = result.current.undo();
+      });
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+      firstQuote.resolve(result.current.quote);
+      await act(async () => {
+        await Promise.all([update, undo]);
+      });
+
+      expect(result.current.state.layout).toBe('m');
+      expect(result.current.canUndo).toBe(false);
+      expect(result.current.canRedo).toBe(true);
+    } finally {
+      quoteSpy.mockRestore();
+    }
+  });
+
+  it('continues with the next update when an undo quote rejects', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await result.current.updateState({ layout: 'xl' });
+    });
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockRejectedValueOnce(new Error('Undo quote rejected.'));
+    let undo;
+    let nextUpdate;
+
+    try {
+      act(() => {
+        undo = result.current.undo();
+        nextUpdate = result.current.updateState({ material: 'player' });
+      });
+      await act(async () => {
+        await expect(undo).rejects.toThrow('Undo quote rejected.');
+        await expect(nextUpdate).resolves.toEqual({ ok: true });
+      });
+
+      expect(quoteSpy).toHaveBeenCalledTimes(2);
+      expect(result.current.state.layout).toBe('m');
+      expect(result.current.state.material).toBe('player');
+      expect(result.current.canUndo).toBe(true);
+      expect(result.current.canRedo).toBe(false);
+    } finally {
+      quoteSpy.mockRestore();
+    }
+  });
+
+  it('loads a design after an earlier pending update instead of letting that update overwrite it', async () => {
+    const { result } = renderHook(() => useConfigurator());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const document = JSON.parse(await result.current.saveDesignFile().blob.text());
+    document.state.layout = 'xl';
+    document.state.colorway = 'third';
+    const file = new File(
+      [JSON.stringify(document)],
+      'queued-design.json',
+      { type: 'application/json' },
+    );
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(firstQuote.promise);
+    let update;
+    let load;
+
+    try {
+      act(() => {
+        update = result.current.updateState({ material: 'pro' });
+        load = result.current.loadDesignFile(file);
+      });
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+      firstQuote.resolve(result.current.quote);
+      await act(async () => {
+        await Promise.all([update, load]);
+      });
+
+      expect(result.current.state.layout).toBe('xl');
+      expect(result.current.state.colorway).toBe('third');
+      expect(result.current.canUndo).toBe(false);
+    } finally {
+      quoteSpy.mockRestore();
+    }
+  });
+});
+
+function createDeferred() {
+  let reject;
+  let resolve;
+  const promise = new Promise((next, fail) => {
+    reject = fail;
+    resolve = next;
+  });
+  return { promise, reject, resolve };
+}

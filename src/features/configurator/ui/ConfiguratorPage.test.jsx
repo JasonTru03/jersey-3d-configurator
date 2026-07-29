@@ -156,26 +156,26 @@ describe('ConfiguratorPage', () => {
     expect(await screen.findByLabelText('Text content')).toHaveValue('YOUR TEXT');
   });
 
-  it('blocks concurrent mutations and file or review actions while a side update is pending', async () => {
+  it('queues ordinary configuration updates while a side update keeps personalization and snapshot actions locked', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
     await screen.findByLabelText('Name');
     const stageDelete = await screen.findByRole('button', { name: 'Delete personalization' });
-    const fileInput = document.querySelector('input[type="file"]');
-    const fileInputClick = vi.spyOn(fileInput, 'click');
-    const loadFile = {
-      text: vi.fn(async () => JSON.stringify({
-        format: 'jersey-design',
-        productId: 'fn8788-jersey',
-        state: { layout: 'xl' },
-        version: 3,
-      })),
+    const sideQuote = createDeferred();
+    const layoutQuote = createDeferred();
+    const quoteResponse = {
+      basePrice: 89,
+      merchandisePrice: 89,
+      customizationTotal: 18,
+      optionAdjustments: [],
+      total: 107,
+      currency: 'USD',
     };
-    const quoteDeferred = createDeferred();
     const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
-      .mockReturnValueOnce(quoteDeferred.promise);
+      .mockReturnValueOnce(sideQuote.promise)
+      .mockReturnValueOnce(layoutQuote.promise);
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
@@ -187,21 +187,15 @@ describe('ConfiguratorPage', () => {
         expect(screen.getByRole('button', { name: 'Add text' })).toBeDisabled();
         expect(screen.getByRole('button', { name: /^Delete player set/ })).toBeDisabled();
         expect(stageDelete).toBeDisabled();
-        expect(document.querySelector('.config-panel')).toHaveAttribute('aria-busy', 'true');
-        expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Open design' })).toBeDisabled();
+        expect(document.querySelector('.config-panel')).not.toHaveAttribute('aria-busy');
+        expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Open design' })).toBeEnabled();
         expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Review design' })).toBeDisabled();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Open design' }));
-      fireEvent.change(fileInput, { target: { files: [loadFile] } });
       fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
       fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-      expect(fileInputClick).not.toHaveBeenCalled();
-      expect(loadFile.text).not.toHaveBeenCalled();
       expect(screen.queryByRole('link', { name: 'Download design JSON' })).not.toBeInTheDocument();
       expect(screen.queryByRole('dialog', { name: 'Review your design' })).not.toBeInTheDocument();
 
@@ -209,7 +203,6 @@ describe('ConfiguratorPage', () => {
       const xl = document.querySelector('[data-option-group="layout"][data-option-id="xl"]');
       fireEvent.click(xl);
       expect(xl).toHaveAttribute('aria-pressed', 'false');
-      expect(rendererHarness.options.onStatePatch({ layout: 'xl' })).toEqual({ ok: false });
       fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
       await waitFor(() => {
         expect(screen.getByLabelText('Name')).toBeDisabled();
@@ -218,20 +211,30 @@ describe('ConfiguratorPage', () => {
       });
       fireEvent.click(screen.getByRole('button', { name: 'Add text' }));
       expect(quoteSpy).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        sideQuote.resolve(quoteResponse);
+        await sideQuote.promise;
+      });
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(2));
+      await waitFor(() => {
+        expect(rendererHarness.personalizationMutationDisabled).toBe(false);
+        expect(screen.getByLabelText('Name')).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Review design' })).toBeDisabled();
+      });
+
+      await act(async () => {
+        layoutQuote.resolve(quoteResponse);
+        await layoutQuote.promise;
+      });
     } finally {
       await act(async () => {
-        quoteDeferred.resolve({
-          basePrice: 89,
-          merchandisePrice: 89,
-          customizationTotal: 18,
-          optionAdjustments: [],
-          total: 107,
-          currency: 'USD',
-        });
-        await quoteDeferred.promise;
+        sideQuote.resolve(quoteResponse);
+        layoutQuote.resolve(quoteResponse);
+        await Promise.allSettled([sideQuote.promise, layoutQuote.promise]);
       });
       quoteSpy.mockRestore();
-      fileInputClick.mockRestore();
     }
 
     await waitFor(() => {
@@ -247,14 +250,13 @@ describe('ConfiguratorPage', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Size' }));
-    fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
     await waitFor(() => {
       expect(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'))
         .toHaveAttribute('aria-pressed', 'true');
     });
   });
 
-  it('restores global mutation actions when a side update fails', async () => {
+  it('restores snapshot actions when a side update fails', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
@@ -268,7 +270,9 @@ describe('ConfiguratorPage', () => {
 
     try {
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Open design' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Review design' })).toBeDisabled();
       });
       await act(async () => {
@@ -746,7 +750,7 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
   });
 
-  it('cancels a pending handoff when the design state identity changes', async () => {
+  it('cancels a pending handoff as soon as a configuration mutation is queued', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
     let resolveRequest;
     let requestSignal;
@@ -759,15 +763,37 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    const quoteDeferred = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(quoteDeferred.promise);
+    let update;
 
-    await act(async () => {
-      await rendererHarness.options.onStatePatch({ overrides: { activeDecorationId: 'changed' } });
-    });
+    try {
+      act(() => {
+        update = rendererHarness.options.onStatePatch({
+          overrides: { activeDecorationId: 'changed' },
+        });
+        expect(requestSignal).toHaveProperty('aborted', true);
+        resolveRequest(secureCartResponse());
+      });
+      await act(async () => { await Promise.resolve(); });
+      expect(navigateToCart).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        quoteDeferred.resolve({
+          basePrice: 89,
+          merchandisePrice: 89,
+          customizationTotal: 0,
+          optionAdjustments: [],
+          total: 89,
+          currency: 'USD',
+        });
+        await update;
+      });
+      quoteSpy.mockRestore();
+    }
 
-    await waitFor(() => expect(requestSignal).toHaveProperty('aborted', true));
     expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
-    resolveRequest(secureCartResponse());
-    await act(async () => { await Promise.resolve(); });
     expect(navigateToCart).not.toHaveBeenCalled();
   });
 

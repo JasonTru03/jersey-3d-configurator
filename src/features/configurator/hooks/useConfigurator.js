@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { productApi } from '../api/productApi.js';
 import { selectedOptions } from '../config/selectors.js';
 import { mergeConfiguratorState } from '../config/state.js';
@@ -12,12 +12,52 @@ import {
   replaceCurrentDesignState,
 } from '../designs/designHistory.js';
 
-export function useConfigurator(initialStateOverride) {
+export function useConfigurator(initialStateOverride, { onMutationStart } = {}) {
   const [product, setProduct] = useState(null);
   const [history, setHistory] = useState(null);
   const [quote, setQuote] = useState(null);
   const [configurationError, setConfigurationError] = useState('');
+  const [pendingMutationCount, setPendingMutationCount] = useState(0);
   const [status, setStatus] = useState('loading');
+  const historyRef = useRef(null);
+  const pendingMutationCountRef = useRef(0);
+  const quoteRef = useRef(null);
+  const mutationQueueRef = useRef(Promise.resolve());
+  const onMutationStartRef = useRef(onMutationStart);
+  onMutationStartRef.current = onMutationStart;
+
+  const enqueueMutation = useCallback((operation) => {
+    onMutationStartRef.current?.();
+    pendingMutationCountRef.current += 1;
+    setPendingMutationCount(pendingMutationCountRef.current);
+    const result = mutationQueueRef.current.then(operation, operation);
+    mutationQueueRef.current = result.then(
+      () => {
+        pendingMutationCountRef.current -= 1;
+        setPendingMutationCount(pendingMutationCountRef.current);
+      },
+      () => {
+        pendingMutationCountRef.current -= 1;
+        setPendingMutationCount(pendingMutationCountRef.current);
+      },
+    );
+    return result;
+  }, []);
+
+  const hasPendingMutation = useCallback(
+    () => pendingMutationCountRef.current > 0,
+    [],
+  );
+
+  const commitHistory = useCallback((nextHistory) => {
+    historyRef.current = nextHistory;
+    setHistory(nextHistory);
+  }, []);
+
+  const commitQuote = useCallback((nextQuote) => {
+    quoteRef.current = nextQuote;
+    setQuote(nextQuote);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -36,8 +76,8 @@ export function useConfigurator(initialStateOverride) {
 
         if (!active) return;
         setProduct(definition);
-        setHistory(createDesignHistory(initialState));
-        setQuote(initialQuote);
+        commitHistory(createDesignHistory(initialState));
+        commitQuote(initialQuote);
         setStatus('ready');
       } catch (error) {
         if (!active) return;
@@ -51,60 +91,51 @@ export function useConfigurator(initialStateOverride) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [commitHistory, commitQuote]);
 
   const updateState = useCallback(
-    async (patch, { quote: shouldQuote = true, recordHistory = true } = {}) => {
+    (patch, { quote: shouldQuote = true, recordHistory = true } = {}) => {
       if (!product) {
-        return { message: 'The configurator is still loading.', ok: false };
+        return Promise.resolve({ message: 'The configurator is still loading.', ok: false });
       }
-      if (!recordHistory && !shouldQuote) {
-        setHistory((currentHistory) => {
-          const latestState = getCurrentDesignState(currentHistory);
-          return latestState
-            ? replaceCurrentDesignState(
-                currentHistory,
-                mergeConfiguratorState(latestState, patch),
-              )
-            : currentHistory;
-        });
-        setConfigurationError('');
-        return { ok: true };
-      }
-      const currentState = getCurrentDesignState(history);
-      if (!currentState) {
-        return { message: 'The configurator is still loading.', ok: false };
-      }
-      const nextState = mergeConfiguratorState(currentState, patch);
-      try {
-        const nextQuote = shouldQuote
-          ? await productApi.quoteConfiguration(product.id, nextState)
-          : quote;
-        setHistory((currentHistory) => (
-          recordHistory
-            ? recordDesignState(currentHistory, nextState)
-            : replaceCurrentDesignState(currentHistory, nextState)
-        ));
-        if (shouldQuote) setQuote(nextQuote);
-        setConfigurationError('');
-        return { ok: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Configuration update failed.';
-        setConfigurationError(message);
-        return { message, ok: false };
-      }
+      return enqueueMutation(async () => {
+        const currentHistory = historyRef.current;
+        const currentState = getCurrentDesignState(currentHistory);
+        if (!currentState) {
+          return { message: 'The configurator is still loading.', ok: false };
+        }
+        const nextState = mergeConfiguratorState(currentState, patch);
+        try {
+          const nextQuote = shouldQuote
+            ? await productApi.quoteConfiguration(product.id, nextState)
+            : quoteRef.current;
+          commitHistory(
+            recordHistory
+              ? recordDesignState(currentHistory, nextState)
+              : replaceCurrentDesignState(currentHistory, nextState),
+          );
+          if (shouldQuote) commitQuote(nextQuote);
+          setConfigurationError('');
+          return { ok: true };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Configuration update failed.';
+          setConfigurationError(message);
+          return { message, ok: false };
+        }
+      });
     },
-    [history, product, quote],
+    [commitHistory, commitQuote, enqueueMutation, product],
   );
 
-  const moveHistory = useCallback(async (offset) => {
-    if (!product || !history) return;
-    const nextHistory = moveDesignHistory(history, offset);
-    if (nextHistory === history) return;
+  const moveHistory = useCallback((offset) => enqueueMutation(async () => {
+    const currentHistory = historyRef.current;
+    if (!product || !currentHistory) return;
+    const nextHistory = moveDesignHistory(currentHistory, offset);
+    if (nextHistory === currentHistory) return;
     const nextState = getCurrentDesignState(nextHistory);
-    setHistory(nextHistory);
-    setQuote(await productApi.quoteConfiguration(product.id, nextState));
-  }, [history, product]);
+    commitHistory(nextHistory);
+    commitQuote(await productApi.quoteConfiguration(product.id, nextState));
+  }), [commitHistory, commitQuote, enqueueMutation, product]);
 
   const saveDesignFile = useCallback((bakeMetadata) => {
     const currentState = getCurrentDesignState(history);
@@ -129,29 +160,31 @@ export function useConfigurator(initialStateOverride) {
     }));
   }, [history, product]);
 
-  const loadDesignFile = useCallback(async (file) => {
+  const loadDesignFile = useCallback((file) => {
     if (!product) {
-      return { message: 'The configurator is still loading.', ok: false };
+      return Promise.resolve({ message: 'The configurator is still loading.', ok: false });
     }
 
-    try {
-      const rawText = await readDesignFile(file);
-      const nextState = parseDesignDocument(rawText, {
-        colorways: product.options.colorway,
-        defaultState: product.defaultState,
-        expectedProductId: product.id,
-      });
-      const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
-      setHistory(createDesignHistory(nextState));
-      setQuote(nextQuote);
-      setConfigurationError('');
-      return { ok: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Design file loading failed.';
-      setConfigurationError(message);
-      return { message, ok: false };
-    }
-  }, [product]);
+    return enqueueMutation(async () => {
+      try {
+        const rawText = await readDesignFile(file);
+        const nextState = parseDesignDocument(rawText, {
+          colorways: product.options.colorway,
+          defaultState: product.defaultState,
+          expectedProductId: product.id,
+        });
+        const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
+        commitHistory(createDesignHistory(nextState));
+        commitQuote(nextQuote);
+        setConfigurationError('');
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Design file loading failed.';
+        setConfigurationError(message);
+        return { message, ok: false };
+      }
+    });
+  }, [commitHistory, commitQuote, enqueueMutation, product]);
 
   const state = useMemo(() => getCurrentDesignState(history), [history]);
   const canUndo = Boolean(history?.cursor > 0);
@@ -174,7 +207,9 @@ export function useConfigurator(initialStateOverride) {
     canUndo,
     canRedo,
     configurationError,
+    hasPendingMutation,
     loadDesignFile,
+    mutationPending: pendingMutationCount > 0,
     saveDesignFile,
   };
 }

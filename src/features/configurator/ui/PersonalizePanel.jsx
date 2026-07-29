@@ -133,13 +133,24 @@ export function PersonalizePanel({
 
   const addText = async () => {
     if (mutationDisabled || customTextItems.length >= MAX_CUSTOM_TEXT_ITEMS) return;
-    const item = createCustomTextItem({
-      id: nextTextId(customTextItems),
-      text: 'YOUR TEXT',
+    let addedItem = null;
+    const result = await updateState((latestState) => {
+      const latestItems = getCustomTextItems(latestState.overrides);
+      if (latestItems.length >= MAX_CUSTOM_TEXT_ITEMS) {
+        return { overrides: { customTextItems: latestItems } };
+      }
+      addedItem = createCustomTextItem({
+        id: nextTextId(latestItems),
+        text: 'YOUR TEXT',
+      });
+      return {
+        overrides: {
+          customTextItems: [...latestItems, addedItem],
+        },
+      };
     });
-    const result = await updateState({ overrides: { customTextItems: [...customTextItems, item] } });
-    if (result?.ok === false) return;
-    onSelect(makePersonalizationKey('text', item.id));
+    if (result?.ok === false || !addedItem) return;
+    onSelect(makePersonalizationKey('text', addedItem.id));
   };
 
   const removeItem = (event, item) => {

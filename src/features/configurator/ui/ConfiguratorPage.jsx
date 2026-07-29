@@ -637,11 +637,11 @@ function ExtrasPanel({ extras, state, updateState }) {
             data-option-id={extra.id}
             key={extra.id}
             onClick={() =>
-              updateState({
+              updateState((latestState) => ({
                 extras: {
-                  [extra.id]: !enabled,
+                  [extra.id]: !Boolean(latestState.extras?.[extra.id]),
                 },
-              })
+              }))
             }
             type="button"
           >

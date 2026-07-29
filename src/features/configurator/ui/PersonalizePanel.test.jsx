@@ -84,6 +84,20 @@ describe('PersonalizePanel', () => {
       .getByRole('button', { name: 'YOUR TEXT' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('adds both text elements when two queued clicks share the same render snapshot', async () => {
+    const updateDeferred = createDeferred();
+    render(<PersonalizeHarness updateDeferred={updateDeferred} />);
+    const addText = screen.getByRole('button', { name: 'Add text' });
+
+    fireEvent.click(addText);
+    fireEvent.click(addText);
+    updateDeferred.resolve({ ok: true });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('text-count')).toHaveTextContent('2');
+    });
+  });
+
   it('moves a selected custom text between the front and back defaults', async () => {
     const onSideFocus = vi.fn();
     const onStateChange = vi.fn();

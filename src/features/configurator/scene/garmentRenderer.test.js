@@ -111,6 +111,11 @@ function installTextCanvasContext() {
   return context;
 }
 
+function resolveLastStatePatch(onStatePatch, state) {
+  const patch = onStatePatch.mock.calls.at(-1)[0];
+  return typeof patch === 'function' ? patch(state) : patch;
+}
+
 describe('garment decoration mesh selection', () => {
   it('disposes a stale model response after a newer model request wins', async () => {
     const host = document.createElement('div');
@@ -836,7 +841,7 @@ describe('garment decoration mesh selection', () => {
 
     renderer.emitPrintPlacement();
 
-    expect(onStatePatch).toHaveBeenCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, renderer.state)).toEqual({
       overrides: {
         customTextItems: [expect.objectContaining({
           id: 'custom-id',
@@ -845,6 +850,86 @@ describe('garment decoration mesh selection', () => {
       },
     });
     renderer.dispose();
+  });
+
+  it('applies a custom text placement to the latest queued state', () => {
+    const onStatePatch = vi.fn();
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.onStatePatch = onStatePatch;
+    renderer.personalizationMutationDisabled = false;
+    renderer.state = {
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'custom-id', text: 'OLD TEXT' }] },
+    };
+
+    renderer.emitPersonalizationItem({
+      itemKind: 'text',
+      sourceId: 'custom-id',
+      placement: { x: 0.25, y: 0.5, z: 0.75 },
+      rotation: 15,
+      scale: 1.2,
+    });
+
+    const queuedPatch = onStatePatch.mock.calls[0][0];
+    expect(queuedPatch).toEqual(expect.any(Function));
+    expect(queuedPatch({
+      lighting: 'none',
+      overrides: { customTextItems: [{ id: 'custom-id', text: 'LATEST TEXT' }] },
+    })).toEqual({
+      overrides: {
+        customTextItems: [expect.objectContaining({
+          id: 'custom-id',
+          text: 'LATEST TEXT',
+          placement: { x: 0.25, y: 0.5, z: 0.75 },
+          rotation: 15,
+          scale: 1.2,
+        })],
+      },
+    });
+  });
+
+  it('applies a player placement to the latest queued state and legacy fields', () => {
+    const onStatePatch = vi.fn();
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.onStatePatch = onStatePatch;
+    renderer.personalizationMutationDisabled = false;
+    renderer.state = {
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{ id: 'player-id', name: 'OLD', number: '1' }],
+      },
+    };
+
+    renderer.emitPersonalizationItem({
+      itemKind: 'player',
+      sourceId: 'player-id',
+      placement: { x: 0.4, y: 0.5, z: 0.6 },
+      rotation: 30,
+      scale: 1.1,
+    });
+
+    const queuedPatch = onStatePatch.mock.calls[0][0];
+    expect(queuedPatch).toEqual(expect.any(Function));
+    expect(queuedPatch({
+      lighting: 'name-number',
+      overrides: {
+        printItems: [{ id: 'player-id', name: 'LATEST', number: '99' }],
+      },
+    })).toEqual({
+      overrides: {
+        printItems: [expect.objectContaining({
+          id: 'player-id',
+          name: 'LATEST',
+          number: '99',
+          placement: { x: 0.4, y: 0.5, z: 0.6 },
+          rotation: 30,
+          scale: 1.1,
+        })],
+        printName: 'LATEST',
+        printNumber: '99',
+        printPlacement: { x: 0.4, y: 0.5, z: 0.6 },
+      },
+    });
   });
 
   it('keeps custom text editable when player lighting is none', () => {
@@ -1577,7 +1662,8 @@ describe('garment decoration mesh selection', () => {
     renderer.handlePointerDown(pointerEvent(100, 100));
     renderer.handlePointerMove(pointerEvent(110, 100));
     renderer.handlePointerUp();
-    const savedItems = onStatePatch.mock.calls[0][0].overrides.customTextItems;
+    const savedItems = resolveLastStatePatch(onStatePatch, renderer.state)
+      .overrides.customTextItems;
     renderer.state = {
       ...renderer.state,
       overrides: { ...renderer.state.overrides, customTextItems: savedItems },
@@ -1821,7 +1907,7 @@ describe('garment decoration mesh selection', () => {
 
     renderer.emitPrintPlacement();
 
-    expect(onStatePatch).toHaveBeenCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, renderer.state)).toEqual({
       overrides: {
         printItems: [
           expect.objectContaining({ id: 'same-id', name: 'FIRST', placement: null }),
@@ -1857,7 +1943,7 @@ describe('garment decoration mesh selection', () => {
     renderer.setActivePrintId('text:same-id');
     renderer.printPlane.position.set(0.1, 0.2, 0.3);
     renderer.emitPrintPlacement();
-    expect(onStatePatch).toHaveBeenLastCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, renderer.state)).toEqual({
       overrides: {
         customTextItems: [expect.objectContaining({
           id: 'same-id',
@@ -1869,7 +1955,7 @@ describe('garment decoration mesh selection', () => {
     renderer.setActivePrintId('player:same-id');
     renderer.printPlane.position.set(0.4, 0.5, 0.6);
     renderer.emitPrintPlacement();
-    expect(onStatePatch).toHaveBeenLastCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, renderer.state)).toEqual({
       overrides: {
         printItems: [expect.objectContaining({
           id: 'same-id',
@@ -1936,7 +2022,7 @@ describe('garment decoration mesh selection', () => {
 
     renderer.handlePointerUp();
 
-    expect(onStatePatch).toHaveBeenLastCalledWith({
+    expect(resolveLastStatePatch(onStatePatch, renderer.state)).toEqual({
       overrides: {
         customTextItems: [expect.objectContaining({ id: 'custom-id', rotation: 45 })],
       },

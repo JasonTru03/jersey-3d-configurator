@@ -1302,21 +1302,29 @@ export class GarmentRenderer {
       scale: activeItem.scale,
     };
     if (activeItem.itemKind === 'text') {
-      const customTextItems = getCustomTextItems(this.state?.overrides);
-      this.onStatePatch({
+      this.onStatePatch((latestState) => ({
         overrides: {
-          customTextItems: patchCustomTextItem(customTextItems, activeItem.sourceId, patch),
+          customTextItems: patchCustomTextItem(
+            getCustomTextItems(latestState?.overrides),
+            activeItem.sourceId,
+            patch,
+          ),
         },
-      });
+      }));
       return;
     }
-    const printItems = getPrintItems(this.state?.overrides);
-    const nextItems = patchPrintItem(printItems, activeItem.sourceId, patch);
-    this.onStatePatch({
-      overrides: {
-        printItems: nextItems,
-        ...legacyFirstItemFields(nextItems),
-      },
+    this.onStatePatch((latestState) => {
+      const nextItems = patchPrintItem(
+        getPrintItems(latestState?.overrides),
+        activeItem.sourceId,
+        patch,
+      );
+      return {
+        overrides: {
+          printItems: nextItems,
+          ...legacyFirstItemFields(nextItems),
+        },
+      };
     });
   }
 

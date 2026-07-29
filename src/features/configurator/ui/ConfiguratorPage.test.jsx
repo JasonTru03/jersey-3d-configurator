@@ -622,6 +622,47 @@ describe('ConfiguratorPage', () => {
     });
   });
 
+  it('applies two queued extra toggles against the latest state', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Extras' }));
+    const extra = screen.getByRole('button', { name: /League sleeve badge/i });
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(firstQuote.promise);
+
+    try {
+      fireEvent.click(extra);
+      fireEvent.click(extra);
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+
+      firstQuote.resolve({
+        basePrice: 89,
+        merchandisePrice: 89,
+        customizationTotal: 0,
+        optionAdjustments: [],
+        total: 89,
+        currency: 'USD',
+      });
+
+      await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(2));
+      await waitFor(() => {
+        expect(extra).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getAllByText('$89').length).toBeGreaterThan(0);
+      });
+    } finally {
+      firstQuote.resolve({
+        basePrice: 89,
+        merchandisePrice: 89,
+        customizationTotal: 0,
+        optionAdjustments: [],
+        total: 89,
+        currency: 'USD',
+      });
+      quoteSpy.mockRestore();
+    }
+  });
+
   it('adds a preset decoration and exposes edit controls', async () => {
     render(<ConfiguratorPage />);
 

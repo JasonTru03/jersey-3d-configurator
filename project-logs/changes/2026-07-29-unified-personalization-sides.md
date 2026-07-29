@@ -11,13 +11,14 @@
 
 - 新增共享的正反面规则与选择器，统一 standalone 和 Shopify 宿主行为。
 - 将号码、文字、预设图案、上传图片的区域切换改为串行状态更新，补齐快速操作时的竞态保护。
+- 将渲染器拖动回写、添加文字和独立站 Extras 切换改为执行时读取最新状态，避免快速连续操作覆盖已排队的修改。
 - 新增正面/背面相机预设，并在临时正反面聚焦后恢复 Orbit、Top、Detail 等当前视图。
 - 默认图案投射使用区域锚点与正反面轴向法线，兼容 Chelsea 与 fn8788 两款现有模型。
 - 修复 `CanvasTexture` 首次按 `256×256` 分配后又调整 canvas 尺寸导致的 WebGL `GL_INVALID_VALUE`：纹理画布保持固定尺寸，图片自然宽高仅用于贴花几何比例。
 
 ## 验证
 
-- 自动化测试：`60` 个测试文件、`713` 项测试全部通过。
+- 自动化测试：`60` 个测试文件、`717` 项测试全部通过。
 - 构建：独立站与 Shopify bundle 均成功；仅保留既有 bundle size / `inlineDynamicImports` 提示。
 - 浏览器桌面验收：
   - 号码、文字、预设图案和真实上传 PNG 可切换正反面。
@@ -36,9 +37,17 @@
 - Cloudflare Worker：`jersey-3d-configurator`
 - 生产地址：`https://jersey-3d-configurator.jason1064969838.workers.dev/`
 - 旧版本：`daa87b22-6348-4751-934a-260ae2cb564a`
-- 新版本：`ea7aca63-e2fd-40ea-b65e-8521b30b0d96`
+- 首次功能版本：`ea7aca63-e2fd-40ea-b65e-8521b30b0d96`
+- 最终热修复版本：`7660fee0-9e5a-49c3-8b43-4dc4e2ee733a`
 - 流量状态：新版本 `100%`
-- 回滚命令：
+- 热修复回滚到首次功能版本：
+
+  ```powershell
+  npx wrangler rollback ea7aca63-e2fd-40ea-b65e-8521b30b0d96
+  npx wrangler deployments status
+  ```
+
+- 整体功能回滚到发布前版本：
 
   ```powershell
   npx wrangler rollback daa87b22-6348-4751-934a-260ae2cb564a

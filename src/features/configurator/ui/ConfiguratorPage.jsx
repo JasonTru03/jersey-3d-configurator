@@ -15,7 +15,7 @@ import {
   Sun,
   Undo2,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { usePersonalizationDeletion } from '../hooks/usePersonalizationDeletion.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
@@ -67,6 +67,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const fileInputRef = useRef(null);
   const [selectedPersonalizationKey, setSelectedPersonalizationKey] = useState(null);
   const [personalizationSidePending, setPersonalizationSidePending] = useState(false);
+  const personalizationSidePendingRef = useRef(false);
   const [artworkFocusId, setArtworkFocusId] = useState(null);
   const [section, setSection] = useState('layout');
   const [theme, setTheme] = useState('light');
@@ -85,13 +86,22 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const reviewOpenRef = useRef(reviewOpen);
   latestStateRef.current = state;
   reviewOpenRef.current = reviewOpen;
+  const guardedUpdateState = useCallback((...args) => {
+    if (personalizationSidePendingRef.current) return { ok: false };
+    return updateState(...args);
+  }, [updateState]);
   const personalizationDeletion = usePersonalizationDeletion({
     onError: setFileError,
     onSelectionChange: setSelectedPersonalizationKey,
     selectedKey: selectedPersonalizationKey,
     state,
-    updateState,
+    updateState: guardedUpdateState,
   });
+
+  const handlePersonalizationSidePendingChange = (pending) => {
+    personalizationSidePendingRef.current = pending;
+    setPersonalizationSidePending(pending);
+  };
 
   const cancelActiveCartRequest = ({ updateUi = true } = {}) => {
     const activeRequest = activeCartRequestRef.current;
@@ -124,6 +134,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   }, [reviewOpen]);
 
   const handleSaveDesign = async () => {
+    if (personalizationSidePendingRef.current) return;
     try {
       setFileError('');
       const productionFiles = shouldPrepareBottomPatternAsset(state)
@@ -157,13 +168,17 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   };
 
   const handleLoadDesign = async (event) => {
+    if (personalizationSidePendingRef.current) {
+      event.target.value = '';
+      return;
+    }
     const result = await loadDesignFile(event.target.files?.[0] ?? null);
     setFileError(result.ok ? '' : result.message);
     event.target.value = '';
   };
 
   const handleAddToCart = async () => {
-    if (cartPendingRef.current) return;
+    if (personalizationSidePendingRef.current || cartPendingRef.current) return;
     const controller = new AbortController();
     const id = cartRequestIdRef.current + 1;
     const stateSnapshot = latestStateRef.current;
@@ -214,6 +229,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   };
 
   const handleOpenReview = () => {
+    if (personalizationSidePendingRef.current) return;
     reviewOpenRef.current = true;
     setReviewOpen(true);
   };
@@ -233,11 +249,20 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         <TopBar
           canRedo={canRedo}
           canUndo={canUndo}
-          onOpenFile={() => fileInputRef.current?.click()}
-          onRedo={redo}
+          mutationDisabled={personalizationSidePending}
+          onOpenFile={() => {
+            if (!personalizationSidePendingRef.current) fileInputRef.current?.click();
+          }}
+          onRedo={() => {
+            if (!personalizationSidePendingRef.current) return redo();
+            return { ok: false };
+          }}
           onSave={handleSaveDesign}
           onThemeToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-          onUndo={undo}
+          onUndo={() => {
+            if (!personalizationSidePendingRef.current) return undo();
+            return { ok: false };
+          }}
           product={product}
           theme={theme}
         />
@@ -267,7 +292,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             }}
             onDeletePersonalization={personalizationDeletion.deletePersonalization}
             onPersonalizationSelect={setSelectedPersonalizationKey}
-            onStatePatch={updateState}
+            onStatePatch={guardedUpdateState}
             personalizationFocusId={selectedPersonalizationKey}
             personalizationMutationDisabled={
               personalizationDeletion.deletePending || personalizationSidePending
@@ -281,14 +306,15 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             deletePersonalization={personalizationDeletion.deletePersonalization}
             onArtworkSelect={setArtworkFocusId}
             onReview={handleOpenReview}
-            onPersonalizationSidePendingChange={setPersonalizationSidePending}
+            onPersonalizationSidePendingChange={handlePersonalizationSidePendingChange}
             personalizationSidePending={personalizationSidePending}
+            personalizationUpdateState={updateState}
             product={product}
             quote={quote}
             section={section}
             selectedPersonalizationKey={selectedPersonalizationKey}
             state={state}
-            updateState={updateState}
+            updateState={guardedUpdateState}
             onPersonalizationSelect={setSelectedPersonalizationKey}
           />
         </div>
@@ -383,7 +409,18 @@ function Sidebar({ activeSection, labels, onSelect }) {
   );
 }
 
-function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onSave, onThemeToggle, onUndo, product, theme }) {
+function TopBar({
+  canRedo,
+  canUndo,
+  mutationDisabled,
+  onOpenFile,
+  onRedo,
+  onSave,
+  onThemeToggle,
+  onUndo,
+  product,
+  theme,
+}) {
   return (
     <header className="topbar">
       <div>
@@ -394,10 +431,10 @@ function TopBar({ canRedo, canUndo, onOpenFile, onRedo, onSave, onThemeToggle, o
         <button className="icon-button" onClick={onThemeToggle} type="button" title="Toggle theme">
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         </button>
-        <button aria-label="Undo" className="icon-button" disabled={!canUndo} onClick={onUndo} type="button"><Undo2 size={18} /></button>
-        <button aria-label="Redo" className="icon-button" disabled={!canRedo} onClick={onRedo} type="button"><Redo2 size={18} /></button>
-        <button className="soft-button" onClick={onOpenFile} type="button"><FolderOpen size={17} />Open design</button>
-        <button className="soft-button" onClick={onSave} type="button">
+        <button aria-label="Undo" className="icon-button" disabled={mutationDisabled || !canUndo} onClick={onUndo} type="button"><Undo2 size={18} /></button>
+        <button aria-label="Redo" className="icon-button" disabled={mutationDisabled || !canRedo} onClick={onRedo} type="button"><Redo2 size={18} /></button>
+        <button className="soft-button" disabled={mutationDisabled} onClick={onOpenFile} type="button"><FolderOpen size={17} />Open design</button>
+        <button className="soft-button" disabled={mutationDisabled} onClick={onSave} type="button">
           <Save size={17} />
           Save design
         </button>
@@ -414,6 +451,7 @@ function ConfigPanel({
   onPersonalizationSidePendingChange,
   onReview,
   personalizationSidePending,
+  personalizationUpdateState,
   product,
   quote,
   section,
@@ -439,7 +477,7 @@ function ConfigPanel({
   const patchBottomPattern = (patch) => updateState({ overrides: { bottomPattern: patch } });
 
   return (
-    <aside className="config-panel">
+    <aside aria-busy={personalizationSidePending} className="config-panel">
       <PanelHeader labels={product.optionLabels} section={section} />
       <div className="panel-scroll">
         {section === 'layout' && (
@@ -485,7 +523,7 @@ function ConfigPanel({
             selectedKey={selectedPersonalizationKey}
             sidePending={personalizationSidePending}
             state={state}
-            updateState={updateState}
+            updateState={personalizationUpdateState}
           />
         )}
         {section === 'extras' && (
@@ -504,7 +542,12 @@ function ConfigPanel({
           <small>Total</small>
           <strong>${quote.total}</strong>
         </span>
-        <button className="primary-button" onClick={onReview} type="button">
+        <button
+          className="primary-button"
+          disabled={personalizationSidePending}
+          onClick={onReview}
+          type="button"
+        >
           <ShoppingCart size={17} />
           Review design
         </button>

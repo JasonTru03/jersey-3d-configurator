@@ -156,13 +156,23 @@ describe('ConfiguratorPage', () => {
     expect(await screen.findByLabelText('Text content')).toHaveValue('YOUR TEXT');
   });
 
-  it('locks panel and stage personalization mutations while a side update is pending', async () => {
+  it('blocks concurrent mutations and file or review actions while a side update is pending', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
     await screen.findByLabelText('Name');
     const stageDelete = await screen.findByRole('button', { name: 'Delete personalization' });
+    const fileInput = document.querySelector('input[type="file"]');
+    const fileInputClick = vi.spyOn(fileInput, 'click');
+    const loadFile = {
+      text: vi.fn(async () => JSON.stringify({
+        format: 'jersey-design',
+        productId: 'fn8788-jersey',
+        state: { layout: 'xl' },
+        version: 3,
+      })),
+    };
     const quoteDeferred = createDeferred();
     const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
       .mockReturnValueOnce(quoteDeferred.promise);
@@ -177,8 +187,29 @@ describe('ConfiguratorPage', () => {
         expect(screen.getByRole('button', { name: 'Add text' })).toBeDisabled();
         expect(screen.getByRole('button', { name: /^Delete player set/ })).toBeDisabled();
         expect(stageDelete).toBeDisabled();
+        expect(document.querySelector('.config-panel')).toHaveAttribute('aria-busy', 'true');
+        expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Open design' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Review design' })).toBeDisabled();
       });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open design' }));
+      fireEvent.change(fileInput, { target: { files: [loadFile] } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+      expect(fileInputClick).not.toHaveBeenCalled();
+      expect(loadFile.text).not.toHaveBeenCalled();
+      expect(screen.queryByRole('link', { name: 'Download design JSON' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: 'Review your design' })).not.toBeInTheDocument();
+
       fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+      const xl = document.querySelector('[data-option-group="layout"][data-option-id="xl"]');
+      fireEvent.click(xl);
+      expect(xl).toHaveAttribute('aria-pressed', 'false');
+      expect(rendererHarness.options.onStatePatch({ layout: 'xl' })).toEqual({ ok: false });
       fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
       await waitFor(() => {
         expect(screen.getByLabelText('Name')).toBeDisabled();
@@ -200,6 +231,7 @@ describe('ConfiguratorPage', () => {
         await quoteDeferred.promise;
       });
       quoteSpy.mockRestore();
+      fileInputClick.mockRestore();
     }
 
     await waitFor(() => {
@@ -207,7 +239,58 @@ describe('ConfiguratorPage', () => {
       expect(screen.getByLabelText('Name')).toBeEnabled();
       expect(screen.getByRole('button', { name: 'Add text' })).toBeEnabled();
       expect(stageDelete).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Back' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Open design' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Save design' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Review design' })).toBeEnabled();
     });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+    fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
+    await waitFor(() => {
+      expect(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'))
+        .toHaveAttribute('aria-pressed', 'true');
+    });
+  });
+
+  it('restores global mutation actions when a side update fails', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
+    await screen.findByLabelText('Name');
+    const quoteDeferred = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockReturnValueOnce(quoteDeferred.promise);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Review design' })).toBeDisabled();
+      });
+      await act(async () => {
+        quoteDeferred.reject(new Error('Side update failed.'));
+        await expect(quoteDeferred.promise).rejects.toThrow('Side update failed.');
+      });
+    } finally {
+      quoteSpy.mockRestore();
+    }
+
+    await waitFor(() => {
+      expect(rendererHarness.personalizationMutationDisabled).toBe(false);
+      expect(screen.getByRole('button', { name: 'Front' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Back' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Open design' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Save design' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Review design' })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    expect(screen.getByRole('dialog', { name: 'Review your design' })).toBeInTheDocument();
   });
 
   it('shows total and review action in a fixed footer instead of the top bar', async () => {
@@ -882,8 +965,10 @@ function secureCartResponse(overrides = {}) {
 
 function createDeferred() {
   let resolve;
-  const promise = new Promise((next) => {
+  let reject;
+  const promise = new Promise((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }

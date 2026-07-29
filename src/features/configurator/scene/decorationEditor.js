@@ -369,9 +369,7 @@ export class DecorationEditor {
     const image = new Image();
     image.onload = () => {
       const aspect = image.naturalWidth / image.naturalHeight || 1;
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
-      canvas.getContext('2d').drawImage(image, 0, 0);
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
       texture.needsUpdate = true;
       const surface = this.surfaces.get(decoration.id);
       if (surface) {

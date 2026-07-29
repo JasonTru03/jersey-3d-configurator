@@ -177,6 +177,58 @@ describe('ProductStage print toolbar', () => {
     });
   });
 
+  it.each([
+    ['Orbit', 'orbit'],
+    ['Top', 'top'],
+    ['Detail', 'detail'],
+  ])('reapplies the active %s toolbar view after a temporary side focus', async (label, view) => {
+    const baseProps = {
+      onStatePatch: vi.fn(),
+      product,
+      selected,
+      state: { lighting: 'none', overrides: {} },
+    };
+    const { rerender } = render(<ProductStage {...baseProps} />);
+    if (view !== 'orbit') {
+      rendererHarness.viewCalls = [];
+      fireEvent.click(screen.getByTitle(`${label} view`));
+      await waitFor(() => expect(rendererHarness.viewCalls).toEqual([view]));
+    }
+    rendererHarness.viewCalls = [];
+
+    rerender(
+      <ProductStage
+        {...baseProps}
+        personalizationSideFocus={{ id: 1, side: 'back' }}
+      />,
+    );
+    await waitFor(() => expect(rendererHarness.viewCalls.at(-1)).toBe('back'));
+    rendererHarness.viewCalls = [];
+
+    fireEvent.click(screen.getByTitle(`${label} view`));
+
+    expect(rendererHarness.viewCalls).toEqual([view]);
+    expect(screen.getByTitle(`${label} view`)).toHaveClass('active');
+  });
+
+  it('replays the current side-focus request when its renderer becomes available', async () => {
+    const sideFocus = { id: 1, side: 'back' };
+    const baseProps = {
+      onStatePatch: vi.fn(),
+      personalizationSideFocus: sideFocus,
+      selected,
+      state: { lighting: 'none', overrides: {} },
+    };
+    const { rerender } = render(
+      <ProductStage {...baseProps} product={{ ...product, renderer: 'missing' }} />,
+    );
+    expect(rendererHarness.viewCalls).toEqual([]);
+
+    rerender(<ProductStage {...baseProps} product={product} />);
+
+    await waitFor(() => expect(rendererHarness.viewCalls.at(-1)).toBe('back'));
+  });
+
   it('ignores an invalid side-focus request', () => {
     render(
       <ProductStage

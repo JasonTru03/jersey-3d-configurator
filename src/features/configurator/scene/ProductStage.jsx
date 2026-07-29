@@ -75,6 +75,13 @@ export function ProductStage({
     (patch) => onStatePatch(patch, { quote: false, recordHistory: false }),
     [onStatePatch],
   );
+  const handleViewSelect = (nextView) => {
+    if (nextView === view) {
+      rendererRef.current?.setView(nextView);
+      return;
+    }
+    setView(nextView);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -227,7 +234,7 @@ export function ProductStage({
     const side = personalizationSideFocus?.side;
     if (side !== 'front' && side !== 'back') return;
     rendererRef.current?.setView(side);
-  }, [personalizationSideFocus]);
+  }, [personalizationSideFocus, product.renderer]);
 
   useEffect(() => {
     onBakeProvider?.(() => rendererRef.current?.ensureLatestBottomPatternBake?.());
@@ -239,7 +246,7 @@ export function ProductStage({
       <div className="stage-toolbar" aria-label="3D view tools">
         <button
           className={view === 'orbit' ? 'active' : ''}
-          onClick={() => setView('orbit')}
+          onClick={() => handleViewSelect('orbit')}
           title="Orbit view"
           type="button"
         >
@@ -247,7 +254,7 @@ export function ProductStage({
         </button>
         <button
           className={view === 'top' ? 'active' : ''}
-          onClick={() => setView('top')}
+          onClick={() => handleViewSelect('top')}
           title="Top view"
           type="button"
         >
@@ -255,7 +262,7 @@ export function ProductStage({
         </button>
         <button
           className={view === 'detail' ? 'active' : ''}
-          onClick={() => setView('detail')}
+          onClick={() => handleViewSelect('detail')}
           title="Detail view"
           type="button"
         >

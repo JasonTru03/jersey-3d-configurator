@@ -9,8 +9,8 @@ const SIDE_PLACEMENTS = Object.freeze({
 });
 
 export function getPersonalizationSide(placement) {
-  const normalZ = Number(placement?.normal?.z);
-  if (Number.isFinite(normalZ) && normalZ < 0) return 'back';
+  const normalZ = placement?.normal?.z;
+  if (Number.isFinite(normalZ)) return normalZ < 0 ? 'back' : 'front';
   return Number(placement?.z) < 0 ? 'back' : 'front';
 }
 

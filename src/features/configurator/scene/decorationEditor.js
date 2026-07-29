@@ -135,7 +135,10 @@ export function getDefaultDecorationPlacement(meshes, region, occupiedPlacements
         .addScaledVector(new THREE.Vector3(0, 1, 0), offset.vertical * verticalSpan * 0.42)
         .addScaledVector(direction, distance * 2);
       const hit = new THREE.Raycaster(origin, direction.clone().negate()).intersectObjects(meshes, false)[0];
-      return hit ? placementFromIntersection(hit, region) : null;
+      return hit ? {
+        ...placementFromIntersection(hit, region),
+        normal: toPlainVector(direction),
+      } : null;
     })
     .filter(Boolean);
 

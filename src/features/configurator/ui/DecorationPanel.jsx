@@ -24,6 +24,7 @@ export function DecorationPanel({
     selectSide,
     sidePending,
   } = useArtworkSideMutation({
+    getSelectionIntentVersion: () => selectionIntentVersionRef.current,
     onSideFocus,
     selectedKey: active?.id ?? active?.sourceId ?? null,
   });
@@ -268,7 +269,11 @@ export function DecorationPanel({
   );
 }
 
-function useArtworkSideMutation({ onSideFocus, selectedKey }) {
+function useArtworkSideMutation({
+  getSelectionIntentVersion,
+  onSideFocus,
+  selectedKey,
+}) {
   const activeOperationRef = useRef(null);
   const mountedRef = useRef(false);
   const nextTokenRef = useRef(0);
@@ -307,6 +312,7 @@ function useArtworkSideMutation({ onSideFocus, selectedKey }) {
 
     const operation = {
       itemKey,
+      selectionIntentVersion: getSelectionIntentVersion(),
       selectionVersion: selectionRef.current.version,
       token: ++nextTokenRef.current,
     };
@@ -318,6 +324,7 @@ function useArtworkSideMutation({ onSideFocus, selectedKey }) {
       if (
         !mountedRef.current
         || activeOperationRef.current?.token !== operation.token
+        || getSelectionIntentVersion() !== operation.selectionIntentVersion
         || selectionRef.current.key !== operation.itemKey
         || selectionRef.current.version !== operation.selectionVersion
       ) {

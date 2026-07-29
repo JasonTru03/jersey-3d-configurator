@@ -724,4 +724,70 @@ describe('DecorationPanel', () => {
 
     expect(onArtworkSelect).not.toHaveBeenCalled();
   });
+
+  it('does not focus a pending side after a newer library selection intent is queued', async () => {
+    const firstQuote = createDeferred();
+    const first = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+    });
+    const second = createDecoration({
+      id: 'roundel-1',
+      kind: 'badge',
+      source: 'roundel',
+      label: 'Roundel',
+      region: 'front',
+    });
+    let latestState = {
+      overrides: {
+        decorations: [first, second],
+        activeDecorationId: first.id,
+      },
+    };
+    let queue = Promise.resolve();
+    let callCount = 0;
+    const updateState = vi.fn((patch) => {
+      callCount += 1;
+      const callNumber = callCount;
+      const result = queue.then(async () => {
+        const resolved = typeof patch === 'function' ? patch(latestState) : patch;
+        latestState = {
+          ...latestState,
+          ...resolved,
+          overrides: { ...latestState.overrides, ...resolved.overrides },
+        };
+        if (callNumber === 1) await firstQuote.promise;
+        return { ok: true };
+      });
+      queue = result;
+      return result;
+    });
+    const onArtworkSelect = vi.fn();
+    const onSideFocus = vi.fn();
+    render(
+      <DecorationPanel
+        onArtworkSelect={onArtworkSelect}
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={latestState}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Roundel' }));
+    expect(updateState).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      firstQuote.resolve();
+      await queue;
+    });
+
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(onArtworkSelect).toHaveBeenCalledWith(second.id);
+    expect(latestState.overrides.activeDecorationId).toBe(second.id);
+  });
 });

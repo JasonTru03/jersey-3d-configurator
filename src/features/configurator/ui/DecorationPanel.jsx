@@ -1,15 +1,30 @@
 import { ImagePlus, RotateCcw, RotateCw, Trash2 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { createDecoration, MAX_DECORATIONS, patchDecoration, removeDecoration, validateDecorationFile } from '../config/decorations.js';
 import { ArtworkLibrary } from './ArtworkLibrary.jsx';
+import { PersonalizationSideSelector } from './PersonalizationSideSelector.jsx';
 
-export function DecorationPanel({ onArtworkSelect, product, state, updateState }) {
+export function DecorationPanel({
+  onArtworkSelect,
+  onSideFocus,
+  product,
+  state,
+  updateState,
+}) {
   const inputRef = useRef(null);
   const [message, setMessage] = useState('');
   const decorations = state.overrides?.decorations ?? [];
   const activeId = state.overrides?.activeDecorationId ?? null;
   const active = decorations.find((item) => item.id === activeId) ?? null;
   const isFull = decorations.length >= MAX_DECORATIONS;
+  const activeSide = active?.region === 'back' ? 'back' : 'front';
+  const {
+    selectSide,
+    sidePending,
+  } = useArtworkSideMutation({
+    onSideFocus,
+    selectedKey: active?.id ?? active?.sourceId ?? null,
+  });
 
   function updateDecorations(next, nextActiveId = activeId) {
     updateState({ overrides: { decorations: next, activeDecorationId: nextActiveId } });
@@ -29,6 +44,26 @@ export function DecorationPanel({ onArtworkSelect, product, state, updateState }
   function updateActive(patch) {
     if (!active) return;
     updateDecorations(decorations.map((item) => item.id === active.id ? patchDecoration(item, patch) : item));
+  }
+
+  function selectActiveSide(side) {
+    if (!active) return;
+    const itemKey = active.id ?? active.sourceId;
+    const targetIds = new Set([active.id, active.sourceId].filter(Boolean));
+    void selectSide({
+      activeSide,
+      itemKey,
+      side,
+      updateRegion: (region) => updateState((latestState) => ({
+        overrides: {
+          decorations: (latestState.overrides?.decorations ?? []).map((item) => (
+            targetIds.has(item.id) || targetIds.has(item.sourceId)
+              ? patchDecoration(item, { region })
+              : item
+          )),
+        },
+      })),
+    });
   }
 
   function removeActive() {
@@ -103,6 +138,11 @@ export function DecorationPanel({ onArtworkSelect, product, state, updateState }
       {active && (
         <div className="decoration-actions">
           <strong>{active.label}</strong>
+          <PersonalizationSideSelector
+            disabled={sidePending}
+            onSelect={selectActiveSide}
+            side={activeSide}
+          />
           <div>
             <button aria-label="Rotate left" onClick={() => updateActive({ rotation: active.rotation - 15 })} type="button"><RotateCcw size={16} /></button>
             <button aria-label="Rotate right" onClick={() => updateActive({ rotation: active.rotation + 15 })} type="button"><RotateCw size={16} /></button>
@@ -115,4 +155,72 @@ export function DecorationPanel({ onArtworkSelect, product, state, updateState }
       <p aria-live="polite" className="decoration-message">{message || 'Choose artwork, then drag it on the jersey.'}</p>
     </section>
   );
+}
+
+function useArtworkSideMutation({ onSideFocus, selectedKey }) {
+  const activeOperationRef = useRef(null);
+  const mountedRef = useRef(false);
+  const nextTokenRef = useRef(0);
+  const onSideFocusRef = useRef(onSideFocus);
+  const selectionRef = useRef({ key: selectedKey, version: 0 });
+  const [sidePending, setSidePending] = useState(false);
+
+  useLayoutEffect(() => {
+    onSideFocusRef.current = onSideFocus;
+    if (selectionRef.current.key !== selectedKey) {
+      selectionRef.current = {
+        key: selectedKey,
+        version: selectionRef.current.version + 1,
+      };
+    }
+  }, [onSideFocus, selectedKey]);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const selectSide = async ({
+    activeSide,
+    itemKey,
+    side,
+    updateRegion,
+  }) => {
+    if (activeOperationRef.current) return { ok: false, reason: 'pending' };
+    if (side === activeSide) {
+      onSideFocusRef.current?.(side);
+      return { ok: true };
+    }
+
+    const operation = {
+      itemKey,
+      selectionVersion: selectionRef.current.version,
+      token: ++nextTokenRef.current,
+    };
+    activeOperationRef.current = operation;
+    setSidePending(true);
+    try {
+      const result = await updateRegion(side);
+      if (result?.ok === false) return result;
+      if (
+        !mountedRef.current
+        || activeOperationRef.current?.token !== operation.token
+        || selectionRef.current.key !== operation.itemKey
+        || selectionRef.current.version !== operation.selectionVersion
+      ) {
+        return result ?? { ok: true };
+      }
+      onSideFocusRef.current?.(side);
+      return result ?? { ok: true };
+    } finally {
+      if (activeOperationRef.current?.token === operation.token) {
+        activeOperationRef.current = null;
+        if (mountedRef.current) setSidePending(false);
+      }
+    }
+  };
+
+  return { selectSide, sidePending };
 }

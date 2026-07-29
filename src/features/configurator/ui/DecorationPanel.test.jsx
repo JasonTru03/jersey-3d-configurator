@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createDecoration } from '../config/decorations.js';
 import { jerseyProduct } from '../config/productDefinitions.js';
@@ -13,6 +13,14 @@ const product = {
     assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E',
   }],
 };
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 describe('DecorationPanel', () => {
   it('does not expose artwork region controls and creates presets on the front', () => {
@@ -166,5 +174,293 @@ describe('DecorationPanel', () => {
       overrides: { decorations: [second], activeDecorationId: null },
     });
     expect(onArtworkSelect).not.toHaveBeenCalled();
+  });
+
+  it('moves only the active preset artwork to the back and clears its placement', async () => {
+    const active = {
+      ...createDecoration({
+        id: 'crest-1',
+        kind: 'badge',
+        source: 'crest',
+        label: 'Crest Badge',
+        region: 'front',
+      }),
+      placement: { x: 0.2, y: 0.4, z: 0.5 },
+    };
+    const other = {
+      ...createDecoration({
+        id: 'roundel-1',
+        kind: 'badge',
+        source: 'roundel',
+        label: 'Roundel Badge',
+        region: 'front',
+      }),
+      placement: { x: -0.2, y: 0.3, z: 0.5 },
+    };
+    const updateState = vi.fn().mockResolvedValue({ ok: true });
+    const onSideFocus = vi.fn();
+
+    render(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [active, other], activeDecorationId: active.id } }}
+        updateState={updateState}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Front' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    const patch = updateState.mock.lastCall[0];
+    expect(patch).toEqual(expect.any(Function));
+    expect(patch({ overrides: { decorations: [active, other] } })).toEqual({
+      overrides: {
+        decorations: [
+          expect.objectContaining({ id: active.id, placement: null, region: 'back' }),
+          other,
+        ],
+      },
+    });
+    await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('back'));
+  });
+
+  it('moves an active uploaded artwork by sourceId without changing another artwork', async () => {
+    const upload = {
+      ...createDecoration({
+        id: 'upload-1',
+        kind: 'upload',
+        source: 'data:image/png;base64,upload',
+        label: 'upload.png',
+        region: 'back',
+      }),
+      placement: { x: 0.1, y: 0.2, z: -0.5 },
+    };
+    const other = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const selectedUpload = { ...upload, id: 'selected-upload', sourceId: upload.id };
+    const updateState = vi.fn().mockResolvedValue({ ok: true });
+    const onSideFocus = vi.fn();
+
+    render(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{
+          overrides: {
+            decorations: [selectedUpload, other],
+            activeDecorationId: selectedUpload.id,
+          },
+        }}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Front' }));
+    const patch = updateState.mock.lastCall[0];
+    expect(patch({
+      overrides: {
+        decorations: [upload, other],
+      },
+    })).toEqual({
+      overrides: {
+        decorations: [
+          expect.objectContaining({ id: upload.id, placement: null, region: 'front' }),
+          other,
+        ],
+      },
+    });
+    await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('front'));
+  });
+
+  it('focuses the current derived side without updating or clearing placement', () => {
+    const placement = { x: 0.25, y: 0.5, z: 0.48 };
+    const active = {
+      ...createDecoration({
+        id: 'sleeve-1',
+        kind: 'badge',
+        source: 'crest',
+        label: 'Sleeve Badge',
+        region: 'left-sleeve',
+      }),
+      placement,
+    };
+    const updateState = vi.fn();
+    const onSideFocus = vi.fn();
+
+    render(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [active], activeDecorationId: active.id } }}
+        updateState={updateState}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Front' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Front' }));
+
+    expect(updateState).not.toHaveBeenCalled();
+    expect(onSideFocus).toHaveBeenCalledWith('front');
+    expect(active.placement).toEqual(placement);
+  });
+
+  it('applies a side change to the latest decorations so a queued array update is preserved', () => {
+    const active = createDecoration({
+      id: 'upload-1',
+      kind: 'upload',
+      source: 'data:image/png;base64,upload',
+      label: 'upload.png',
+      region: 'front',
+    });
+    const other = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const latestOther = { ...other, rotation: 45 };
+    const updateState = vi.fn().mockReturnValue(new Promise(() => {}));
+
+    render(
+      <DecorationPanel
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [active, other], activeDecorationId: active.id } }}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    const patch = updateState.mock.lastCall[0];
+    expect(patch({
+      overrides: { decorations: [active, latestOther] },
+    })).toEqual({
+      overrides: {
+        decorations: [
+          expect.objectContaining({ id: active.id, region: 'back' }),
+          latestOther,
+        ],
+      },
+    });
+  });
+
+  it('disables both sides while pending and does not focus when the update fails', async () => {
+    const active = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const deferred = createDeferred();
+    const updateState = vi.fn().mockReturnValue(deferred.promise);
+    const onSideFocus = vi.fn();
+
+    render(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [active], activeDecorationId: active.id } }}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('button', { name: 'Front' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(updateState).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      deferred.resolve({ message: 'Quote failed', ok: false });
+      await deferred.promise;
+    });
+
+    expect(onSideFocus).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Front' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
+  });
+
+  it('does not focus a stale artwork when the active selection changes while pending', async () => {
+    const first = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const second = createDecoration({
+      id: 'upload-1',
+      kind: 'upload',
+      source: 'data:image/png;base64,upload',
+      label: 'upload.png',
+      region: 'front',
+    });
+    const deferred = createDeferred();
+    const updateState = vi.fn().mockReturnValue(deferred.promise);
+    const onSideFocus = vi.fn();
+    const { rerender } = render(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [first, second], activeDecorationId: first.id } }}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    rerender(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [first, second], activeDecorationId: second.id } }}
+        updateState={updateState}
+      />,
+    );
+
+    await act(async () => {
+      deferred.resolve({ ok: true });
+      await deferred.promise;
+    });
+
+    expect(onSideFocus).not.toHaveBeenCalled();
+  });
+
+  it('does not focus after a pending artwork panel is hidden', async () => {
+    const active = createDecoration({
+      id: 'crest-1',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const deferred = createDeferred();
+    const updateState = vi.fn().mockReturnValue(deferred.promise);
+    const onSideFocus = vi.fn();
+    const { unmount } = render(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{ overrides: { decorations: [active], activeDecorationId: active.id } }}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    unmount();
+
+    await act(async () => {
+      deferred.resolve({ ok: true });
+      await deferred.promise;
+    });
+
+    expect(onSideFocus).not.toHaveBeenCalled();
   });
 });

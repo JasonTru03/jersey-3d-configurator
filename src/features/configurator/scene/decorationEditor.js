@@ -122,7 +122,7 @@ export function getDefaultDecorationPlacement(meshes, region, occupiedPlacements
   if (bounds.isEmpty()) return null;
 
   const direction = (REGION_DIRECTIONS[region] ?? REGION_DIRECTIONS.front).clone();
-  const center = bounds.getCenter(new THREE.Vector3());
+  const anchor = toVector(getRegionFrame(region).anchor);
   const size = bounds.getSize(new THREE.Vector3());
   const distance = Math.max(size.length(), 1);
   const horizontal = new THREE.Vector3(0, 1, 0).cross(direction).normalize();
@@ -130,7 +130,7 @@ export function getDefaultDecorationPlacement(meshes, region, occupiedPlacements
   const verticalSpan = Math.max(size.y, 0.8);
   const candidates = DEFAULT_PLACEMENT_OFFSETS
     .map((offset) => {
-      const origin = center.clone()
+      const origin = anchor.clone()
         .addScaledVector(horizontal, offset.horizontal * horizontalSpan * 0.42)
         .addScaledVector(new THREE.Vector3(0, 1, 0), offset.vertical * verticalSpan * 0.42)
         .addScaledVector(direction, distance * 2);

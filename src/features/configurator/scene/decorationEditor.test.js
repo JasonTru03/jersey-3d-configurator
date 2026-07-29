@@ -398,7 +398,7 @@ describe('decoration editor geometry', () => {
 
     expect(getDefaultDecorationPlacement([mesh], 'front')).toMatchObject({
       region: 'front',
-      position: { x: 0, y: 0, z: 1 },
+      position: { x: 0, y: 0.42, z: 1 },
       normal: { x: 0, y: 0, z: 1 },
     });
   });

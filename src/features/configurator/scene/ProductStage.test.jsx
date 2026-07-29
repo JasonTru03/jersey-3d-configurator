@@ -19,6 +19,7 @@ const rendererHarness = vi.hoisted(() => ({
   personalizationMutationDisabled: null,
   normalizationForUpdate: null,
   updateArgs: null,
+  viewCalls: [],
 }));
 
 function resolveLastStatePatch(onStatePatch, state) {
@@ -44,7 +45,9 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
         this.onPrintAnchorChange?.({ visible: true, left: 180, top: 220, width: 96, height: 54 });
       }
 
-      setView() {}
+      setView(view) {
+        rendererHarness.viewCalls.push(view);
+      }
 
       setActivePrintId(id) {
         rendererHarness.activePrintId = id;
@@ -126,9 +129,68 @@ beforeEach(() => {
   rendererHarness.personalizationMutationDisabled = null;
   rendererHarness.normalizationForUpdate = null;
   rendererHarness.updateArgs = null;
+  rendererHarness.viewCalls = [];
 });
 
 describe('ProductStage print toolbar', () => {
+  it('applies an initial back side-focus request after the renderer initializes', async () => {
+    render(
+      <ProductStage
+        onStatePatch={vi.fn()}
+        personalizationSideFocus={{ id: 1, side: 'back' }}
+        product={product}
+        selected={selected}
+        state={{ lighting: 'none', overrides: {} }}
+      />,
+    );
+
+    await waitFor(() => expect(rendererHarness.viewCalls.at(-1)).toBe('back'));
+    expect(screen.getByTitle('Orbit view')).toHaveClass('active');
+  });
+
+  it('applies repeated requests for the same side when their ids change', async () => {
+    const baseProps = {
+      onStatePatch: vi.fn(),
+      product,
+      selected,
+      state: { lighting: 'none', overrides: {} },
+    };
+    const { rerender } = render(
+      <ProductStage
+        {...baseProps}
+        personalizationSideFocus={{ id: 1, side: 'back' }}
+      />,
+    );
+    await waitFor(() => {
+      expect(rendererHarness.viewCalls.filter((view) => view === 'back')).toHaveLength(1);
+    });
+
+    rerender(
+      <ProductStage
+        {...baseProps}
+        personalizationSideFocus={{ id: 2, side: 'back' }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(rendererHarness.viewCalls.filter((view) => view === 'back')).toHaveLength(2);
+    });
+  });
+
+  it('ignores an invalid side-focus request', () => {
+    render(
+      <ProductStage
+        onStatePatch={vi.fn()}
+        personalizationSideFocus={{ id: 1, side: 'left' }}
+        product={product}
+        selected={selected}
+        state={{ lighting: 'none', overrides: {} }}
+      />,
+    );
+
+    expect(rendererHarness.viewCalls).toEqual(['orbit']);
+  });
+
   it('forwards selected appearance to the garment renderer', () => {
     const appearance = { template: 'gradient', colors: { body: '#F7F5EF' } };
     render(<ProductStage onStatePatch={vi.fn()} product={product} selected={{ ...selected, appearance }} state={{ lighting: 'none', overrides: {} }} />);

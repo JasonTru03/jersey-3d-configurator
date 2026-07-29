@@ -32,6 +32,7 @@ export function ProductStage({
   onStatePatch,
   personalizationFocusId,
   personalizationMutationDisabled = false,
+  personalizationSideFocus,
   product,
   state,
   selected,
@@ -221,6 +222,12 @@ export function ProductStage({
   useEffect(() => {
     rendererRef.current?.setView(view);
   }, [view]);
+
+  useEffect(() => {
+    const side = personalizationSideFocus?.side;
+    if (side !== 'front' && side !== 'back') return;
+    rendererRef.current?.setView(side);
+  }, [personalizationSideFocus]);
 
   useEffect(() => {
     onBakeProvider?.(() => rendererRef.current?.ensureLatestBottomPatternBake?.());

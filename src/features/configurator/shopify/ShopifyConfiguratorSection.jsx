@@ -29,6 +29,7 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
     updateState,
   } = useShopifyConfigurator(mergedSettings);
   const [artworkFocusId, setArtworkFocusId] = useState(null);
+  const [personalizationSideFocus, setPersonalizationSideFocus] = useState(null);
   const [deletionError, setDeletionError] = useState('');
   const [selectedPersonalizationKey, setSelectedPersonalizationKey] = useState(null);
   const personalizationDeletion = usePersonalizationDeletion({
@@ -38,6 +39,12 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
     state,
     updateState,
   });
+  const handlePersonalizationSideFocus = (side) => {
+    setPersonalizationSideFocus((current) => ({
+      id: (current?.id ?? 0) + 1,
+      side,
+    }));
+  };
 
   useEffect(() => {
     if (!product || !selected || !state) return;
@@ -71,6 +78,7 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
           onStatePatch={updateState}
           personalizationFocusId={selectedPersonalizationKey}
           personalizationMutationDisabled={personalizationDeletion.deletePending}
+          personalizationSideFocus={personalizationSideFocus}
           product={product}
           state={state}
           selected={selected}
@@ -109,7 +117,13 @@ export function ShopifyConfiguratorSection({ settings = defaults }) {
           )}
           <section className="pc3d-group">
             <h3>Artwork</h3>
-            <DecorationPanel onArtworkSelect={setArtworkFocusId} product={product} state={state} updateState={updateState} />
+            <DecorationPanel
+              onArtworkSelect={setArtworkFocusId}
+              onSideFocus={handlePersonalizationSideFocus}
+              product={product}
+              state={state}
+              updateState={updateState}
+            />
           </section>
           <ExtrasGroup extras={product.options.extras} state={state} updateState={updateState} />
           <Summary quote={quote} selected={selected} />

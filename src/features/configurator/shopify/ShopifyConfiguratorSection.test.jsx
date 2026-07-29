@@ -9,6 +9,7 @@ const rendererHarness = vi.hoisted(() => ({
   focusedDecorationCalls: [],
   focusedDecorationId: null,
   options: null,
+  viewCalls: [],
 }));
 
 vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
@@ -32,7 +33,9 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       previewPersonalizationScale() {}
       endPersonalizationResize() {}
       cancelPersonalizationResizePreview() {}
-      setView() {}
+      setView(view) {
+        rendererHarness.viewCalls.push(view);
+      }
       focusDecoration(id) {
         rendererHarness.focusedDecorationCalls.push(id);
         rendererHarness.focusedDecorationId = id;
@@ -56,6 +59,7 @@ beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.finalRotationItem = null;
   rendererHarness.options = null;
+  rendererHarness.viewCalls = [];
 });
 
 describe('ShopifyConfiguratorSection', () => {
@@ -192,6 +196,24 @@ describe('ShopifyConfiguratorSection', () => {
         region: 'back',
       });
       expect(decorations[1]).toEqual(roundel);
+    });
+  });
+
+  it('focuses the back camera when Shopify artwork changes side', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
+    await screen.findByText('Crest Badge added');
+    rendererHarness.viewCalls = [];
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => {
+      expect(rendererHarness.viewCalls).toContain('back');
     });
   });
 

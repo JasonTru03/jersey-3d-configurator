@@ -12,6 +12,7 @@ const rendererHarness = vi.hoisted(() => ({
   updateStates: [],
   finalRotationItem: null,
   normalizationForUpdate: null,
+  viewCalls: [],
 }));
 let downloadClick;
 
@@ -57,7 +58,9 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
         rendererHarness.personalizationMutationDisabled = disabled;
       }
 
-      setView() {}
+      setView(view) {
+        rendererHarness.viewCalls.push(view);
+      }
 
       ensureLatestBottomPatternBake() {
         return rendererHarness.bakeResult ?? {
@@ -103,6 +106,7 @@ beforeEach(() => {
   rendererHarness.finalRotationItem = null;
   rendererHarness.normalizationForUpdate = null;
   rendererHarness.configurationError = '';
+  rendererHarness.viewCalls = [];
   downloadClick.mockClear();
   URL.createObjectURL.mockClear();
   URL.revokeObjectURL.mockClear();
@@ -156,6 +160,41 @@ describe('ConfiguratorPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('$97').length).toBeGreaterThan(0));
     expect(await screen.findByLabelText('Text content')).toHaveValue('YOUR TEXT');
+  });
+
+  it('focuses the back camera for two consecutive current-side player requests', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
+    await screen.findByLabelText('Name');
+    rendererHarness.viewCalls = [];
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Back' })).toHaveAttribute('aria-pressed', 'true');
+      expect(rendererHarness.viewCalls.filter((view) => view === 'back')).toHaveLength(1);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => {
+      expect(rendererHarness.viewCalls.filter((view) => view === 'back')).toHaveLength(2);
+    });
+  });
+
+  it('focuses the requested side when artwork changes side', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Artwork' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
+    await screen.findByText('Crest Badge added');
+    rendererHarness.viewCalls = [];
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => {
+      expect(rendererHarness.viewCalls).toContain('back');
+    });
   });
 
   it('queues ordinary configuration updates while a side update keeps personalization and snapshot actions locked', async () => {

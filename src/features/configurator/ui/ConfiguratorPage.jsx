@@ -73,6 +73,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [selectedPersonalizationKey, setSelectedPersonalizationKey] = useState(null);
   const [personalizationSidePending, setPersonalizationSidePending] = useState(false);
   const personalizationSidePendingRef = useRef(false);
+  const [personalizationSideFocus, setPersonalizationSideFocus] = useState(null);
   const [artworkFocusId, setArtworkFocusId] = useState(null);
   const [section, setSection] = useState('layout');
   const [theme, setTheme] = useState('light');
@@ -104,6 +105,12 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const handlePersonalizationSidePendingChange = (pending) => {
     personalizationSidePendingRef.current = pending;
     setPersonalizationSidePending(pending);
+  };
+  const handlePersonalizationSideFocus = (side) => {
+    setPersonalizationSideFocus((current) => ({
+      id: (current?.id ?? 0) + 1,
+      side,
+    }));
   };
 
   function cancelActiveCartRequest({ updateUi = true } = {}) {
@@ -308,6 +315,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             personalizationMutationDisabled={
               personalizationDeletion.deletePending || personalizationSidePending
             }
+            personalizationSideFocus={personalizationSideFocus}
             product={product}
             state={state}
             selected={selected}
@@ -316,6 +324,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             deletePending={personalizationDeletion.deletePending}
             deletePersonalization={personalizationDeletion.deletePersonalization}
             onArtworkSelect={setArtworkFocusId}
+            onSideFocus={handlePersonalizationSideFocus}
             onReview={handleOpenReview}
             onPersonalizationSidePendingChange={handlePersonalizationSidePendingChange}
             personalizationSidePending={personalizationSidePending}
@@ -462,6 +471,7 @@ function ConfigPanel({
   onPersonalizationSelect,
   onPersonalizationSidePendingChange,
   onReview,
+  onSideFocus,
   personalizationSidePending,
   product,
   quote,
@@ -531,6 +541,7 @@ function ConfigPanel({
             deletePending={deletePending}
             deletePersonalization={deletePersonalization}
             onSelect={onPersonalizationSelect}
+            onSideFocus={onSideFocus}
             onSidePendingChange={onPersonalizationSidePendingChange}
             selectedKey={selectedPersonalizationKey}
             sidePending={personalizationSidePending}
@@ -546,7 +557,13 @@ function ConfigPanel({
           />
         )}
         {section === 'decorations' && (
-          <DecorationPanel onArtworkSelect={onArtworkSelect} product={product} state={state} updateState={updateState} />
+          <DecorationPanel
+            onArtworkSelect={onArtworkSelect}
+            onSideFocus={onSideFocus}
+            product={product}
+            state={state}
+            updateState={updateState}
+          />
         )}
       </div>
       <div className="panel-checkout" data-testid="panel-checkout">

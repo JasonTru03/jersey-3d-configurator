@@ -37,7 +37,12 @@ export function DecorationPanel({
     }
     const id = `preset-${preset.id}-${Date.now()}`;
     const next = createDecoration({ ...preset, id, region: 'front' });
-    updateDecorations([...decorations, next], id);
+    updateState((latestState) => ({
+      overrides: {
+        decorations: [...(latestState.overrides?.decorations ?? []), next],
+        activeDecorationId: id,
+      },
+    }));
     setMessage(`${preset.label} added`);
   }
 
@@ -49,20 +54,29 @@ export function DecorationPanel({
   function selectActiveSide(side) {
     if (!active) return;
     const itemKey = active.id ?? active.sourceId;
-    const targetIds = new Set([active.id, active.sourceId].filter(Boolean));
     void selectSide({
       activeSide,
       itemKey,
       side,
-      updateRegion: (region) => updateState((latestState) => ({
-        overrides: {
-          decorations: (latestState.overrides?.decorations ?? []).map((item) => (
-            targetIds.has(item.id) || targetIds.has(item.sourceId)
-              ? patchDecoration(item, { region })
-              : item
-          )),
-        },
-      })),
+      updateRegion: async (region) => {
+        let targetFound = false;
+        const result = await updateState((latestState) => {
+          const latestDecorations = latestState.overrides?.decorations ?? [];
+          const targetIndex = findDecorationTargetIndex(latestDecorations, active);
+          if (targetIndex < 0) {
+            return { overrides: { decorations: latestDecorations } };
+          }
+          targetFound = true;
+          const nextDecorations = [...latestDecorations];
+          nextDecorations[targetIndex] = patchDecoration(
+            nextDecorations[targetIndex],
+            { region },
+          );
+          return { overrides: { decorations: nextDecorations } };
+        });
+        if (result?.ok === false) return result;
+        return targetFound ? (result ?? { ok: true }) : { ok: false, reason: 'missing' };
+      },
     });
   }
 
@@ -223,4 +237,31 @@ function useArtworkSideMutation({ onSideFocus, selectedKey }) {
   };
 
   return { selectSide, sidePending };
+}
+
+function findDecorationTargetIndex(decorations, active) {
+  if (active.id) {
+    const exactIndex = findUniqueDecorationIndex(
+      decorations,
+      (item) => item.id === active.id,
+    );
+    if (exactIndex !== null) return exactIndex;
+  }
+
+  const canonicalId = active.sourceId ?? active.id;
+  if (!canonicalId) return -1;
+  return findUniqueDecorationIndex(
+    decorations,
+    (item) => item.sourceId === canonicalId || item.id === canonicalId,
+  ) ?? -1;
+}
+
+function findUniqueDecorationIndex(decorations, predicate) {
+  let matchIndex = null;
+  for (let index = 0; index < decorations.length; index += 1) {
+    if (!predicate(decorations[index])) continue;
+    if (matchIndex !== null) return -1;
+    matchIndex = index;
+  }
+  return matchIndex;
 }

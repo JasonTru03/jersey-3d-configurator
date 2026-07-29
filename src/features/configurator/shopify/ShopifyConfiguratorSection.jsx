@@ -124,6 +124,7 @@ function useShopifyConfigurator(settings) {
   const [state, setState] = useState(null);
   const [quote, setQuote] = useState(null);
   const [configurationError, setConfigurationError] = useState('');
+  const mutationQueueRef = useRef(Promise.resolve());
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -165,43 +166,40 @@ function useShopifyConfigurator(settings) {
 
   const updateState = async (
     patch,
-    { quote: shouldQuote = true, transactional = false } = {},
+    { quote: shouldQuote = true } = {},
   ) => {
-    const currentState = stateRef.current;
-    if (!product || !currentState) return { message: 'The configurator is still loading.', ok: false };
-    let resolvedPatch;
-    try {
-      resolvedPatch = resolveShopifyStatePatch(currentState, patch);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Configuration update failed.';
-      setConfigurationError(message);
-      return { message, ok: false };
-    }
-    const nextState = mergeConfiguratorState(currentState, resolvedPatch);
-    if (!shouldQuote) {
-      stateRef.current = nextState;
-      setState(nextState);
-      setConfigurationError('');
-      return { ok: true };
-    }
-    try {
-      if (!transactional) {
+    if (!product) return { message: 'The configurator is still loading.', ok: false };
+    return enqueueShopifyMutation(mutationQueueRef, async () => {
+      const currentState = stateRef.current;
+      if (!currentState) return { message: 'The configurator is still loading.', ok: false };
+      let nextState;
+      try {
+        const resolvedPatch = resolveShopifyStatePatch(currentState, patch);
+        nextState = mergeConfiguratorState(currentState, resolvedPatch);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Configuration update failed.';
+        setConfigurationError(message);
+        return { message, ok: false };
+      }
+      if (!shouldQuote) {
         stateRef.current = nextState;
         setState(nextState);
+        setConfigurationError('');
+        return { ok: true };
       }
-      const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
-      if (transactional) {
+      try {
+        const nextQuote = await productApi.quoteConfiguration(product.id, nextState);
         stateRef.current = nextState;
         setState(nextState);
+        setQuote(nextQuote);
+        setConfigurationError('');
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Configuration update failed.';
+        setConfigurationError(message);
+        return { message, ok: false };
       }
-      setQuote(nextQuote);
-      setConfigurationError('');
-      return { ok: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Configuration update failed.';
-      setConfigurationError(message);
-      return { message, ok: false };
-    }
+    });
   };
 
   const selected = useMemo(() => {
@@ -228,6 +226,15 @@ function resolveShopifyStatePatch(currentState, patch) {
     throw new TypeError('Configuration patch must be a plain object.');
   }
   return resolvedPatch;
+}
+
+function enqueueShopifyMutation(queueRef, operation) {
+  const result = queueRef.current.then(operation, operation);
+  queueRef.current = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 function OptionGroup({ disabled = false, label, options, selectedId, onSelect }) {

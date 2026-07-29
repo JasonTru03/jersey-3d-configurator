@@ -6,6 +6,7 @@ import { ShopifyConfiguratorSection } from './ShopifyConfiguratorSection.jsx';
 
 const rendererHarness = vi.hoisted(() => ({
   finalRotationItem: null,
+  focusedDecorationCalls: [],
   focusedDecorationId: null,
   options: null,
 }));
@@ -32,7 +33,10 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
       endPersonalizationResize() {}
       cancelPersonalizationResizePreview() {}
       setView() {}
-      focusDecoration(id) { rendererHarness.focusedDecorationId = id; }
+      focusDecoration(id) {
+        rendererHarness.focusedDecorationCalls.push(id);
+        rendererHarness.focusedDecorationId = id;
+      }
       dispose() {}
     },
   };
@@ -48,6 +52,7 @@ afterAll(() => {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  rendererHarness.focusedDecorationCalls = [];
   rendererHarness.focusedDecorationId = null;
   rendererHarness.finalRotationItem = null;
   rendererHarness.options = null;
@@ -164,6 +169,44 @@ describe('ShopifyConfiguratorSection', () => {
     });
   });
 
+  it('keeps artwork state, quote, hidden JSON, and focus unchanged when its side quote fails', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
+    await waitFor(() => {
+      expect(readSubmittedState().overrides.decorations).toHaveLength(1);
+    });
+    const [crest] = readSubmittedState().overrides.decorations;
+    await act(async () => {
+      await rendererHarness.options.onStatePatch({
+        overrides: {
+          decorations: [{
+            ...crest,
+            placement: { x: 0.2, y: 0.4, z: 0.5 },
+          }],
+        },
+      }, { quote: false });
+    });
+    const previousState = readSubmittedState();
+    const summary = screen.getByRole('heading', { name: 'Configuration summary' }).closest('section');
+    const previousSummary = summary.textContent;
+    const previousFocusCalls = [...rendererHarness.focusedDecorationCalls];
+    vi.spyOn(productApi, 'quoteConfiguration')
+      .mockRejectedValueOnce(new Error('Side quote failed'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Side quote failed');
+    expect(readSubmittedState()).toEqual(previousState);
+    expect(summary).toHaveTextContent(previousSummary);
+    expect(rendererHarness.focusedDecorationCalls).toEqual(previousFocusCalls);
+  });
+
   it('resolves consecutive functional updates against the latest Shopify state', async () => {
     document.body.innerHTML = `
       <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
@@ -203,6 +246,160 @@ describe('ShopifyConfiguratorSection', () => {
     });
 
     expect(readSubmittedState().overrides.decorations).toEqual([crest, roundel]);
+  });
+
+  it('serializes deferred quoted updates and quotes each committed snapshot in order', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    const originalQuote = productApi.quoteConfiguration.bind(productApi);
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockImplementationOnce(() => firstQuote.promise)
+      .mockImplementation(originalQuote);
+    const crest = createDecoration({
+      id: 'serial-crest',
+      kind: 'badge',
+      source: 'crest-badge',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const roundel = createDecoration({
+      id: 'serial-roundel',
+      kind: 'badge',
+      source: 'roundel-badge',
+      label: 'Roundel Badge',
+      region: 'front',
+    });
+
+    const firstResult = rendererHarness.options.onStatePatch((current) => ({
+      overrides: {
+        decorations: [...current.overrides.decorations, crest],
+      },
+    }));
+    const secondResult = rendererHarness.options.onStatePatch((current) => ({
+      overrides: {
+        decorations: [...current.overrides.decorations, roundel],
+      },
+    }));
+
+    await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+    const firstQuotedState = quoteSpy.mock.calls[0][1];
+    await act(async () => {
+      firstQuote.resolve(await originalQuote('fn8788-jersey', firstQuotedState));
+      await Promise.all([firstResult, secondResult]);
+    });
+
+    expect(quoteSpy).toHaveBeenCalledTimes(2);
+    const finalState = readSubmittedState();
+    const finalQuotedState = quoteSpy.mock.calls[1][1];
+    expect(finalState.overrides.decorations).toEqual([crest, roundel]);
+    expect(finalQuotedState).toEqual(finalState);
+  });
+
+  it('continues with the next quoted update after an earlier queued quote fails', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    const originalQuote = productApi.quoteConfiguration.bind(productApi);
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockRejectedValueOnce(new Error('First quote failed'))
+      .mockImplementation(originalQuote);
+
+    let results;
+    await act(async () => {
+      results = await Promise.all([
+        rendererHarness.options.onStatePatch({ layout: 'xl' }),
+        rendererHarness.options.onStatePatch({ material: 'player' }),
+      ]);
+    });
+
+    expect(results).toEqual([
+      { message: 'First quote failed', ok: false },
+      { ok: true },
+    ]);
+    expect(quoteSpy).toHaveBeenCalledTimes(2);
+    const finalState = readSubmittedState();
+    expect(finalState).toMatchObject({ layout: 'm', material: 'player' });
+    expect(quoteSpy.mock.calls[1][1]).toEqual(finalState);
+  });
+
+  it('preserves a queued ordinary update after a deferred transactional update', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    const originalQuote = productApi.quoteConfiguration.bind(productApi);
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockImplementationOnce(() => firstQuote.promise)
+      .mockImplementation(originalQuote);
+
+    const firstResult = rendererHarness.options.onStatePatch(
+      { material: 'player' },
+      { transactional: true },
+    );
+    const secondResult = rendererHarness.options.onStatePatch({ lighting: 'name-number' });
+
+    await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+    const firstQuotedState = quoteSpy.mock.calls[0][1];
+    await act(async () => {
+      firstQuote.resolve(await originalQuote('fn8788-jersey', firstQuotedState));
+      await Promise.all([firstResult, secondResult]);
+    });
+
+    const finalState = readSubmittedState();
+    expect(finalState).toMatchObject({ material: 'player', lighting: 'name-number' });
+    expect(quoteSpy.mock.calls[1][1]).toEqual(finalState);
+    const finalQuote = await quoteSpy.mock.results[1].value;
+    expect(within(screen.getByRole('heading', { name: 'Configuration summary' }).closest('section'))
+      .getByText(`$${finalQuote.total}`)).toBeVisible();
+  });
+
+  it('preserves a queued transactional update after a deferred ordinary update', async () => {
+    document.body.innerHTML = `
+      <form action="/cart/add" method="post"><input name="id" value="47824466051223"></form>
+      <div id="mount"></div>
+    `;
+    render(<ShopifyConfiguratorSection />, { container: document.getElementById('mount') });
+    await screen.findByText('Customize your match jersey');
+    await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+    const originalQuote = productApi.quoteConfiguration.bind(productApi);
+    const firstQuote = createDeferred();
+    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
+      .mockImplementationOnce(() => firstQuote.promise)
+      .mockImplementation(originalQuote);
+
+    const firstResult = rendererHarness.options.onStatePatch({ material: 'player' });
+    const secondResult = rendererHarness.options.onStatePatch(
+      { lighting: 'name-number' },
+      { transactional: true },
+    );
+
+    await waitFor(() => expect(quoteSpy).toHaveBeenCalledTimes(1));
+    const firstQuotedState = quoteSpy.mock.calls[0][1];
+    await act(async () => {
+      firstQuote.resolve(await originalQuote('fn8788-jersey', firstQuotedState));
+      await Promise.all([firstResult, secondResult]);
+    });
+
+    const finalState = readSubmittedState();
+    expect(finalState).toMatchObject({ material: 'player', lighting: 'name-number' });
+    expect(quoteSpy.mock.calls[1][1]).toEqual(finalState);
+    const finalQuote = await quoteSpy.mock.results[1].value;
+    expect(within(screen.getByRole('heading', { name: 'Configuration summary' }).closest('section'))
+      .getByText(`$${finalQuote.total}`)).toBeVisible();
   });
 
   it('rejects a functional updater that throws instead of reporting success', async () => {
@@ -285,9 +482,12 @@ describe('ShopifyConfiguratorSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Crest Badge$/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Roundel Badge$/ }));
+    const library = screen.getByLabelText('Added artwork');
+    const crestRow = await within(library).findByRole('button', { name: 'Crest Badge' });
+    await within(library).findByRole('button', { name: 'Roundel Badge' });
     expect(rendererHarness.focusedDecorationId).toBeNull();
 
-    fireEvent.click(within(screen.getByLabelText('Added artwork')).getByRole('button', { name: 'Crest Badge' }));
+    fireEvent.click(crestRow);
 
     await waitFor(() => {
       expect(rendererHarness.focusedDecorationId).toMatch(/^preset-crest-badge-/);
@@ -414,4 +614,12 @@ function readSubmittedState() {
   return JSON.parse(
     document.querySelector('input[name="properties[_3D Config JSON]"]').value,
   ).state;
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }

@@ -39,7 +39,9 @@ describe('DecorationPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Crest Badge' }));
 
-    expect(updateState).toHaveBeenCalledWith({
+    const patch = updateState.mock.lastCall[0];
+    expect(patch).toEqual(expect.any(Function));
+    expect(patch({ overrides: { decorations: [] } })).toEqual({
       overrides: {
         decorations: [expect.objectContaining({ label: 'Crest Badge', region: 'front' })],
         activeDecorationId: expect.any(String),
@@ -276,6 +278,106 @@ describe('DecorationPanel', () => {
       },
     });
     await waitFor(() => expect(onSideFocus).toHaveBeenCalledWith('front'));
+  });
+
+  it('prefers the active exact id without patching an artwork whose id collides with its alias', async () => {
+    const active = {
+      ...createDecoration({
+        id: 'selected-upload',
+        kind: 'upload',
+        source: 'data:image/png;base64,upload',
+        label: 'upload.png',
+        region: 'front',
+      }),
+      sourceId: 'canonical-upload',
+    };
+    const aliasCollision = createDecoration({
+      id: 'canonical-upload',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    const updateState = vi.fn().mockResolvedValue({ ok: true });
+
+    render(
+      <DecorationPanel
+        product={{ decorationPresets: [] }}
+        state={{
+          overrides: {
+            decorations: [active, aliasCollision],
+            activeDecorationId: active.id,
+          },
+        }}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    const patch = updateState.mock.lastCall[0];
+
+    expect(patch({
+      overrides: { decorations: [active, aliasCollision] },
+    })).toEqual({
+      overrides: {
+        decorations: [
+          expect.objectContaining({ id: active.id, region: 'back' }),
+          aliasCollision,
+        ],
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
+    });
+  });
+
+  it('keeps the latest decorations unchanged and does not focus when the target disappeared', async () => {
+    const active = createDecoration({
+      id: 'removed-upload',
+      kind: 'upload',
+      source: 'data:image/png;base64,upload',
+      label: 'upload.png',
+      region: 'front',
+    });
+    const remaining = createDecoration({
+      id: 'remaining-crest',
+      kind: 'badge',
+      source: 'crest',
+      label: 'Crest Badge',
+      region: 'front',
+    });
+    let appliedPatch;
+    const updateState = vi.fn((patch) => {
+      appliedPatch = patch({
+        overrides: { decorations: [remaining] },
+      });
+      return Promise.resolve({ ok: true });
+    });
+    const onSideFocus = vi.fn();
+
+    render(
+      <DecorationPanel
+        onSideFocus={onSideFocus}
+        product={{ decorationPresets: [] }}
+        state={{
+          overrides: {
+            decorations: [active, remaining],
+            activeDecorationId: active.id,
+          },
+        }}
+        updateState={updateState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
+    });
+    expect(appliedPatch).toEqual({
+      overrides: { decorations: [remaining] },
+    });
+    expect(onSideFocus).not.toHaveBeenCalled();
   });
 
   it('focuses the current derived side without updating or clearing placement', () => {

@@ -46,44 +46,69 @@ export function getPersonalizationDockLayout(candidate, anchor, stageArea) {
   return { columns, left, top };
 }
 
-export function getPersonalizationRotateHandleLayout(anchor, stageArea) {
-  const candidate = {
+export function getPersonalizationRotateHandleLayout(anchor, stageArea, dockRect = null) {
+  const preferred = {
     left: anchor.left + anchor.width,
     top: anchor.top - ROTATE_HANDLE_OFFSET,
   };
-  if (!stageArea) {
+  const candidates = dockRect
+    ? [
+        preferred,
+        {
+          left: dockRect.right + DOCK_EDGE_GAP + CONTROL_SIZE / 2,
+          top: dockRect.top,
+        },
+        {
+          left: dockRect.left - DOCK_EDGE_GAP - CONTROL_SIZE / 2,
+          top: dockRect.top,
+        },
+        {
+          left: anchor.left + anchor.width,
+          top: dockRect.bottom + DOCK_EDGE_GAP,
+        },
+      ]
+    : [preferred];
+  const resolveCandidate = (candidate) => {
+    if (!stageArea) {
+      return {
+        left: candidate.left,
+        top: Math.max(DOCK_EDGE_GAP, candidate.top),
+      };
+    }
+
+    const halfSize = CONTROL_SIZE / 2;
     return {
-      left: candidate.left,
-      top: Math.max(DOCK_EDGE_GAP, candidate.top),
+      left: clamp(
+        candidate.left,
+        DOCK_EDGE_GAP + halfSize,
+        Math.max(DOCK_EDGE_GAP + halfSize, stageArea.width - DOCK_EDGE_GAP - halfSize),
+      ),
+      top: clamp(
+        candidate.top,
+        DOCK_EDGE_GAP,
+        Math.max(DOCK_EDGE_GAP, stageArea.height - DOCK_EDGE_GAP - CONTROL_SIZE),
+      ),
     };
-  }
+  };
+  const resolved = candidates.map(resolveCandidate);
+  const clearCandidate = resolved.find((layout) => {
+    const rectangle = getControlRect(layout);
+    return (!dockRect || rectanglesHaveGap(rectangle, dockRect))
+      && (!stageArea?.obstacle || !rectanglesIntersect(rectangle, stageArea.obstacle));
+  });
 
-  const halfSize = CONTROL_SIZE / 2;
-  const left = clamp(
-    candidate.left,
-    DOCK_EDGE_GAP + halfSize,
-    Math.max(DOCK_EDGE_GAP + halfSize, stageArea.width - DOCK_EDGE_GAP - halfSize),
+  return clearCandidate ?? resolved.at(-1);
+}
+
+export function getPersonalizationControlsLayout(candidate, anchor, stageArea) {
+  const dock = getPersonalizationDockLayout(candidate, anchor, stageArea);
+  const dockRect = getDockRect(dock);
+  const rotateHandle = getPersonalizationRotateHandleLayout(
+    anchor,
+    stageArea,
+    dockRect,
   );
-  const maxTop = Math.max(DOCK_EDGE_GAP, stageArea.height - DOCK_EDGE_GAP - CONTROL_SIZE);
-  let top = clamp(candidate.top, DOCK_EDGE_GAP, maxTop);
-
-  if (stageArea.obstacle && rectanglesIntersect(
-    {
-      bottom: top + CONTROL_SIZE,
-      left: left - halfSize,
-      right: left + halfSize,
-      top,
-    },
-    stageArea.obstacle,
-  )) {
-    top = clamp(
-      Math.max(stageArea.obstacle.bottom + DOCK_EDGE_GAP, anchor.top + anchor.height + DOCK_EDGE_GAP),
-      DOCK_EDGE_GAP,
-      maxTop,
-    );
-  }
-
-  return { left, top };
+  return { dock, rotateHandle };
 }
 
 export function measurePersonalizationStageArea(overlay) {
@@ -119,6 +144,35 @@ export function personalizationStageAreasEqual(first, second) {
 
 function getGridSize(count) {
   return count * CONTROL_SIZE + (count - 1) * CONTROL_GAP;
+}
+
+function getDockRect(layout) {
+  const rows = Math.ceil(CONTROL_COUNT / layout.columns);
+  const width = getGridSize(layout.columns);
+  const height = getGridSize(rows);
+  return {
+    bottom: layout.top + height,
+    left: layout.left - width / 2,
+    right: layout.left + width / 2,
+    top: layout.top,
+  };
+}
+
+function getControlRect(layout) {
+  const halfSize = CONTROL_SIZE / 2;
+  return {
+    bottom: layout.top + CONTROL_SIZE,
+    left: layout.left - halfSize,
+    right: layout.left + halfSize,
+    top: layout.top,
+  };
+}
+
+function rectanglesHaveGap(first, second, gap = DOCK_EDGE_GAP) {
+  return first.right + gap <= second.left
+    || first.left >= second.right + gap
+    || first.bottom + gap <= second.top
+    || first.top >= second.bottom + gap;
 }
 
 function clamp(value, minimum, maximum) {

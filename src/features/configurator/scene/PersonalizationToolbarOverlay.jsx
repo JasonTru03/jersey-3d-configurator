@@ -6,8 +6,7 @@ import {
   updateRotationGesture,
 } from './personalizationRotation.js';
 import {
-  getPersonalizationDockLayout,
-  getPersonalizationRotateHandleLayout,
+  getPersonalizationControlsLayout,
   measurePersonalizationStageArea,
   personalizationStageAreasEqual,
 } from './personalizationToolbarLayout.js';
@@ -140,9 +139,13 @@ export function PersonalizationToolbarOverlay({
   }, [anchorVisible, itemKey]);
 
   if (!item || !anchorVisible) return null;
-  const dockPosition = getDockPosition(anchor);
-  const dockLayout = getPersonalizationDockLayout(dockPosition, anchor, stageArea);
-  const rotateHandleLayout = getPersonalizationRotateHandleLayout(anchor, stageArea);
+  const controlsLayout = getPersonalizationControlsLayout(
+    getDockPosition(anchor),
+    anchor,
+    stageArea,
+  );
+  const dockLayout = controlsLayout.dock;
+  const rotateHandleLayout = controlsLayout.rotateHandle;
 
   const finishResize = (event, mode) => {
     const start = resizeStart.current;

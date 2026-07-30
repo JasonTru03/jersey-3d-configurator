@@ -65,6 +65,31 @@ function pointerEvent(x, y) {
   return { clientX: x, clientY: y, preventDefault: vi.fn() };
 }
 
+function createRaycastPickerRenderer() {
+  const renderer = Object.create(GarmentRenderer.prototype);
+  const domElement = document.createElement('canvas');
+  vi.spyOn(domElement, 'getBoundingClientRect').mockReturnValue({
+    bottom: 100,
+    height: 100,
+    left: 0,
+    right: 100,
+    top: 0,
+    width: 100,
+    x: 0,
+    y: 0,
+    toJSON() {},
+  });
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.set(0, 0, 5);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld(true);
+  renderer.renderer = { domElement };
+  renderer.camera = camera;
+  renderer.pointer = new THREE.Vector2();
+  renderer.raycaster = new THREE.Raycaster();
+  return renderer;
+}
+
 function makeModel(map) {
   const model = new THREE.Group();
   model.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ map })));
@@ -596,6 +621,77 @@ describe('garment decoration mesh selection', () => {
     expect(selectDecorationMeshes([first, second])).toEqual([first, second]);
   });
 
+  it('does not pick a print hidden behind the outward garment surface', () => {
+    const renderer = createRaycastPickerRenderer();
+    const garment = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    const print = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    print.position.z = -1;
+    garment.updateMatrixWorld(true);
+    print.updateMatrixWorld(true);
+    renderer.decorationMeshes = [garment];
+    renderer.printLayers = new Map([['text:hidden', { plane: print }]]);
+
+    expect(renderer.pickPrint(pointerEvent(50, 50))).toBeNull();
+  });
+
+  it('picks a print slightly outside the outward garment surface', () => {
+    const renderer = createRaycastPickerRenderer();
+    const garment = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    const print = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    print.position.z = 0.02;
+    garment.updateMatrixWorld(true);
+    print.updateMatrixWorld(true);
+    const intersectObjects = vi.spyOn(renderer.raycaster, 'intersectObjects');
+    renderer.decorationMeshes = [garment];
+    renderer.printLayers = new Map([['text:visible', { plane: print }]]);
+
+    expect(renderer.pickPrint(pointerEvent(50, 50))?.object).toBe(print);
+    expect(intersectObjects).toHaveBeenCalledWith(renderer.decorationMeshes, false);
+  });
+
+  it('uses the next outward-facing garment hit for print dragging', () => {
+    const renderer = createRaycastPickerRenderer();
+    const backFacingMesh = new THREE.Mesh();
+    const outwardMesh = new THREE.Mesh();
+    backFacingMesh.updateMatrixWorld(true);
+    outwardMesh.updateMatrixWorld(true);
+    const backFacingHit = {
+      distance: 1,
+      face: { normal: new THREE.Vector3(0, 0, -1) },
+      object: backFacingMesh,
+    };
+    const outwardHit = {
+      distance: 2,
+      face: { normal: new THREE.Vector3(0, 0, 1) },
+      object: outwardMesh,
+    };
+    const intersectObjects = vi.fn(() => [backFacingHit, outwardHit]);
+    const setFromCamera = vi.fn();
+    renderer.camera = {};
+    renderer.raycaster = {
+      intersectObjects,
+      ray: { direction: new THREE.Vector3(0, 0, -1) },
+      setFromCamera,
+    };
+    renderer.decorationMeshes = [backFacingMesh, outwardMesh];
+
+    expect(renderer.pickJersey(pointerEvent(50, 50))).toBe(outwardHit);
+    expect(setFromCamera).toHaveBeenCalledWith(renderer.pointer, renderer.camera);
+    expect(intersectObjects).toHaveBeenCalledWith(renderer.decorationMeshes, false);
+  });
+
   it('chooses a copy placement away from existing print placements', () => {
     const selected = getNextPrintPlacement(
       [{ x: 0, y: 0.36, z: 0.5 }, { x: 0.3, y: 0.36, z: 0.5 }],
@@ -748,6 +844,26 @@ describe('garment decoration mesh selection', () => {
       width: 1.05,
       height: 1.05 / CUSTOM_TEXT_CANVAS_ASPECT,
     });
+    renderer.dispose();
+  });
+
+  it('renders new print proxy and decal materials on their outward side only', () => {
+    installTextCanvasContext();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.state = {
+      lighting: 'none',
+      overrides: {
+        customTextItems: [{ id: 'text-1', text: 'MASON' }],
+      },
+    };
+
+    renderer.updatePrintLayer();
+
+    const layer = renderer.printLayers.get('text:text-1');
+    expect(layer.plane.material.side).toBe(THREE.FrontSide);
+    expect(layer.decal.material.side).toBe(THREE.FrontSide);
     renderer.dispose();
   });
 

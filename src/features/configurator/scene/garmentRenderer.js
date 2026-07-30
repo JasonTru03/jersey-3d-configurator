@@ -15,6 +15,10 @@ import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
 import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTexture.js';
 import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
+  findNearestFacingIntersection,
+  findVisibleElementIntersection,
+} from './surfaceVisibility.js';
+import {
   fitPersonalizationDecalToSurface,
   getPersonalizationAlphaMask,
   getPersonalizationDecalOrientation,
@@ -641,7 +645,7 @@ export class GarmentRenderer {
         : makePrintCanvas(this.getPrintOptions(item));
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
-      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide });
+      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false, side: THREE.FrontSide });
       const decalMaterial = new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
@@ -650,7 +654,7 @@ export class GarmentRenderer {
         polygonOffset: true,
         polygonOffsetFactor: -2,
         polygonOffsetUnits: -2,
-        side: THREE.DoubleSide,
+        side: THREE.FrontSide,
       });
       const planeHeight = item.itemKind === 'text' ? 1.05 / CUSTOM_TEXT_CANVAS_ASPECT : 0.42;
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.05, planeHeight), material);
@@ -1249,7 +1253,7 @@ export class GarmentRenderer {
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    return this.raycaster.intersectObjects(this.decorationMeshes, false)[0] ?? null;
+    return findNearestFacingIntersection(this.raycaster, this.decorationMeshes);
   }
 
   pickPrint(event) {
@@ -1257,7 +1261,11 @@ export class GarmentRenderer {
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    return this.raycaster.intersectObjects([...this.printLayers.values()].map((layer) => layer.plane), false)[0] ?? null;
+    return findVisibleElementIntersection({
+      elements: [...this.printLayers.values()].map((layer) => layer.plane),
+      garmentMeshes: this.decorationMeshes,
+      raycaster: this.raycaster,
+    });
   }
 
   placePrintAtIntersection(hit, animate = false) {

@@ -6,6 +6,8 @@ const MIN_DECAL_DEPTH = 0.12;
 const MAX_DECAL_DEPTH = 1.2;
 const FACING_NORMAL_THRESHOLD = 0.08;
 const FORWARD = new THREE.Vector3(0, 0, 1);
+const GARMENT_UP = new THREE.Vector3(0, 1, 0);
+const MIN_TANGENT_LENGTH_SQ = 1e-8;
 const FOOTPRINT_SAMPLE_COORDINATES = [
   [0, 0],
   [-0.5, 0],
@@ -143,8 +145,17 @@ export function getPersonalizationDecalOrientation(normalValue, rotation = 0) {
     throw new TypeError('Personalization decal orientation requires a finite normal and rotation.');
   }
   normal.normalize();
-  return new THREE.Quaternion()
-    .setFromUnitVectors(FORWARD, normal)
+  const up = GARMENT_UP.clone().addScaledVector(normal, -GARMENT_UP.dot(normal));
+  if (up.lengthSq() < MIN_TANGENT_LENGTH_SQ) {
+    up.copy(FORWARD).addScaledVector(normal, -FORWARD.dot(normal));
+  }
+  up.normalize();
+  const right = up.clone().cross(normal).normalize();
+  up.crossVectors(normal, right).normalize();
+  const surfaceOrientation = new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(right, up, normal),
+  );
+  return surfaceOrientation
     .multiply(new THREE.Quaternion().setFromAxisAngle(
       FORWARD,
       THREE.MathUtils.degToRad(angle),

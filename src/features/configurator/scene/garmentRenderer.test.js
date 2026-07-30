@@ -33,6 +33,7 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import { GarmentRenderer, getNextPrintPlacement, getPrintPointerDownAction, getPrintSelectionRect, hasExceededPrintDragThreshold, hasPrintSelectionRectChanged, selectDecorationMeshes, shouldEnableOrbitControls } from './garmentRenderer.js';
 import { CUSTOM_TEXT_CANVAS_ASPECT } from './customTextTexture.js';
+import { getPersonalizationDecalOrientation } from './personalizationDecal.js';
 
 function createPointerRenderer({ selectedDecorationId = null, printHit = null, decorationHit = false } = {}) {
   const host = document.createElement('div');
@@ -2008,9 +2009,7 @@ describe('garment decoration mesh selection', () => {
     renderer.handlePointerMove(pointerEvent(110, 100));
 
     const normal = new THREE.Vector3(1, 0, 0);
-    const expectedQuaternion = new THREE.Quaternion()
-      .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
-      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), THREE.MathUtils.degToRad(45)));
+    const expectedQuaternion = getPersonalizationDecalOrientation(normal, 45);
     const expectedGrabPoint = surfaceHit.point.clone().addScaledVector(normal, 0.018);
     const expectedCenter = expectedGrabPoint.clone().sub(
       localGrab.clone().multiply(plane.scale).applyQuaternion(expectedQuaternion),
@@ -2028,6 +2027,34 @@ describe('garment decoration mesh selection', () => {
       },
     });
     renderer.dispose();
+  });
+
+  it('keeps text upright while dragging across a curved back surface', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    renderer.activePrintId = 'text:custom-id';
+    renderer.activePrintDrag = {
+      grabOffset: new THREE.Vector3(),
+      rotation: 0,
+    };
+    renderer.printLayers = new Map([['text:custom-id', { plane }]]);
+    const normal = new THREE.Vector3(0, 0.02, -0.9998).normalize();
+    const jersey = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+    jersey.updateMatrixWorld(true);
+
+    renderer.placePrintAtIntersection({
+      face: { normal },
+      object: jersey,
+      point: new THREE.Vector3(0, 0.3, -0.5),
+    });
+
+    const garmentUp = new THREE.Vector3(0, 1, 0);
+    const actualUp = garmentUp.clone().applyQuaternion(plane.quaternion);
+    const expectedUp = garmentUp.clone()
+      .addScaledVector(normal, -garmentUp.dot(normal))
+      .normalize();
+    expect(actualUp.dot(expectedUp)).toBeGreaterThan(0.999999);
+    expect(renderer.activePrintDrag.rotation).toBe(0);
   });
 
   it('does not fall back to another layer for an explicitly missing active key', () => {

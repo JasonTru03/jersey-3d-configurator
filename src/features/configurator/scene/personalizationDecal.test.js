@@ -523,6 +523,23 @@ describe('personalization decal geometry', () => {
     expect(forward.distanceTo(normal)).toBeLessThan(0.000001);
   });
 
+  it('keeps local up stable across curved back-facing normals', () => {
+    const garmentUp = new THREE.Vector3(0, 1, 0);
+    [
+      new THREE.Vector3(0, 0, -1),
+      new THREE.Vector3(0, 0.02, -0.9998).normalize(),
+      new THREE.Vector3(0, -0.02, -0.9998).normalize(),
+    ].forEach((normal) => {
+      const orientation = getPersonalizationDecalOrientation(normal, 0);
+      const actualUp = garmentUp.clone().applyQuaternion(orientation);
+      const expectedUp = garmentUp.clone()
+        .addScaledVector(normal, -garmentUp.dot(normal))
+        .normalize();
+
+      expect(actualUp.dot(expectedUp)).toBeGreaterThan(0.999999);
+    });
+  });
+
   it('rejects degenerate geometry inputs', () => {
     const garment = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 0.4));
     garment.updateMatrixWorld(true);

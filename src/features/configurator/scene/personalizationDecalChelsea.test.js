@@ -137,7 +137,7 @@ describe('Chelsea personalization decal coverage', () => {
       width: TEXT_WIDTH,
     });
 
-    expect(atZero.scale).toBeCloseTo(1.0676, 3);
+    expect(atZero.scale).toBeCloseTo(1.0664, 3);
     expect(atFifteen.scale).toBeCloseTo(1.0271, 3);
     expect(atFifteen.scale).toBeLessThan(atZero.scale);
     expect(atFifteen.coverage).toBeGreaterThanOrEqual(0.985);

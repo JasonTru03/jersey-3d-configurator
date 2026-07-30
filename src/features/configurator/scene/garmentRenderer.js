@@ -17,6 +17,7 @@ import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
   fitPersonalizationDecalToSurface,
   getPersonalizationAlphaMask,
+  getPersonalizationDecalOrientation,
   getPersonalizationSurfaceFromIntersection,
   projectPersonalizationCenterOntoSurface,
   resolvePersonalizationSurface,
@@ -24,6 +25,7 @@ import {
 } from './personalizationDecal.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
+const DEFAULT_PRINT_NORMAL = { x: 0, y: 0, z: 1 };
 const DECORATION_MESH_NAME_PATTERN = /cloth|fabric|body/i;
 const MIN_PRINT_COPY_DISTANCE = 0.24;
 const PRINT_DRAG_THRESHOLD = 4;
@@ -731,15 +733,10 @@ export class GarmentRenderer {
   applyStoredPrintPlacement(plane, item) {
     const stored = item.placement ?? DEFAULT_PRINT_POSITION;
     plane.position.set(stored.x, stored.y, stored.z);
-    if (stored.normal) {
-      plane.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1),
-        new THREE.Vector3(stored.normal.x, stored.normal.y, stored.normal.z).normalize(),
-      );
-    } else {
-      plane.quaternion.identity();
-    }
-    plane.rotateZ(THREE.MathUtils.degToRad(item.rotation ?? 0));
+    plane.quaternion.copy(getPersonalizationDecalOrientation(
+      stored.normal ?? DEFAULT_PRINT_NORMAL,
+      item.rotation ?? 0,
+    ));
     plane.scale.setScalar(item.scale ?? 1);
     plane.userData.rotation = item.rotation ?? 0;
   }
@@ -1268,12 +1265,7 @@ export class GarmentRenderer {
     const normal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
     const targetGrabPoint = hit.point.clone().addScaledVector(normal, 0.018);
     const rotation = this.activePrintDrag?.rotation ?? this.printPlane.userData.rotation ?? 0;
-    const nextQuaternion = new THREE.Quaternion()
-      .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
-      .multiply(new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(0, 0, 1),
-        THREE.MathUtils.degToRad(rotation),
-      ));
+    const nextQuaternion = getPersonalizationDecalOrientation(normal, rotation);
     const grabOffset = this.activePrintDrag?.grabOffset ?? new THREE.Vector3();
     const position = targetGrabPoint.sub(
       grabOffset.clone().multiply(this.printPlane.scale).applyQuaternion(nextQuaternion),

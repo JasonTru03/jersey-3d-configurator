@@ -9,6 +9,12 @@ const REGION_POSITION_SCALE = 0.48;
 const DECORATION_MIN_DISTANCE = 0.24;
 const SELECTION_FLASH_DURATION = 180;
 const DECORATION_DRAG_THRESHOLD = 4;
+const requestDecorationFrame = typeof requestAnimationFrame === 'function'
+  ? requestAnimationFrame.bind(globalThis)
+  : (callback) => setTimeout(callback, 16);
+const cancelDecorationFrame = typeof cancelAnimationFrame === 'function'
+  ? cancelAnimationFrame.bind(globalThis)
+  : clearTimeout;
 const DEFAULT_PLACEMENT_OFFSETS = [
   { horizontal: 0, vertical: 0 },
   { horizontal: -0.58, vertical: 0.32 },
@@ -256,11 +262,21 @@ function toPlainVector(vector) {
 }
 
 export class DecorationEditor {
-  constructor({ camera, domElement, scene, onDecorationsChange, onSelectionChange }) {
+  constructor({
+    camera,
+    cancelFrame = cancelDecorationFrame,
+    domElement,
+    scene,
+    onDecorationsChange,
+    onSelectionChange,
+    requestFrame = requestDecorationFrame,
+  }) {
     this.camera = camera;
+    this.cancelFrame = cancelFrame;
     this.domElement = domElement;
     this.onDecorationsChange = onDecorationsChange;
     this.onSelectionChange = onSelectionChange;
+    this.requestFrame = requestFrame;
     this.group = new THREE.Group();
     this.scene = scene;
     this.scene.add(this.group);
@@ -276,6 +292,9 @@ export class DecorationEditor {
     this.selectionFlashId = null;
     this.dragging = false;
     this.pendingDrag = null;
+    this.dragFrame = null;
+    this.pendingDragPointer = null;
+    this.previewDecoration = null;
     this.migratedDecorationIds = new Set();
   }
 
@@ -415,13 +434,17 @@ export class DecorationEditor {
     const isNewSelection = this.selectedId !== decoration.id;
     this.selectedId = decoration.id;
     this.onSelectionChange?.(decoration.id);
+    this.clearDragFrame();
     this.pendingDrag = {
       id: decoration.id,
       x: event.clientX,
       y: event.clientY,
       grabOffset: getDecorationGrabOffset(picked?.point, decoration.placement, decoration.rotation),
+      originalDecoration: decoration,
     };
     this.dragging = false;
+    this.pendingDragPointer = null;
+    this.previewDecoration = null;
     this.refreshSelection();
     if (isNewSelection) this.flashSelection(decoration.id);
     return true;
@@ -442,21 +465,83 @@ export class DecorationEditor {
       if (!hasExceededDecorationDragThreshold(this.pendingDrag, event)) return false;
       this.dragging = true;
     }
-    const decoration = this.decorations.find((item) => item.id === this.selectedId);
-    if (!decoration) return false;
-    const placement = getPlacementFromIntersection(this.pickGarment(event), decoration.region, null);
-    if (!placement) return false;
-    this.emitPatch(decoration.id, {
-      placement: applyDecorationGrabOffset(placement, this.pendingDrag.grabOffset, decoration.rotation),
-    });
+    this.pendingDragPointer = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    if (this.dragFrame === null) {
+      this.dragFrame = this.requestFrame(() => {
+        this.dragFrame = null;
+        this.flushDecorationPreview();
+      });
+    }
     return true;
+  }
+
+  flushDecorationPreview() {
+    const pointer = this.pendingDragPointer;
+    this.pendingDragPointer = null;
+    if (!pointer) return this.previewDecoration;
+
+    const dragId = this.pendingDrag?.id;
+    const decoration = this.decorations.find((item) => item.id === dragId);
+    const surface = dragId ? this.surfaces.get(dragId) : null;
+    if (!dragId || this.selectedId !== dragId || !decoration || !surface) {
+      this.previewDecoration = null;
+      return null;
+    }
+    const placement = getPlacementFromIntersection(this.pickGarment(pointer), decoration.region, null);
+    if (!placement) {
+      this.previewDecoration = null;
+      return null;
+    }
+    const previewDecoration = patchDecoration(decoration, {
+      placement: applyDecorationGrabOffset(
+        placement,
+        this.pendingDrag.grabOffset,
+        decoration.rotation,
+      ),
+    });
+    this.applyDecoration(surface, previewDecoration, previewDecoration.placement);
+    this.previewDecoration = previewDecoration;
+    return previewDecoration;
+  }
+
+  clearDragFrame() {
+    if (this.dragFrame === null) return;
+    this.cancelFrame(this.dragFrame);
+    this.dragFrame = null;
   }
 
   handlePointerUp() {
     const hadPointerGesture = Boolean(this.pendingDrag);
+    if (!hadPointerGesture) return false;
+    this.clearDragFrame();
+    this.flushDecorationPreview();
+    const finalDecoration = this.dragging ? this.previewDecoration : null;
     this.dragging = false;
     this.pendingDrag = null;
-    return hadPointerGesture;
+    this.pendingDragPointer = null;
+    this.previewDecoration = null;
+    if (finalDecoration) this.emitDecoration(finalDecoration);
+    return true;
+  }
+
+  handlePointerCancel() {
+    if (!this.pendingDrag) return false;
+    const originalDecoration = this.pendingDrag.originalDecoration;
+    const surface = originalDecoration
+      ? this.surfaces.get(originalDecoration.id)
+      : null;
+    this.clearDragFrame();
+    this.dragging = false;
+    this.pendingDrag = null;
+    this.pendingDragPointer = null;
+    this.previewDecoration = null;
+    if (surface && originalDecoration?.placement) {
+      this.applyDecoration(surface, originalDecoration, originalDecoration.placement);
+    }
+    return true;
   }
 
   patchSelected(transform) {
@@ -470,10 +555,13 @@ export class DecorationEditor {
   }
 
   dispose() {
+    this.clearDragFrame();
     clearTimeout(this.selectionFlashTimer);
     this.selectionFlashTimer = null;
     this.selectionFlashId = null;
     this.pendingDrag = null;
+    this.pendingDragPointer = null;
+    this.previewDecoration = null;
     this.dragging = false;
     this.surfaces.forEach((surface) => {
       surface.geometry.dispose();
@@ -522,6 +610,13 @@ export class DecorationEditor {
       decoration.id === id ? patchDecoration(decoration, patch) : decoration
     ));
     this.onDecorationsChange(next);
+  }
+
+  emitDecoration(nextDecoration) {
+    const next = this.decorations.map((decoration) => (
+      decoration.id === nextDecoration.id ? nextDecoration : decoration
+    ));
+    this.onDecorationsChange?.(next);
   }
 
   refreshSelection() {

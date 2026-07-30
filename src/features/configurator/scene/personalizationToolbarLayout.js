@@ -46,44 +46,94 @@ export function getPersonalizationDockLayout(candidate, anchor, stageArea) {
   return { columns, left, top };
 }
 
-export function getPersonalizationRotateHandleLayout(anchor, stageArea) {
-  const candidate = {
+export function getPersonalizationRotateHandleLayout(anchor, stageArea, dockRect = null) {
+  const preferred = {
     left: anchor.left + anchor.width,
     top: anchor.top - ROTATE_HANDLE_OFFSET,
   };
-  if (!stageArea) {
+  const candidates = dockRect
+    ? [
+        preferred,
+        {
+          left: dockRect.right + DOCK_EDGE_GAP + CONTROL_SIZE / 2,
+          top: dockRect.top,
+        },
+        {
+          left: dockRect.left - DOCK_EDGE_GAP - CONTROL_SIZE / 2,
+          top: dockRect.top,
+        },
+        {
+          left: anchor.left + anchor.width,
+          top: dockRect.bottom + DOCK_EDGE_GAP,
+        },
+      ]
+    : [preferred];
+  const resolveCandidate = (candidate) => {
+    if (!stageArea) {
+      return {
+        left: candidate.left,
+        top: Math.max(DOCK_EDGE_GAP, candidate.top),
+      };
+    }
+
+    const halfSize = CONTROL_SIZE / 2;
     return {
-      left: candidate.left,
-      top: Math.max(DOCK_EDGE_GAP, candidate.top),
+      left: clamp(
+        candidate.left,
+        DOCK_EDGE_GAP + halfSize,
+        Math.max(DOCK_EDGE_GAP + halfSize, stageArea.width - DOCK_EDGE_GAP - halfSize),
+      ),
+      top: clamp(
+        candidate.top,
+        DOCK_EDGE_GAP,
+        Math.max(DOCK_EDGE_GAP, stageArea.height - DOCK_EDGE_GAP - CONTROL_SIZE),
+      ),
     };
+  };
+  const resolved = candidates.map(resolveCandidate);
+  const isClearCandidate = (layout) => {
+    const rectangle = getControlRect(layout);
+    return (!stageArea || rectangleIsInsideStage(rectangle, stageArea))
+      && (!dockRect || rectanglesHaveGap(rectangle, dockRect))
+      && (!stageArea?.obstacle || !rectanglesIntersect(rectangle, stageArea.obstacle));
+  };
+  const clearCandidate = resolved.find(isClearCandidate);
+  if (clearCandidate) return clearCandidate;
+
+  if (stageArea) {
+    const fallbackCandidate = getSafeControlCandidates(
+      preferred,
+      dockRect,
+      stageArea,
+    )
+      .map(resolveCandidate)
+      .sort((first, second) => (
+        getSquaredDistance(first, preferred) - getSquaredDistance(second, preferred)
+      ))
+      .find(isClearCandidate);
+    if (fallbackCandidate) return fallbackCandidate;
   }
 
-  const halfSize = CONTROL_SIZE / 2;
-  const left = clamp(
-    candidate.left,
-    DOCK_EDGE_GAP + halfSize,
-    Math.max(DOCK_EDGE_GAP + halfSize, stageArea.width - DOCK_EDGE_GAP - halfSize),
-  );
-  const maxTop = Math.max(DOCK_EDGE_GAP, stageArea.height - DOCK_EDGE_GAP - CONTROL_SIZE);
-  let top = clamp(candidate.top, DOCK_EDGE_GAP, maxTop);
+  return null;
+}
 
-  if (stageArea.obstacle && rectanglesIntersect(
-    {
-      bottom: top + CONTROL_SIZE,
-      left: left - halfSize,
-      right: left + halfSize,
-      top,
-    },
-    stageArea.obstacle,
-  )) {
-    top = clamp(
-      Math.max(stageArea.obstacle.bottom + DOCK_EDGE_GAP, anchor.top + anchor.height + DOCK_EDGE_GAP),
-      DOCK_EDGE_GAP,
-      maxTop,
-    );
-  }
-
-  return { left, top };
+export function getPersonalizationControlsLayout(candidate, anchor, stageArea) {
+  const dock = getPersonalizationDockLayout(candidate, anchor, stageArea);
+  const dockRect = getDockRect(dock);
+  const dockIsClear = (!stageArea || rectangleIsInsideStage(dockRect, stageArea))
+    && (!stageArea?.obstacle || !rectanglesIntersect(dockRect, stageArea.obstacle));
+  const rotateHandle = dockIsClear
+    ? getPersonalizationRotateHandleLayout(
+        anchor,
+        stageArea,
+        dockRect,
+      )
+    : null;
+  return {
+    collisionFree: dockIsClear && rotateHandle !== null,
+    dock,
+    rotateHandle,
+  };
 }
 
 export function measurePersonalizationStageArea(overlay) {
@@ -119,6 +169,86 @@ export function personalizationStageAreasEqual(first, second) {
 
 function getGridSize(count) {
   return count * CONTROL_SIZE + (count - 1) * CONTROL_GAP;
+}
+
+function getDockRect(layout) {
+  const rows = Math.ceil(CONTROL_COUNT / layout.columns);
+  const width = getGridSize(layout.columns);
+  const height = getGridSize(rows);
+  return {
+    bottom: layout.top + height,
+    left: layout.left - width / 2,
+    right: layout.left + width / 2,
+    top: layout.top,
+  };
+}
+
+function getControlRect(layout) {
+  const halfSize = CONTROL_SIZE / 2;
+  return {
+    bottom: layout.top + CONTROL_SIZE,
+    left: layout.left - halfSize,
+    right: layout.left + halfSize,
+    top: layout.top,
+  };
+}
+
+function getSafeControlCandidates(preferred, dockRect, stageArea) {
+  const halfSize = CONTROL_SIZE / 2;
+  const horizontalPositions = [
+    preferred.left,
+    DOCK_EDGE_GAP + halfSize,
+    stageArea.width - DOCK_EDGE_GAP - halfSize,
+  ];
+  const verticalPositions = [
+    preferred.top,
+    DOCK_EDGE_GAP,
+    stageArea.height - DOCK_EDGE_GAP - CONTROL_SIZE,
+  ];
+
+  if (dockRect) {
+    horizontalPositions.push(
+      dockRect.left - DOCK_EDGE_GAP - halfSize,
+      dockRect.right + DOCK_EDGE_GAP + halfSize,
+    );
+    verticalPositions.push(
+      dockRect.top - DOCK_EDGE_GAP - CONTROL_SIZE,
+      dockRect.bottom + DOCK_EDGE_GAP,
+    );
+  }
+
+  if (stageArea.obstacle) {
+    horizontalPositions.push(
+      stageArea.obstacle.left - halfSize,
+      stageArea.obstacle.right + halfSize,
+    );
+    verticalPositions.push(
+      stageArea.obstacle.top - CONTROL_SIZE,
+      stageArea.obstacle.bottom,
+    );
+  }
+
+  return verticalPositions.flatMap((top) => (
+    horizontalPositions.map((left) => ({ left, top }))
+  ));
+}
+
+function getSquaredDistance(first, second) {
+  return (first.left - second.left) ** 2 + (first.top - second.top) ** 2;
+}
+
+function rectangleIsInsideStage(rectangle, stageArea) {
+  return rectangle.left >= DOCK_EDGE_GAP
+    && rectangle.right <= stageArea.width - DOCK_EDGE_GAP
+    && rectangle.top >= DOCK_EDGE_GAP
+    && rectangle.bottom <= stageArea.height - DOCK_EDGE_GAP;
+}
+
+function rectanglesHaveGap(first, second, gap = DOCK_EDGE_GAP) {
+  return first.right + gap <= second.left
+    || first.left >= second.right + gap
+    || first.bottom + gap <= second.top
+    || first.top >= second.bottom + gap;
 }
 
 function clamp(value, minimum, maximum) {

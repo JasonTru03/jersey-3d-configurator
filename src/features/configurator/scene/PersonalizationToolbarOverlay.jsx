@@ -6,8 +6,7 @@ import {
   updateRotationGesture,
 } from './personalizationRotation.js';
 import {
-  getPersonalizationDockLayout,
-  getPersonalizationRotateHandleLayout,
+  getPersonalizationControlsLayout,
   measurePersonalizationStageArea,
   personalizationStageAreasEqual,
 } from './personalizationToolbarLayout.js';
@@ -72,6 +71,7 @@ export function PersonalizationToolbarOverlay({
   const deleteFocusRef = useRef(null);
   const resizeStart = useRef(null);
   const rotationStart = useRef(null);
+  const lastValidControlsLayoutRef = useRef(null);
   const rotationGestureEndRef = useRef(onRotationGestureEnd);
   const rotationGestureCancelRef = useRef(onRotationGestureCancel);
   const resizeGestureCancelRef = useRef(onResizeGestureCancel);
@@ -139,10 +139,53 @@ export function PersonalizationToolbarOverlay({
     };
   }, [anchorVisible, itemKey]);
 
-  if (!item || !anchorVisible) return null;
-  const dockPosition = getDockPosition(anchor);
-  const dockLayout = getPersonalizationDockLayout(dockPosition, anchor, stageArea);
-  const rotateHandleLayout = getPersonalizationRotateHandleLayout(anchor, stageArea);
+  const controlsLayout = item && anchorVisible
+    ? getPersonalizationControlsLayout(
+        getDockPosition(anchor),
+        anchor,
+        stageArea,
+      )
+    : null;
+
+  useLayoutEffect(() => {
+    if (!controlsLayout?.collisionFree || !stageArea) return;
+    lastValidControlsLayoutRef.current = {
+      itemKey,
+      layout: controlsLayout,
+    };
+  }, [controlsLayout, itemKey, stageArea]);
+
+  if (!controlsLayout) return null;
+  const lastValidControlsLayout = lastValidControlsLayoutRef.current?.itemKey === itemKey
+    ? lastValidControlsLayoutRef.current.layout
+    : null;
+  const currentLayoutIsCollisionFree = Boolean(stageArea && controlsLayout.collisionFree);
+  const provisionalControlsLayout = !stageArea && controlsLayout.collisionFree
+    ? controlsLayout
+    : null;
+  const renderedControlsLayout = currentLayoutIsCollisionFree
+    ? controlsLayout
+    : (lastValidControlsLayout ?? provisionalControlsLayout);
+  const overlayStyle = {
+    '--print-left': `${anchor.left}px`,
+    '--print-top': `${anchor.top}px`,
+    '--print-width': `${anchor.width}px`,
+    '--print-height': `${anchor.height}px`,
+  };
+  if (!renderedControlsLayout) {
+    return (
+      <div
+        aria-label="Selected personalization controls"
+        className="print-toolbar-overlay"
+        data-layout-collision-free="false"
+        ref={overlayRef}
+        role="group"
+        style={overlayStyle}
+      />
+    );
+  }
+  const dockLayout = renderedControlsLayout.dock;
+  const rotateHandleLayout = renderedControlsLayout.rotateHandle;
 
   const finishResize = (event, mode) => {
     const start = resizeStart.current;
@@ -329,14 +372,10 @@ export function PersonalizationToolbarOverlay({
     <div
       aria-label="Selected personalization controls"
       className="print-toolbar-overlay"
+      data-layout-collision-free={currentLayoutIsCollisionFree}
       ref={overlayRef}
       role="group"
-      style={{
-        '--print-left': `${anchor.left}px`,
-        '--print-top': `${anchor.top}px`,
-        '--print-width': `${anchor.width}px`,
-        '--print-height': `${anchor.height}px`,
-      }}
+      style={overlayStyle}
     >
       <div className="print-selection-frame" data-testid="print-selection-frame" />
       <div

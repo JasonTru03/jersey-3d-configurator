@@ -71,6 +71,100 @@ function disposeMeshes(meshes) {
   });
 }
 
+function createFrameScheduler() {
+  let nextId = 0;
+  const callbacks = new Map();
+  return {
+    cancelFrame: vi.fn((id) => callbacks.delete(id)),
+    flushLatest() {
+      const entries = [...callbacks.entries()];
+      callbacks.clear();
+      entries.forEach(([, callback]) => callback(0));
+    },
+    pendingCount() {
+      return callbacks.size;
+    },
+    requestFrame: vi.fn((callback) => {
+      const id = ++nextId;
+      callbacks.set(id, callback);
+      return id;
+    }),
+  };
+}
+
+function createDragEditor({
+  cancelFrame,
+  onDecorationsChange = vi.fn(),
+  requestFrame,
+} = {}) {
+  const scene = new THREE.Scene();
+  const domElement = document.createElement('canvas');
+  domElement.getBoundingClientRect = () => ({
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
+  });
+  const garment = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+  );
+  garment.updateMatrixWorld(true);
+  const placement = {
+    region: 'front',
+    position: { x: 0, y: 0, z: 1 },
+    normal: { x: 0, y: 0, z: 1 },
+  };
+  const decoration = {
+    id: 'crest',
+    kind: 'pattern',
+    source: 'crest',
+    label: 'Crest',
+    region: 'front',
+    placement,
+    rotation: 17,
+    scale: 0.8,
+  };
+  const surface = createDecalSurface(new THREE.Texture(), garment, placement, decoration);
+  surface.userData.decorationId = decoration.id;
+  surface.userData.garmentMesh = garment;
+  surface.userData.placement = placement;
+  const editor = new DecorationEditor({
+    camera: createFrontCamera(),
+    cancelFrame,
+    domElement,
+    onDecorationsChange,
+    onSelectionChange: vi.fn(),
+    requestFrame,
+    scene,
+  });
+  editor.group.add(surface);
+  editor.setGarmentMeshes([garment]);
+  editor.surfaces.set(decoration.id, surface);
+  editor.decorations = [decoration];
+  editor.pickDecoration = () => ({
+    decoration,
+    point: new THREE.Vector3(0, 0, 1),
+  });
+  editor.pickGarment = ({ clientX, clientY }) => ({
+    point: new THREE.Vector3((clientX - 100) / 100, (clientY - 100) / 100, 1),
+    face: { normal: new THREE.Vector3(0, 0, 1) },
+    object: garment,
+  });
+  cleanupAfterTest(() => {
+    editor.dispose();
+    disposeMeshes([garment]);
+  });
+  return {
+    decoration,
+    editor,
+    garment,
+    onDecorationsChange,
+    placement,
+    surface,
+  };
+}
+
 describe('decoration editor geometry', () => {
   it('picks only the front artwork visible above the garment', () => {
     const editor = createEditorFixture();
@@ -194,29 +288,8 @@ describe('decoration editor geometry', () => {
   });
 
   it('does not start moving an artwork until its pointer moves beyond the drag threshold', () => {
-    const onDecorationsChange = vi.fn();
-    const decoration = {
-      id: 'crest',
-      kind: 'pattern',
-      source: 'crest',
-      label: 'Crest',
-      region: 'front',
-      placement: { region: 'front', position: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
-    };
-    const editor = new DecorationEditor({
-      camera: new THREE.PerspectiveCamera(),
-      domElement: document.createElement('canvas'),
-      scene: new THREE.Scene(),
-      onDecorationsChange,
-      onSelectionChange: vi.fn(),
-    });
-    editor.decorations = [decoration];
-    editor.pickDecoration = () => decoration;
-    editor.pickGarment = vi.fn(() => ({
-      point: new THREE.Vector3(0.2, 0.3, 1),
-      face: { normal: new THREE.Vector3(0, 0, 1) },
-      object: new THREE.Mesh(),
-    }));
+    const frameScheduler = createFrameScheduler();
+    const { editor, onDecorationsChange } = createDragEditor(frameScheduler);
 
     editor.handlePointerDown({ clientX: 100, clientY: 100 });
     expect(editor.isEditing()).toBe(true);
@@ -227,9 +300,104 @@ describe('decoration editor geometry', () => {
 
     editor.handlePointerDown({ clientX: 100, clientY: 100 });
     expect(editor.handlePointerMove({ clientX: 105, clientY: 103 })).toBe(true);
+    frameScheduler.flushLatest();
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+    expect(editor.handlePointerUp()).toBe(true);
     expect(onDecorationsChange).toHaveBeenCalledOnce();
+  });
+
+  it('coalesces artwork drag previews into one frame and persists only on pointer up', () => {
+    const frameScheduler = createFrameScheduler();
+    const {
+      decoration,
+      editor,
+      onDecorationsChange,
+      surface,
+    } = createDragEditor(frameScheduler);
+    const originalGeometry = surface.geometry;
+    const originalTexture = surface.material.map;
+
+    editor.handlePointerDown({ clientX: 100, clientY: 100 });
+    for (let index = 0; index < 60; index += 1) {
+      expect(editor.handlePointerMove({
+        clientX: 105 + index,
+        clientY: 103 + index,
+      })).toBe(true);
+    }
+
+    expect(frameScheduler.requestFrame).toHaveBeenCalledOnce();
+    expect(frameScheduler.pendingCount()).toBe(1);
+    frameScheduler.flushLatest();
+    expect(frameScheduler.pendingCount()).toBe(0);
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+    expect(surface.geometry).not.toBe(originalGeometry);
+    expect(surface.material.map).toBe(originalTexture);
+    expect(surface.userData.rotation).toBe(decoration.rotation);
+    expect(editor.selectedId).toBe(decoration.id);
+
+    expect(editor.handlePointerUp()).toBe(true);
+    expect(onDecorationsChange).toHaveBeenCalledOnce();
+    expect(onDecorationsChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: decoration.id,
+        kind: decoration.kind,
+        source: decoration.source,
+        rotation: decoration.rotation,
+        scale: decoration.scale,
+        placement: expect.objectContaining({
+          position: { x: 0.64, y: 0.62, z: 1 },
+        }),
+      }),
+    ]);
+  });
+
+  it('restores the original artwork surface on pointer cancel without persisting', () => {
+    const frameScheduler = createFrameScheduler();
+    const {
+      editor,
+      onDecorationsChange,
+      placement,
+      surface,
+    } = createDragEditor(frameScheduler);
+
+    editor.handlePointerDown({ clientX: 100, clientY: 100 });
+    editor.handlePointerMove({ clientX: 125, clientY: 130 });
+    frameScheduler.flushLatest();
+    expect(surface.userData.placement.position).toEqual({ x: 0.25, y: 0.3, z: 1 });
+
+    expect(editor.handlePointerCancel()).toBe(true);
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+    expect(surface.userData.placement).toEqual(placement);
+    expect(editor.isEditing()).toBe(false);
+  });
+
+  it('handles a missing drag surface safely and cancels pending frames on dispose', () => {
+    const frameScheduler = createFrameScheduler();
+    const {
+      decoration,
+      editor,
+      onDecorationsChange,
+      surface,
+    } = createDragEditor(frameScheduler);
+
+    editor.handlePointerDown({ clientX: 100, clientY: 100 });
+    editor.handlePointerMove({ clientX: 125, clientY: 130 });
+    editor.surfaces.delete(decoration.id);
+
+    expect(() => frameScheduler.flushLatest()).not.toThrow();
+    expect(editor.handlePointerUp()).toBe(true);
+    expect(onDecorationsChange).not.toHaveBeenCalled();
+
+    editor.surfaces.set(decoration.id, surface);
+    editor.handlePointerDown({ clientX: 100, clientY: 100 });
+    editor.handlePointerMove({ clientX: 140, clientY: 145 });
+    expect(frameScheduler.pendingCount()).toBe(1);
 
     editor.dispose();
+
+    expect(frameScheduler.pendingCount()).toBe(0);
+    expect(frameScheduler.cancelFrame).toHaveBeenCalledOnce();
+    expect(onDecorationsChange).not.toHaveBeenCalled();
   });
 
   it('uses a four pixel threshold to distinguish a click from an artwork drag', () => {
@@ -290,22 +458,14 @@ describe('decoration editor geometry', () => {
   });
 
   it('preserves the grab offset when the first movement crosses the drag threshold', () => {
-    const onDecorationsChange = vi.fn();
-    const decoration = {
-      id: 'crest',
-      kind: 'pattern',
-      source: 'crest',
-      label: 'Crest',
+    const frameScheduler = createFrameScheduler();
+    const { decoration, editor, onDecorationsChange } = createDragEditor(frameScheduler);
+    decoration.placement = {
       region: 'front',
-      placement: { region: 'front', position: { x: 0.2, y: 0.1, z: 1 }, normal: { x: 0, y: 0, z: 1 } },
+      position: { x: 0.2, y: 0.1, z: 1 },
+      normal: { x: 0, y: 0, z: 1 },
     };
-    const editor = new DecorationEditor({
-      camera: new THREE.PerspectiveCamera(),
-      domElement: document.createElement('canvas'),
-      scene: new THREE.Scene(),
-      onDecorationsChange,
-      onSelectionChange: vi.fn(),
-    });
+    decoration.rotation = 0;
     editor.decorations = [decoration];
     editor.pickDecoration = () => ({ decoration, point: new THREE.Vector3(0.35, 0.18, 1.02) });
     editor.pickGarment = () => ({
@@ -316,12 +476,12 @@ describe('decoration editor geometry', () => {
 
     editor.handlePointerDown({ clientX: 100, clientY: 100 });
     editor.handlePointerMove({ clientX: 105, clientY: 100 });
+    frameScheduler.flushLatest();
+    editor.handlePointerUp();
 
     expect(onDecorationsChange).toHaveBeenCalledWith([expect.objectContaining({
       placement: expect.objectContaining({ position: { x: 0.55, y: 0.52, z: 1 } }),
     })]);
-
-    editor.dispose();
   });
 
   it('returns the stored world-facing decal normal for camera focus', () => {

@@ -120,4 +120,12 @@ describe('wide configurator viewport layout', () => {
     expect(ruleBody(css, '.personalize-elements .personalize-element-delete:disabled'))
       .toContain('cursor: not-allowed');
   });
+
+  it('puts player side on its own row before name and number', () => {
+    expect(ruleBody(css, '.print-fields')).toContain('grid-template-columns: 1fr 86px');
+    expect(ruleBody(
+      css,
+      '.personalize-editor .print-fields > .personalization-side-selector',
+    )).toContain('grid-column: 1 / -1');
+  });
 });

@@ -82,10 +82,10 @@ describe('garment artwork default placement', () => {
     editor.update([decoration], decoration.id, []);
 
     const surface = editor.surfaces.get(decoration.id);
-    const positions = surface.geometry.getAttribute('position');
     surface.geometry.computeBoundingBox();
     const geometryCenter = surface.geometry.boundingBox.getCenter(new THREE.Vector3());
-    expect(positions.count).toBeGreaterThan(0);
+    expect(surface.material.side).toBe(THREE.FrontSide);
+    expectGeometryToFace(surface.geometry, expectedNormalZ);
     expect(geometryCenter.x).toBeCloseTo(0, 1);
     expect(geometryCenter.y).toBeCloseTo(getRegionFrame(region).anchor.y, 1);
     expect(Math.sign(geometryCenter.z)).toBe(expectedNormalZ);
@@ -103,6 +103,35 @@ describe('garment artwork default placement', () => {
     editor.dispose();
   });
 });
+
+function expectGeometryToFace(geometry, expectedNormalZ) {
+  const positions = geometry.getAttribute('position');
+  expect(positions.count).toBeGreaterThan(0);
+
+  const expectedNormal = new THREE.Vector3(0, 0, expectedNormalZ);
+  const vertexA = new THREE.Vector3();
+  const vertexB = new THREE.Vector3();
+  const vertexC = new THREE.Vector3();
+  const edgeAB = new THREE.Vector3();
+  const edgeAC = new THREE.Vector3();
+  const faceNormal = new THREE.Vector3();
+  const indexCount = geometry.index?.count ?? positions.count;
+
+  for (let index = 0; index < indexCount; index += 3) {
+    const vertexIndexA = geometry.index?.getX(index) ?? index;
+    const vertexIndexB = geometry.index?.getX(index + 1) ?? index + 1;
+    const vertexIndexC = geometry.index?.getX(index + 2) ?? index + 2;
+    vertexA.fromBufferAttribute(positions, vertexIndexA);
+    vertexB.fromBufferAttribute(positions, vertexIndexB);
+    vertexC.fromBufferAttribute(positions, vertexIndexC);
+    edgeAB.subVectors(vertexB, vertexA);
+    edgeAC.subVectors(vertexC, vertexA);
+    faceNormal.crossVectors(edgeAB, edgeAC);
+    if (faceNormal.lengthSq() === 0) continue;
+
+    expect(faceNormal.normalize().dot(expectedNormal)).toBeGreaterThanOrEqual(0.08);
+  }
+}
 
 function createPlacementCases(modelName) {
   return [

@@ -62,6 +62,27 @@ describe('camera-visible surface policy', () => {
     expect(isIntersectionFacingRay(createHit({ distance: 1 }), new Vector3())).toBe(false);
   });
 
+  it('fails closed for invalid facing thresholds while preserving valid boundary values', () => {
+    const rayDirection = new Vector3(0, 0, -1);
+    const frontHit = createHit({ distance: 1, normal: new Vector3(0, 0, 1) });
+    const backHit = createHit({ distance: 1, normal: new Vector3(0, 0, -1) });
+    const tangentHit = createHit({ distance: 1, normal: new Vector3(1, 0, 0) });
+
+    for (const [threshold, hit] of [
+      [-1, backHit],
+      [1.01, frontHit],
+      [Infinity, frontHit],
+      [Number.NaN, frontHit],
+      ['1', frontHit],
+    ]) {
+      expect(isIntersectionFacingRay(hit, rayDirection, threshold)).toBe(false);
+    }
+
+    expect(isIntersectionFacingRay(tangentHit, rayDirection, 0)).toBe(true);
+    expect(isIntersectionFacingRay(frontHit, rayDirection, 0.08)).toBe(true);
+    expect(isIntersectionFacingRay(frontHit, rayDirection, 1)).toBe(true);
+  });
+
   it('skips a nearer back-facing garment hit and returns the next outward hit', () => {
     const garmentMeshes = [createMesh()];
     const backHit = createHit({ distance: 1, normal: new Vector3(0, 0, -1) });
@@ -113,6 +134,51 @@ describe('camera-visible surface policy', () => {
       garmentMeshes,
       raycaster,
     })).toBe(elementHit);
+  });
+
+  it('fails closed for invalid surface epsilons while preserving valid tolerance behavior', () => {
+    const elements = [createMesh()];
+    const garmentMeshes = [createMesh()];
+    const hiddenElementHit = createHit({ distance: 3 });
+    const nearElementHit = createHit({ distance: 2.03 });
+    const garmentHit = createHit({ distance: 2 });
+    const direction = new Vector3(0, 0, -1);
+    const hiddenRaycaster = createRaycaster(
+      direction,
+      new Map([
+        [elements, [hiddenElementHit]],
+        [garmentMeshes, [garmentHit]],
+      ]),
+    );
+    const nearRaycaster = createRaycaster(
+      direction,
+      new Map([
+        [elements, [nearElementHit]],
+        [garmentMeshes, [garmentHit]],
+      ]),
+    );
+
+    for (const surfaceEpsilon of [-1, Infinity, Number.NaN, '1']) {
+      expect(findVisibleElementIntersection({
+        elements,
+        garmentMeshes,
+        raycaster: hiddenRaycaster,
+        surfaceEpsilon,
+      })).toBeNull();
+    }
+
+    expect(findVisibleElementIntersection({
+      elements,
+      garmentMeshes,
+      raycaster: nearRaycaster,
+      surfaceEpsilon: 0,
+    })).toBeNull();
+    expect(findVisibleElementIntersection({
+      elements,
+      garmentMeshes,
+      raycaster: nearRaycaster,
+      surfaceEpsilon: 0.04,
+    })).toBe(nearElementHit);
   });
 
   it('accepts a genuinely visible oblique side element when that ray has no garment hit', () => {

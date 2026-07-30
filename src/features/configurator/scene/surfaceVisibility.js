@@ -15,6 +15,14 @@ export function isIntersectionFacingRay(
   rayDirection,
   threshold = SURFACE_FACING_THRESHOLD,
 ) {
+  if (
+    typeof threshold !== 'number'
+    || !Number.isFinite(threshold)
+    || threshold < 0
+    || threshold > 1
+  ) {
+    return false;
+  }
   if (!(rayDirection instanceof Vector3) || rayDirection.lengthSq() === 0) return false;
 
   const worldNormal = getWorldIntersectionNormal(hit);
@@ -49,7 +57,10 @@ export function findVisibleElementIntersection({
   surfaceEpsilon = ELEMENT_SURFACE_EPSILON,
 } = {}) {
   if (
-    !raycaster
+    typeof surfaceEpsilon !== 'number'
+    || !Number.isFinite(surfaceEpsilon)
+    || surfaceEpsilon < 0
+    || !raycaster
     || typeof raycaster.intersectObjects !== 'function'
     || !Array.isArray(elements)
     || elements.length === 0

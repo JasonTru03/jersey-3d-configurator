@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import { clampDecorationTransform, patchDecoration, resolveDecorationAsset } from '../config/decorations.js';
-import { filterFacingDecalTriangles } from './personalizationDecal.js';
+import {
+  filterFacingDecalTriangles,
+  getPersonalizationDecalOrientation,
+} from './personalizationDecal.js';
 import { findNearestFacingIntersection, findVisibleElementIntersection } from './surfaceVisibility.js';
 
 const REGION_OFFSET = 0.026;
@@ -237,10 +240,10 @@ export function applyDecorationGrabOffset(placement, grabOffset, rotation = 0) {
 }
 
 function getDecalOrientation(placement, rotation = 0) {
-  const normal = toVector(placement?.normal ?? { x: 0, y: 0, z: 1 }).normalize();
-  return new THREE.Quaternion()
-    .setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
-    .multiply(new THREE.Quaternion().setFromAxisAngle(normal, THREE.MathUtils.degToRad(rotation ?? 0)));
+  return getPersonalizationDecalOrientation(
+    placement?.normal ?? { x: 0, y: 0, z: 1 },
+    rotation,
+  );
 }
 
 function findGarmentMeshForPlacement(meshes, placement) {

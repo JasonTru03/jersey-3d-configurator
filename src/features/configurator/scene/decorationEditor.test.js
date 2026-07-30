@@ -15,6 +15,7 @@ import {
   toRegionTransform,
   toSpriteTransform,
 } from './decorationEditor.js';
+import { getPersonalizationDecalOrientation } from './personalizationDecal.js';
 
 const fixtureCleanups = [];
 
@@ -441,9 +442,7 @@ describe('decoration editor geometry', () => {
 
     const offset = getDecorationGrabOffset(pointerHit, originalPlacement, rotation);
     const nextPlacement = applyDecorationGrabOffset(nextGarmentHit, offset, rotation);
-    const orientation = new THREE.Quaternion()
-      .setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0))
-      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), THREE.MathUtils.degToRad(rotation)));
+    const orientation = getPersonalizationDecalOrientation(nextGarmentHit.normal, rotation);
     const resolvedGrabPoint = new THREE.Vector3(
       nextPlacement.position.x,
       nextPlacement.position.y,
@@ -455,6 +454,31 @@ describe('decoration editor geometry', () => {
       nextGarmentHit.position.y,
       nextGarmentHit.position.z,
     ))).toBeLessThan(0.0002);
+  });
+
+  it('keeps artwork local up aligned with garment up across curved back-facing normals', () => {
+    const garmentUp = new THREE.Vector3(0, 1, 0);
+    [
+      new THREE.Vector3(0, 0, -1),
+      new THREE.Vector3(0, 0.02, -0.9998).normalize(),
+      new THREE.Vector3(0, -0.02, -0.9998).normalize(),
+    ].forEach((normal) => {
+      const position = new THREE.Vector3(0, 0, -1);
+      const projectedUp = garmentUp.clone()
+        .addScaledVector(normal, -garmentUp.dot(normal))
+        .normalize();
+      const offset = getDecorationGrabOffset(
+        position.clone().addScaledVector(projectedUp, 0.2),
+        {
+          region: 'back',
+          position: { x: position.x, y: position.y, z: position.z },
+          normal: { x: normal.x, y: normal.y, z: normal.z },
+        },
+      );
+
+      expect(new THREE.Vector3(offset.x, offset.y, offset.z)
+        .distanceTo(new THREE.Vector3(0, 0.2, 0))).toBeLessThan(0.000001);
+    });
   });
 
   it('preserves the grab offset when the first movement crosses the drag threshold', () => {

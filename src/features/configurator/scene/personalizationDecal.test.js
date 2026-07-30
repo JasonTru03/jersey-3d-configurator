@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import {
   createPersonalizationDecalGeometry,
+  filterFacingDecalTriangles,
   getPersonalizationDecalOrientation,
   getPersonalizationAlphaMask,
   getPersonalizationSurfaceFromIntersection,
@@ -253,6 +254,37 @@ describe('personalization decal surface resolution', () => {
 });
 
 describe('personalization decal geometry', () => {
+  it('keeps only triangles facing the requested outward normal', () => {
+    const source = new THREE.BufferGeometry();
+    source.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0,
+      1, 0, 0,
+      0, 1, 0,
+      0, 0, 0,
+      0, 1, 0,
+      1, 0, 0,
+    ], 3));
+    source.setAttribute('uv', new THREE.Float32BufferAttribute([
+      0, 0,
+      1, 0,
+      0, 1,
+      0, 0,
+      0, 1,
+      1, 0,
+    ], 2));
+
+    const geometry = filterFacingDecalTriangles(
+      source,
+      new THREE.Vector3(0, 0, 1),
+      1,
+    );
+
+    expect(geometry.getAttribute('position').count).toBe(3);
+    expect(geometry.getAttribute('uv').count).toBe(3);
+    source.dispose();
+    geometry.dispose();
+  });
+
   it('creates projected vertices with requested aspect, scale, and rotation', () => {
     const garment = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 0.4));
     garment.updateMatrixWorld(true);
@@ -444,6 +476,57 @@ describe('personalization decal geometry', () => {
     });
 
     expect(geometry.getAttribute('position').count).toBeGreaterThan(0);
+    geometry.dispose();
+  });
+
+  it('keeps a mirrored personalization decal front-facing from the outward side', () => {
+    const garment = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 0.4),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    garment.scale.x = -1;
+    garment.updateMatrixWorld(true);
+    const surface = resolvePersonalizationSurface([garment], {
+      x: 0,
+      y: 0,
+      z: 0.5,
+      normal: { x: 0, y: 0, z: 1 },
+    });
+    const geometry = createPersonalizationDecalGeometry({
+      height: 1,
+      mesh: surface.mesh,
+      normal: surface.normal,
+      position: surface.point,
+      rotation: 0,
+      scale: 1,
+      width: 1,
+    });
+    const decal = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({ side: THREE.FrontSide }),
+    );
+    decal.updateMatrixWorld(true);
+    const outsideHits = new THREE.Raycaster(
+      surface.point.clone().addScaledVector(surface.normal, 1),
+      surface.normal.clone().negate(),
+    ).intersectObject(decal, false);
+    const position = geometry.getAttribute('position');
+    const outwardDots = [];
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    for (let index = 0; index + 2 < position.count; index += 3) {
+      a.fromBufferAttribute(position, index);
+      b.fromBufferAttribute(position, index + 1);
+      c.fromBufferAttribute(position, index + 2);
+      outwardDots.push(
+        b.clone().sub(a).cross(c.clone().sub(a)).normalize().dot(surface.normal),
+      );
+    }
+
+    expect(garment.matrixWorld.determinant()).toBeLessThan(0);
+    expect(outsideHits.length).toBeGreaterThan(0);
+    expect(outwardDots.every((dot) => dot >= 0.08)).toBe(true);
     geometry.dispose();
   });
 

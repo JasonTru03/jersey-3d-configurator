@@ -16,11 +16,127 @@ import {
   toSpriteTransform,
 } from './decorationEditor.js';
 
+const fixtureCleanups = [];
+
 afterEach(() => {
   vi.useRealTimers();
+  while (fixtureCleanups.length) fixtureCleanups.pop()();
 });
 
+function cleanupAfterTest(callback) {
+  fixtureCleanups.push(callback);
+}
+
+function createFrontCamera() {
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+  camera.position.set(0, 0, 2);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+  return camera;
+}
+
+function createEditorFixture() {
+  const domElement = document.createElement('canvas');
+  domElement.getBoundingClientRect = () => ({
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
+  });
+  const editor = new DecorationEditor({
+    camera: createFrontCamera(),
+    domElement,
+    scene: new THREE.Scene(),
+  });
+  cleanupAfterTest(() => editor.dispose());
+  return editor;
+}
+
+function createPlane(z, { backFacing = false } = {}) {
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+  );
+  mesh.position.z = z;
+  if (backFacing) mesh.rotation.y = Math.PI;
+  mesh.updateMatrixWorld(true);
+  return mesh;
+}
+
+function disposeMeshes(meshes) {
+  meshes.forEach((mesh) => {
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  });
+}
+
 describe('decoration editor geometry', () => {
+  it('picks only the front artwork visible above the garment', () => {
+    const editor = createEditorFixture();
+    const garment = createPlane(0);
+    const frontSurface = createPlane(0.02);
+    const hiddenSurface = createPlane(-0.08);
+    const frontDecoration = { id: 'front-artwork' };
+    const hiddenDecoration = { id: 'hidden-artwork' };
+    frontSurface.userData.decorationId = frontDecoration.id;
+    hiddenSurface.userData.decorationId = hiddenDecoration.id;
+    editor.setGarmentMeshes([garment]);
+    editor.surfaces.set(frontDecoration.id, frontSurface);
+    editor.surfaces.set(hiddenDecoration.id, hiddenSurface);
+    editor.decorations = [frontDecoration, hiddenDecoration];
+    cleanupAfterTest(() => disposeMeshes([garment]));
+
+    const picked = editor.pickDecoration({ clientX: 50, clientY: 50 });
+
+    expect(picked?.decoration).toBe(frontDecoration);
+    expect(picked?.point.z).toBeCloseTo(0.02);
+  });
+
+  it('does not pick artwork hidden behind the garment', () => {
+    const editor = createEditorFixture();
+    const garment = createPlane(0);
+    const hiddenSurface = createPlane(-0.08);
+    const hiddenDecoration = { id: 'hidden-artwork' };
+    hiddenSurface.userData.decorationId = hiddenDecoration.id;
+    editor.setGarmentMeshes([garment]);
+    editor.surfaces.set(hiddenDecoration.id, hiddenSurface);
+    editor.decorations = [hiddenDecoration];
+    cleanupAfterTest(() => disposeMeshes([garment]));
+
+    expect(editor.pickDecoration({ clientX: 50, clientY: 50 })).toBeNull();
+  });
+
+  it('skips a nearer back-facing garment hit while picking a drag surface', () => {
+    const editor = createEditorFixture();
+    const backFacingMesh = createPlane(0.2, { backFacing: true });
+    const outwardMesh = createPlane(0);
+    const createHit = (distance, point, object) => ({
+      distance,
+      point,
+      object,
+      face: {
+        a: 0,
+        b: 1,
+        c: 2,
+        normal: new THREE.Vector3(0, 0, 1),
+        materialIndex: 0,
+      },
+      faceIndex: 0,
+      uv: new THREE.Vector2(0.5, 0.5),
+    });
+    const backFacingHit = createHit(1.8, new THREE.Vector3(0, 0, 0.2), backFacingMesh);
+    const outwardHit = createHit(2, new THREE.Vector3(0, 0, 0), outwardMesh);
+    editor.setGarmentMeshes([backFacingMesh, outwardMesh]);
+    vi.spyOn(editor.raycaster, 'intersectObjects').mockReturnValue([
+      backFacingHit,
+      outwardHit,
+    ]);
+    cleanupAfterTest(() => disposeMeshes([backFacingMesh, outwardMesh]));
+
+    expect(editor.pickGarment({ clientX: 50, clientY: 50 })).toBe(outwardHit);
+  });
+
   it('returns a decoration geometry center in world coordinates', () => {
     const scene = new THREE.Scene();
     const parent = new THREE.Group();
@@ -390,6 +506,7 @@ describe('decoration editor geometry', () => {
     expect(surface.material).toBeInstanceOf(THREE.MeshBasicMaterial);
     expect(surface.material.depthTest).toBe(true);
     expect(surface.material.depthWrite).toBe(false);
+    expect(surface.material.side).toBe(THREE.FrontSide);
   });
 
   it('derives a front artwork placement from the loaded garment mesh', () => {
@@ -400,6 +517,23 @@ describe('decoration editor geometry', () => {
       region: 'front',
       position: { x: 0, y: 0.42, z: 1 },
       normal: { x: 0, y: 0, z: 1 },
+    });
+  });
+
+  it('uses an outward-facing hit for the default artwork placement', () => {
+    const backFacingMesh = createPlane(0.8, { backFacing: true });
+    const outwardMesh = createPlane(0.4);
+    cleanupAfterTest(() => disposeMeshes([backFacingMesh, outwardMesh]));
+
+    const placement = getDefaultDecorationPlacement(
+      [backFacingMesh, outwardMesh],
+      'front',
+    );
+
+    expect(placement).toMatchObject({
+      region: 'front',
+      position: { z: 0.4 },
+      normal: { z: 1 },
     });
   });
 
@@ -433,6 +567,46 @@ describe('decoration editor geometry', () => {
     expect(surface.material.depthTest).toBe(true);
     expect(surface.material.depthWrite).toBe(false);
     expect(surface.material.polygonOffset).toBe(true);
+    expect(surface.material.side).toBe(THREE.FrontSide);
+  });
+
+  it('keeps only outward-facing triangles on a thin garment mesh', () => {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 0.04),
+      new THREE.MeshBasicMaterial(),
+    );
+    mesh.updateMatrixWorld(true);
+    const outwardNormal = new THREE.Vector3(0, 0, 1);
+    const surface = createDecalSurface(
+      new THREE.Texture(),
+      mesh,
+      {
+        region: 'front',
+        position: { x: 0, y: 0, z: 0.02 },
+        normal: { x: 0, y: 0, z: 1 },
+      },
+      { scale: 1, rotation: 0 },
+    );
+    const positions = surface.geometry.getAttribute('position');
+    const outwardDots = [];
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const edge = new THREE.Vector3();
+    const faceNormal = new THREE.Vector3();
+
+    for (let index = 0; index + 2 < positions.count; index += 3) {
+      a.fromBufferAttribute(positions, index);
+      b.fromBufferAttribute(positions, index + 1);
+      c.fromBufferAttribute(positions, index + 2);
+      faceNormal.subVectors(b, a).cross(edge.subVectors(c, a));
+      if (faceNormal.lengthSq() > 0) {
+        outwardDots.push(faceNormal.normalize().dot(outwardNormal));
+      }
+    }
+
+    expect(outwardDots.length).toBeGreaterThan(0);
+    expect(Math.min(...outwardDots)).toBeGreaterThanOrEqual(0.08);
   });
 
   it('keeps the last valid placement when a drag ray misses the garment', () => {
@@ -474,5 +648,37 @@ describe('decoration editor geometry', () => {
     });
 
     editor.dispose();
+  });
+
+  it('restores a saved placement on the outward garment mesh', () => {
+    const editor = createEditorFixture();
+    const backFacingMesh = createPlane(0.02, { backFacing: true });
+    const outwardMesh = createPlane(0);
+    const decoration = {
+      id: 'saved-badge',
+      kind: 'pattern',
+      source: 'crest',
+      label: 'Crest',
+      region: 'front',
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotation: 0,
+      placement: {
+        region: 'front',
+        position: { x: 0, y: 0, z: 0 },
+        normal: { x: 0, y: 0, z: 1 },
+      },
+    };
+    editor.setGarmentMeshes([backFacingMesh, outwardMesh]);
+    cleanupAfterTest(() => disposeMeshes([backFacingMesh, outwardMesh]));
+
+    editor.update(
+      [decoration],
+      null,
+      [{ source: 'crest', assetUrl: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E' }],
+    );
+
+    expect(editor.surfaces.get(decoration.id)?.userData.garmentMesh).toBe(outwardMesh);
   });
 });

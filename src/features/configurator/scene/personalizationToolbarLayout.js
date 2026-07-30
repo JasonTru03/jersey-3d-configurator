@@ -114,18 +114,26 @@ export function getPersonalizationRotateHandleLayout(anchor, stageArea, dockRect
     if (fallbackCandidate) return fallbackCandidate;
   }
 
-  throw new RangeError('Unable to place personalization rotation control within the stage');
+  return null;
 }
 
 export function getPersonalizationControlsLayout(candidate, anchor, stageArea) {
   const dock = getPersonalizationDockLayout(candidate, anchor, stageArea);
   const dockRect = getDockRect(dock);
-  const rotateHandle = getPersonalizationRotateHandleLayout(
-    anchor,
-    stageArea,
-    dockRect,
-  );
-  return { dock, rotateHandle };
+  const dockIsClear = (!stageArea || rectangleIsInsideStage(dockRect, stageArea))
+    && (!stageArea?.obstacle || !rectanglesIntersect(dockRect, stageArea.obstacle));
+  const rotateHandle = dockIsClear
+    ? getPersonalizationRotateHandleLayout(
+        anchor,
+        stageArea,
+        dockRect,
+      )
+    : null;
+  return {
+    collisionFree: dockIsClear && rotateHandle !== null,
+    dock,
+    rotateHandle,
+  };
 }
 
 export function measurePersonalizationStageArea(overlay) {

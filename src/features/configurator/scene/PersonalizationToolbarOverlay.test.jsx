@@ -39,10 +39,12 @@ function makeRect({ left = 0, top = 0, width = 0, height = 0 }) {
 }
 
 function renderToolbarInStage({ stageWidth, stageHeight, toolbarRect, anchor: stageAnchor }) {
+  let currentStageWidth = stageWidth;
+  let currentStageHeight = stageHeight;
   const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
   const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function getBoundingClientRect() {
     if (this.classList?.contains('print-toolbar-overlay')) {
-      return makeRect({ width: stageWidth, height: stageHeight });
+      return makeRect({ width: currentStageWidth, height: currentStageHeight });
     }
     if (this.classList?.contains('stage-toolbar') && toolbarRect) return makeRect(toolbarRect);
     return originalGetBoundingClientRect.call(this);
@@ -62,6 +64,11 @@ function renderToolbarInStage({ stageWidth, stageHeight, toolbarRect, anchor: st
   return {
     ...result,
     rerenderToolbar: (nextAnchor) => result.rerender(renderStage(nextAnchor)),
+    resizeStage: (width, height) => {
+      currentStageWidth = width;
+      currentStageHeight = height;
+      fireEvent(window, new Event('resize'));
+    },
     restoreRects: () => rectSpy.mockRestore(),
   };
 }
@@ -137,10 +144,18 @@ describe('PersonalizationToolbarOverlay', () => {
 
     try {
       const dock = screen.getByTestId('print-control-dock');
+      const rotateControl = screen.getByTestId('print-rotate-control');
       await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-position-top')).toBe('68px'));
       const buttonRects = getDockButtonRects(dock);
+      const rotateRect = getRotateRect(rotateControl);
       expect(buttonRects).toHaveLength(3);
       expect(buttonRects.every((buttonRect) => !intersects(buttonRect, toolbarRect))).toBe(true);
+      expect(buttonRects.every((buttonRect) => rectanglesHaveGap(buttonRect, rotateRect))).toBe(true);
+      expect(intersects(rotateRect, toolbarRect)).toBe(false);
+      expect(rotateRect.left).toBeGreaterThanOrEqual(8);
+      expect(rotateRect.right).toBeLessThanOrEqual(632);
+      expect(rotateRect.top).toBeGreaterThanOrEqual(8);
+      expect(rotateRect.bottom).toBeLessThanOrEqual(392);
       expect(buttonRects.every((buttonRect) => (
         buttonRect.left >= 8
         && buttonRect.right <= 632
@@ -269,8 +284,8 @@ describe('PersonalizationToolbarOverlay', () => {
     }
   });
 
-  it('fails explicitly when no clear rotation position exists in the stage', () => {
-    expect(() => getPersonalizationControlsLayout(
+  it('returns an explicit unresolved layout when no clear rotation position exists', () => {
+    const layout = getPersonalizationControlsLayout(
       { left: 105, top: 248 },
       { left: 90, top: 300, width: 30, height: 20 },
       {
@@ -278,7 +293,75 @@ describe('PersonalizationToolbarOverlay', () => {
         height: 320,
         obstacle: { left: 8, right: 112, top: 8, bottom: 212 },
       },
-    )).toThrow('Unable to place personalization rotation control within the stage');
+    );
+
+    expect(layout).toMatchObject({
+      collisionFree: false,
+      rotateHandle: null,
+    });
+  });
+
+  it('marks the joint layout unresolved when the dock cannot avoid the obstacle', () => {
+    const layout = getPersonalizationControlsLayout(
+      { left: 105, top: 60 },
+      { left: 90, top: 112, width: 30, height: 20 },
+      {
+        width: 120,
+        height: 160,
+        obstacle: { left: 20, right: 112, top: 60, bottom: 152 },
+      },
+    );
+
+    expect(layout).toMatchObject({
+      collisionFree: false,
+      rotateHandle: null,
+    });
+  });
+
+  it('recovers after a physically constrained stage without throwing during render', async () => {
+    let view;
+    expect(() => {
+      view = renderToolbarInStage({
+        stageWidth: 120,
+        stageHeight: 320,
+        toolbarRect: { left: 8, top: 8, width: 104, height: 204 },
+        anchor: { visible: true, left: 90, top: 300, width: 30, height: 20 },
+      });
+    }).not.toThrow();
+
+    try {
+      const overlay = screen.getByRole('group', { name: 'Selected personalization controls' });
+      await waitFor(() => expect(overlay).toHaveAttribute('data-layout-collision-free', 'false'));
+      expect(screen.queryByTestId('print-control-dock')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('print-rotate-control')).not.toBeInTheDocument();
+
+      view.resizeStage(640, 400);
+
+      await waitFor(() => expect(overlay).toHaveAttribute('data-layout-collision-free', 'true'));
+      const dock = screen.getByTestId('print-control-dock');
+      const rotateRect = getRotateRect(screen.getByTestId('print-rotate-control'));
+      expect(getDockButtonRects(dock).every((buttonRect) => rectanglesHaveGap(buttonRect, rotateRect))).toBe(true);
+      expect(rotateRect.left).toBeGreaterThanOrEqual(8);
+      expect(rotateRect.right).toBeLessThanOrEqual(632);
+      expect(rotateRect.top).toBeGreaterThanOrEqual(8);
+      expect(rotateRect.bottom).toBeLessThanOrEqual(392);
+
+      const dockLeft = dock.style.getPropertyValue('--print-dock-position-left');
+      const rotateLeft = screen.getByTestId('print-rotate-control')
+        .style.getPropertyValue('--print-rotate-position-left');
+      view.resizeStage(0, 0);
+
+      await waitFor(() => expect(overlay).toHaveAttribute('data-layout-collision-free', 'false'));
+      expect(dock.style.getPropertyValue('--print-dock-position-left')).toBe(dockLeft);
+      expect(screen.getByTestId('print-rotate-control')
+        .style.getPropertyValue('--print-rotate-position-left')).toBe(rotateLeft);
+
+      view.resizeStage(640, 400);
+      await waitFor(() => expect(overlay).toHaveAttribute('data-layout-collision-free', 'true'));
+    } finally {
+      view?.unmount();
+      view?.restoreRects();
+    }
   });
 
   it('moves the action dock and captured rotation handle with the latest selection anchor', async () => {

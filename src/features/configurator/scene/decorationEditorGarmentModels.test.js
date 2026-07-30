@@ -107,6 +107,8 @@ describe('garment artwork default placement', () => {
 function expectGeometryToFace(geometry, expectedNormalZ) {
   const positions = geometry.getAttribute('position');
   expect(positions.count).toBeGreaterThan(0);
+  const indexCount = geometry.index?.count ?? positions.count;
+  expect(indexCount % 3).toBe(0);
 
   const expectedNormal = new THREE.Vector3(0, 0, expectedNormalZ);
   const vertexA = new THREE.Vector3();
@@ -115,7 +117,7 @@ function expectGeometryToFace(geometry, expectedNormalZ) {
   const edgeAB = new THREE.Vector3();
   const edgeAC = new THREE.Vector3();
   const faceNormal = new THREE.Vector3();
-  const indexCount = geometry.index?.count ?? positions.count;
+  let nonDegenerateTriangleCount = 0;
 
   for (let index = 0; index < indexCount; index += 3) {
     const vertexIndexA = geometry.index?.getX(index) ?? index;
@@ -129,8 +131,11 @@ function expectGeometryToFace(geometry, expectedNormalZ) {
     faceNormal.crossVectors(edgeAB, edgeAC);
     if (faceNormal.lengthSq() === 0) continue;
 
+    nonDegenerateTriangleCount += 1;
     expect(faceNormal.normalize().dot(expectedNormal)).toBeGreaterThanOrEqual(0.08);
   }
+
+  expect(nonDegenerateTriangleCount).toBeGreaterThan(0);
 }
 
 function createPlacementCases(modelName) {

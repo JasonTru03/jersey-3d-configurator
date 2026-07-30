@@ -91,13 +91,30 @@ export function getPersonalizationRotateHandleLayout(anchor, stageArea, dockRect
     };
   };
   const resolved = candidates.map(resolveCandidate);
-  const clearCandidate = resolved.find((layout) => {
+  const isClearCandidate = (layout) => {
     const rectangle = getControlRect(layout);
-    return (!dockRect || rectanglesHaveGap(rectangle, dockRect))
+    return (!stageArea || rectangleIsInsideStage(rectangle, stageArea))
+      && (!dockRect || rectanglesHaveGap(rectangle, dockRect))
       && (!stageArea?.obstacle || !rectanglesIntersect(rectangle, stageArea.obstacle));
-  });
+  };
+  const clearCandidate = resolved.find(isClearCandidate);
+  if (clearCandidate) return clearCandidate;
 
-  return clearCandidate ?? resolved.at(-1);
+  if (stageArea) {
+    const fallbackCandidate = getSafeControlCandidates(
+      preferred,
+      dockRect,
+      stageArea,
+    )
+      .map(resolveCandidate)
+      .sort((first, second) => (
+        getSquaredDistance(first, preferred) - getSquaredDistance(second, preferred)
+      ))
+      .find(isClearCandidate);
+    if (fallbackCandidate) return fallbackCandidate;
+  }
+
+  throw new RangeError('Unable to place personalization rotation control within the stage');
 }
 
 export function getPersonalizationControlsLayout(candidate, anchor, stageArea) {
@@ -166,6 +183,57 @@ function getControlRect(layout) {
     right: layout.left + halfSize,
     top: layout.top,
   };
+}
+
+function getSafeControlCandidates(preferred, dockRect, stageArea) {
+  const halfSize = CONTROL_SIZE / 2;
+  const horizontalPositions = [
+    preferred.left,
+    DOCK_EDGE_GAP + halfSize,
+    stageArea.width - DOCK_EDGE_GAP - halfSize,
+  ];
+  const verticalPositions = [
+    preferred.top,
+    DOCK_EDGE_GAP,
+    stageArea.height - DOCK_EDGE_GAP - CONTROL_SIZE,
+  ];
+
+  if (dockRect) {
+    horizontalPositions.push(
+      dockRect.left - DOCK_EDGE_GAP - halfSize,
+      dockRect.right + DOCK_EDGE_GAP + halfSize,
+    );
+    verticalPositions.push(
+      dockRect.top - DOCK_EDGE_GAP - CONTROL_SIZE,
+      dockRect.bottom + DOCK_EDGE_GAP,
+    );
+  }
+
+  if (stageArea.obstacle) {
+    horizontalPositions.push(
+      stageArea.obstacle.left - halfSize,
+      stageArea.obstacle.right + halfSize,
+    );
+    verticalPositions.push(
+      stageArea.obstacle.top - CONTROL_SIZE,
+      stageArea.obstacle.bottom,
+    );
+  }
+
+  return verticalPositions.flatMap((top) => (
+    horizontalPositions.map((left) => ({ left, top }))
+  ));
+}
+
+function getSquaredDistance(first, second) {
+  return (first.left - second.left) ** 2 + (first.top - second.top) ** 2;
+}
+
+function rectangleIsInsideStage(rectangle, stageArea) {
+  return rectangle.left >= DOCK_EDGE_GAP
+    && rectangle.right <= stageArea.width - DOCK_EDGE_GAP
+    && rectangle.top >= DOCK_EDGE_GAP
+    && rectangle.bottom <= stageArea.height - DOCK_EDGE_GAP;
 }
 
 function rectanglesHaveGap(first, second, gap = DOCK_EDGE_GAP) {

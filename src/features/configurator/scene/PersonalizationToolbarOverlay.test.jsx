@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PersonalizationToolbarOverlay } from './PersonalizationToolbarOverlay.jsx';
+import { getPersonalizationControlsLayout } from './personalizationToolbarLayout.js';
 
 const anchor = { visible: true, left: 100, top: 100, width: 100, height: 60 };
 
@@ -100,6 +101,13 @@ function intersects(first, second) {
     && first.bottom > second.top;
 }
 
+function rectanglesHaveGap(first, second, gap = 8) {
+  return first.right + gap <= second.left
+    || first.left >= second.right + gap
+    || first.bottom + gap <= second.top
+    || first.top >= second.bottom + gap;
+}
+
 describe('PersonalizationToolbarOverlay', () => {
   it('separates the drag rotation handle from the compact action dock', () => {
     renderToolbar();
@@ -167,7 +175,7 @@ describe('PersonalizationToolbarOverlay', () => {
       const rotateControl = screen.getByTestId('print-rotate-control');
       await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-columns')).toBe('3'));
       const rotateRect = getRotateRect(rotateControl);
-      expect(getDockButtonRects(dock).every((buttonRect) => !intersects(buttonRect, rotateRect))).toBe(true);
+      expect(getDockButtonRects(dock).every((buttonRect) => rectanglesHaveGap(buttonRect, rotateRect))).toBe(true);
     } finally {
       view.unmount();
       view.restoreRects();
@@ -189,7 +197,7 @@ describe('PersonalizationToolbarOverlay', () => {
       const buttonRects = getDockButtonRects(dock);
       const rotateRect = getRotateRect(rotateControl);
       expect(buttonRects.every((buttonRect) => buttonRect.left >= 8 && buttonRect.right <= 632)).toBe(true);
-      expect(buttonRects.every((buttonRect) => !intersects(buttonRect, rotateRect))).toBe(true);
+      expect(buttonRects.every((buttonRect) => rectanglesHaveGap(buttonRect, rotateRect))).toBe(true);
       expect(rotateRect.left).toBeGreaterThanOrEqual(8);
       expect(rotateRect.right).toBeLessThanOrEqual(632);
       expect(rotateRect.top).toBeGreaterThanOrEqual(8);
@@ -225,7 +233,7 @@ describe('PersonalizationToolbarOverlay', () => {
         && buttonRect.bottom <= 312
       ))).toBe(true);
       expect(buttonRects.some((buttonRect) => buttonRect.top !== buttonRects[0].top)).toBe(true);
-      expect(buttonRects.every((buttonRect) => !intersects(buttonRect, rotateRect))).toBe(true);
+      expect(buttonRects.every((buttonRect) => rectanglesHaveGap(buttonRect, rotateRect))).toBe(true);
       expect(rotateRect.left).toBeGreaterThanOrEqual(8);
       expect(rotateRect.right).toBeLessThanOrEqual(112);
       expect(rotateRect.top).toBeGreaterThanOrEqual(8);
@@ -234,6 +242,43 @@ describe('PersonalizationToolbarOverlay', () => {
       view.unmount();
       view.restoreRects();
     }
+  });
+
+  it('finds a clear rotation position above a bottom-clamped wrapped dock', async () => {
+    const view = renderToolbarInStage({
+      stageWidth: 120,
+      stageHeight: 320,
+      toolbarRect: null,
+      anchor: { visible: true, left: 90, top: 300, width: 30, height: 20 },
+    });
+
+    try {
+      const dock = screen.getByTestId('print-control-dock');
+      const rotateControl = screen.getByTestId('print-rotate-control');
+      await waitFor(() => expect(dock.style.getPropertyValue('--print-dock-columns')).toBe('2'));
+      const buttonRects = getDockButtonRects(dock);
+      const rotateRect = getRotateRect(rotateControl);
+      expect(buttonRects.every((buttonRect) => rectanglesHaveGap(buttonRect, rotateRect))).toBe(true);
+      expect(rotateRect.left).toBeGreaterThanOrEqual(8);
+      expect(rotateRect.right).toBeLessThanOrEqual(112);
+      expect(rotateRect.top).toBeGreaterThanOrEqual(8);
+      expect(rotateRect.bottom).toBeLessThanOrEqual(312);
+    } finally {
+      view.unmount();
+      view.restoreRects();
+    }
+  });
+
+  it('fails explicitly when no clear rotation position exists in the stage', () => {
+    expect(() => getPersonalizationControlsLayout(
+      { left: 105, top: 248 },
+      { left: 90, top: 300, width: 30, height: 20 },
+      {
+        width: 120,
+        height: 320,
+        obstacle: { left: 8, right: 112, top: 8, bottom: 212 },
+      },
+    )).toThrow('Unable to place personalization rotation control within the stage');
   });
 
   it('moves the action dock and captured rotation handle with the latest selection anchor', async () => {

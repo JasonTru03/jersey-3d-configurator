@@ -390,6 +390,7 @@ describe('decoration editor geometry', () => {
     expect(surface.material).toBeInstanceOf(THREE.MeshBasicMaterial);
     expect(surface.material.depthTest).toBe(true);
     expect(surface.material.depthWrite).toBe(false);
+    expect(surface.material.side).toBe(THREE.FrontSide);
   });
 
   it('derives a front artwork placement from the loaded garment mesh', () => {
@@ -433,6 +434,46 @@ describe('decoration editor geometry', () => {
     expect(surface.material.depthTest).toBe(true);
     expect(surface.material.depthWrite).toBe(false);
     expect(surface.material.polygonOffset).toBe(true);
+    expect(surface.material.side).toBe(THREE.FrontSide);
+  });
+
+  it('keeps only outward-facing triangles on a thin garment mesh', () => {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 0.04),
+      new THREE.MeshBasicMaterial(),
+    );
+    mesh.updateMatrixWorld(true);
+    const outwardNormal = new THREE.Vector3(0, 0, 1);
+    const surface = createDecalSurface(
+      new THREE.Texture(),
+      mesh,
+      {
+        region: 'front',
+        position: { x: 0, y: 0, z: 0.02 },
+        normal: { x: 0, y: 0, z: 1 },
+      },
+      { scale: 1, rotation: 0 },
+    );
+    const positions = surface.geometry.getAttribute('position');
+    const outwardDots = [];
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const edge = new THREE.Vector3();
+    const faceNormal = new THREE.Vector3();
+
+    for (let index = 0; index + 2 < positions.count; index += 3) {
+      a.fromBufferAttribute(positions, index);
+      b.fromBufferAttribute(positions, index + 1);
+      c.fromBufferAttribute(positions, index + 2);
+      faceNormal.subVectors(b, a).cross(edge.subVectors(c, a));
+      if (faceNormal.lengthSq() > 0) {
+        outwardDots.push(faceNormal.normalize().dot(outwardNormal));
+      }
+    }
+
+    expect(outwardDots.length).toBeGreaterThan(0);
+    expect(Math.min(...outwardDots)).toBeGreaterThanOrEqual(0.08);
   });
 
   it('keeps the last valid placement when a drag ray misses the garment', () => {

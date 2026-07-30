@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import { clampDecorationTransform, patchDecoration, resolveDecorationAsset } from '../config/decorations.js';
+import { filterFacingDecalTriangles } from './personalizationDecal.js';
 
 const REGION_OFFSET = 0.026;
 const REGION_POSITION_SCALE = 0.48;
@@ -106,7 +107,7 @@ export function createRegionSurface(texture) {
     transparent: true,
     depthTest: true,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
   });
   const surface = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
   surface.renderOrder = 8;
@@ -162,7 +163,7 @@ export function createDecalSurface(texture, mesh, placement, transform) {
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
   });
   const surface = new THREE.Mesh(createDecalGeometry(mesh, placement, transform), material);
   surface.renderOrder = 8;
@@ -174,12 +175,22 @@ export function createDecalSurface(texture, mesh, placement, transform) {
 function createDecalGeometry(mesh, placement, transform, aspect = 1) {
   const orientation = getDecalOrientation(placement, transform.rotation);
   const size = 0.6 * toSpriteTransform(transform).scale;
-  return new DecalGeometry(
+  const rawGeometry = new DecalGeometry(
     mesh,
     toVector(placement.position),
     new THREE.Euler().setFromQuaternion(orientation),
     new THREE.Vector3(size * aspect, size, 0.12),
   );
+  const targetNormal = toVector(
+    placement.normal ?? getRegionFrame(placement.region).normal,
+  ).normalize();
+  const geometry = filterFacingDecalTriangles(
+    rawGeometry,
+    targetNormal,
+    Math.sign(mesh.matrixWorld.determinant()) || 1,
+  );
+  rawGeometry.dispose();
+  return geometry;
 }
 
 function placementFromIntersection(hit, region) {

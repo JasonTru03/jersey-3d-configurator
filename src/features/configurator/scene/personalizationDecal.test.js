@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import {
   createPersonalizationDecalGeometry,
+  filterFacingDecalTriangles,
   getPersonalizationDecalOrientation,
   getPersonalizationAlphaMask,
   getPersonalizationSurfaceFromIntersection,
@@ -253,6 +254,37 @@ describe('personalization decal surface resolution', () => {
 });
 
 describe('personalization decal geometry', () => {
+  it('keeps only triangles facing the requested outward normal', () => {
+    const source = new THREE.BufferGeometry();
+    source.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0,
+      1, 0, 0,
+      0, 1, 0,
+      0, 0, 0,
+      0, 1, 0,
+      1, 0, 0,
+    ], 3));
+    source.setAttribute('uv', new THREE.Float32BufferAttribute([
+      0, 0,
+      1, 0,
+      0, 1,
+      0, 0,
+      0, 1,
+      1, 0,
+    ], 2));
+
+    const geometry = filterFacingDecalTriangles(
+      source,
+      new THREE.Vector3(0, 0, 1),
+      1,
+    );
+
+    expect(geometry.getAttribute('position').count).toBe(3);
+    expect(geometry.getAttribute('uv').count).toBe(3);
+    source.dispose();
+    geometry.dispose();
+  });
+
   it('creates projected vertices with requested aspect, scale, and rotation', () => {
     const garment = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 0.4));
     garment.updateMatrixWorld(true);

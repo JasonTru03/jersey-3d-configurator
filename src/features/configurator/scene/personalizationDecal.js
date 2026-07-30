@@ -246,7 +246,7 @@ function getAdaptiveDecalDepth(dimensions, surfaceDeviation) {
   );
 }
 
-function filterFacingDecalTriangles(source, targetNormal, windingSign) {
+export function filterFacingDecalTriangles(source, targetNormal, windingSign) {
   const position = source.getAttribute('position');
   const uv = source.getAttribute('uv');
   const normal = source.getAttribute('normal');

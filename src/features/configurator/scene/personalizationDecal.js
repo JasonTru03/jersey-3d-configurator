@@ -267,11 +267,14 @@ function filterFacingDecalTriangles(source, targetNormal, windingSign) {
     if (faceNormal.lengthSq() === 0
       || faceNormal.normalize().multiplyScalar(windingSign).dot(targetNormal)
         < FACING_NORMAL_THRESHOLD) continue;
-    for (let vertex = index; vertex < index + 3; vertex += 1) {
+    const vertexOrder = windingSign < 0
+      ? [index, index + 2, index + 1]
+      : [index, index + 1, index + 2];
+    vertexOrder.forEach((vertex) => {
       positions.push(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
       if (uv) uvs.push(uv.getX(vertex), uv.getY(vertex));
       if (normal) normals.push(normal.getX(vertex), normal.getY(vertex), normal.getZ(vertex));
-    }
+    });
   }
 
   const geometry = new THREE.BufferGeometry();

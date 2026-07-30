@@ -447,6 +447,57 @@ describe('personalization decal geometry', () => {
     geometry.dispose();
   });
 
+  it('keeps a mirrored personalization decal front-facing from the outward side', () => {
+    const garment = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 0.4),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    garment.scale.x = -1;
+    garment.updateMatrixWorld(true);
+    const surface = resolvePersonalizationSurface([garment], {
+      x: 0,
+      y: 0,
+      z: 0.5,
+      normal: { x: 0, y: 0, z: 1 },
+    });
+    const geometry = createPersonalizationDecalGeometry({
+      height: 1,
+      mesh: surface.mesh,
+      normal: surface.normal,
+      position: surface.point,
+      rotation: 0,
+      scale: 1,
+      width: 1,
+    });
+    const decal = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({ side: THREE.FrontSide }),
+    );
+    decal.updateMatrixWorld(true);
+    const outsideHits = new THREE.Raycaster(
+      surface.point.clone().addScaledVector(surface.normal, 1),
+      surface.normal.clone().negate(),
+    ).intersectObject(decal, false);
+    const position = geometry.getAttribute('position');
+    const outwardDots = [];
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    for (let index = 0; index + 2 < position.count; index += 3) {
+      a.fromBufferAttribute(position, index);
+      b.fromBufferAttribute(position, index + 1);
+      c.fromBufferAttribute(position, index + 2);
+      outwardDots.push(
+        b.clone().sub(a).cross(c.clone().sub(a)).normalize().dot(surface.normal),
+      );
+    }
+
+    expect(garment.matrixWorld.determinant()).toBeLessThan(0);
+    expect(outsideHits.length).toBeGreaterThan(0);
+    expect(outwardDots.every((dot) => dot >= 0.08)).toBe(true);
+    geometry.dispose();
+  });
+
   it('extracts actual alpha samples and measures their UV coverage', () => {
     const alpha = new Uint8ClampedArray(8 * 4 * 4);
     for (let y = 1; y <= 2; y += 1) {

@@ -44,6 +44,7 @@ function createPointerRenderer({ selectedDecorationId = null, printHit = null, d
     selectedId: selectedDecorationId,
     handlePointerDown: vi.fn(() => decorationHit),
     handlePointerMove: vi.fn(() => false),
+    handlePointerCancel: vi.fn(() => true),
     handlePointerUp: vi.fn(() => false),
     clearSelection: vi.fn(),
     isEditing: vi.fn(() => false),
@@ -2439,5 +2440,16 @@ describe('garment decoration mesh selection', () => {
     expect(renderer.controls.enabled).toBe(true);
     expect(renderer.decorationEditor.clearSelection).not.toHaveBeenCalled();
     expect(renderer.emitPrintPlacement).not.toHaveBeenCalled();
+  });
+
+  it('cancels an artwork preview without routing it through pointer-up commit', () => {
+    const renderer = createPointerRenderer({ decorationHit: true });
+
+    renderer.handlePointerDown(pointerEvent(100, 100));
+    renderer.handlePointerCancel();
+
+    expect(renderer.decorationEditor.handlePointerCancel).toHaveBeenCalledOnce();
+    expect(renderer.decorationEditor.handlePointerUp).not.toHaveBeenCalled();
+    expect(renderer.controls.enabled).toBe(true);
   });
 });

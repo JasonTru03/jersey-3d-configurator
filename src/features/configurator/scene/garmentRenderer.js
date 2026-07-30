@@ -1230,7 +1230,7 @@ export class GarmentRenderer {
   };
 
   handlePointerCancel = () => {
-    this.decorationEditor?.handlePointerUp();
+    this.decorationEditor?.handlePointerCancel?.();
     this.pendingDecorationDeselect = null;
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;

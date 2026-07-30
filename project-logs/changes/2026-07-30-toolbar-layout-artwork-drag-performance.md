@@ -211,10 +211,8 @@ Design and plan:
 - Rollback/source checkpoint: `289caae`
 - Production Worker version before this batch:
   `3657240c-45e9-4864-8d18-a5f9b0c2a394`
-- Cloudflare upload version:
+- Manual Cloudflare upload version:
   `79120885-c22b-4e1e-a7bb-9ecad22c6833`
-- Active 100% deployment version:
-  `77df99bb-b53a-48fc-99df-e82b30c9bf3c`
 - Production URL:
   `https://jersey-3d-configurator.jason1064969838.workers.dev/`
 
@@ -224,13 +222,15 @@ was not modified or synchronized in this release.
 
 Post-release verification:
 
-- `origin/showcase` resolved to `8cb12bad060a6cad6597e3bdbbe36fbe51b66d41`
-  before this documentation-only release note update;
-- Cloudflare reported deployment version
-  `77df99bb-b53a-48fc-99df-e82b30c9bf3c` at 100%;
+- `showcase` was merged at
+  `8cb12bad060a6cad6597e3bdbbe36fbe51b66d41`;
+- pushing `showcase` triggers the repository's automated Cloudflare
+  deployment, so the active version ID can advance after documentation-only
+  commits and must be read with `wrangler deployments status`;
 - the production root returned HTTP 200;
 - production HTML referenced `index-DWgFfN6G.css` and
   `index-CPzcALwL.js`;
+- production JS and CSS SHA-256 values matched the local build;
 - the production browser loaded the configurator DOM and
   `Chelsea Match Jersey` heading.
 

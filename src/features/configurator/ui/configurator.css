@@ -684,6 +684,10 @@
   padding: 0;
 }
 
+.personalize-editor .print-fields > .personalization-side-selector {
+  grid-column: 1 / -1;
+}
+
 .personalize-editor .print-fields input {
   min-height: 44px;
 }

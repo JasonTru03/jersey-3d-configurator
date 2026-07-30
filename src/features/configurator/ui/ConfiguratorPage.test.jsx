@@ -140,7 +140,7 @@ describe('ConfiguratorPage', () => {
     expect(within(navigation).queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
   });
 
-  it('keeps jersey appearance controls together under Design', async () => {
+  it('keeps only the simple jersey appearance controls under Design', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
 
@@ -148,7 +148,10 @@ describe('ConfiguratorPage', () => {
 
     expect(screen.getByRole('region', { name: 'Jersey templates' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Zone colors' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Continuous bottom pattern' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Continuous bottom pattern' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('checkbox', { name: 'Enable continuous bottom pattern' }),
+    ).not.toBeInTheDocument();
   });
 
   it('adds custom text from Personalize and updates the total by eight dollars', async () => {
@@ -519,11 +522,7 @@ describe('ConfiguratorPage', () => {
   it('discards a patterned save when the design changes while its bake is pending', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
-    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
-    await waitFor(() => expect(
-      screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }),
-    ).toBeChecked());
+    await enableHiddenBottomPattern();
     const bakeDeferred = createDeferred();
     rendererHarness.bakeResult = bakeDeferred.promise;
 
@@ -552,11 +551,7 @@ describe('ConfiguratorPage', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { unmount } = render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
-    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
-    await waitFor(() => expect(
-      screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }),
-    ).toBeChecked());
+    await enableHiddenBottomPattern();
     const bakeDeferred = createDeferred();
     rendererHarness.bakeResult = bakeDeferred.promise;
 
@@ -788,9 +783,7 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
+    await enableHiddenBottomPattern();
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
@@ -806,9 +799,7 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
+    await enableHiddenBottomPattern();
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     const productionDownload = await screen.findByRole('link', { name: 'Download production ZIP' });
     expect(productionDownload).toHaveAttribute('download', 'fn8788-jersey-production.zip');
@@ -1107,9 +1098,7 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' }));
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable continuous bottom pattern' })).toBeChecked());
+    await enableHiddenBottomPattern();
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     fireEvent.click(await screen.findByRole('link', { name: 'Download production ZIP' }));
     fireEvent.click(screen.getByRole('button', { name: 'Size' }));
@@ -1197,6 +1186,22 @@ function secureCartResponse(overrides = {}) {
     status: 201,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+async function enableHiddenBottomPattern() {
+  await waitFor(() => expect(rendererHarness.options).not.toBeNull());
+  let statePatch;
+  act(() => {
+    statePatch = rendererHarness.options.onStatePatch({
+      overrides: { bottomPattern: { enabled: true } },
+    });
+  });
+  await act(async () => {
+    await statePatch;
+  });
+  await waitFor(() => expect(
+    rendererHarness.updateStates.at(-1).overrides.bottomPattern.enabled,
+  ).toBe(true));
 }
 
 function createDeferred() {

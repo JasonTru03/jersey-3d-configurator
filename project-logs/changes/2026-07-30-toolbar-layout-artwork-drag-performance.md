@@ -205,15 +205,34 @@ Design and plan:
 
 ## Release checkpoint
 
-- Branch: `codex/toolbar-layout-artwork-drag-performance`
+- Source branch: `codex/toolbar-layout-artwork-drag-performance`
 - Feature code commit: `2f3a31981f70bb796929cbb0d0682a3a5a081828`
+- `showcase` merge commit: `8cb12bad060a6cad6597e3bdbbe36fbe51b66d41`
 - Rollback/source checkpoint: `289caae`
-- Current production Worker version before this batch:
+- Production Worker version before this batch:
   `3657240c-45e9-4864-8d18-a5f9b0c2a394`
+- Cloudflare upload version:
+  `79120885-c22b-4e1e-a7bb-9ecad22c6833`
+- Active 100% deployment version:
+  `77df99bb-b53a-48fc-99df-e82b30c9bf3c`
+- Production URL:
+  `https://jersey-3d-configurator.jason1064969838.workers.dev/`
 
-Merge, push, live Shopify theme synchronization, and Cloudflare deployment have
-not occurred. A fresh user confirmation is required before those release
-actions.
+The feature was merged into `showcase`, pushed to `origin/showcase`, and
+deployed to Cloudflare after explicit user confirmation. The live Shopify theme
+was not modified or synchronized in this release.
+
+Post-release verification:
+
+- `origin/showcase` resolved to `8cb12bad060a6cad6597e3bdbbe36fbe51b66d41`
+  before this documentation-only release note update;
+- Cloudflare reported deployment version
+  `77df99bb-b53a-48fc-99df-e82b30c9bf3c` at 100%;
+- the production root returned HTTP 200;
+- production HTML referenced `index-DWgFfN6G.css` and
+  `index-CPzcALwL.js`;
+- the production browser loaded the configurator DOM and
+  `Chelsea Match Jersey` heading.
 
 ## Known non-blocking limits
 

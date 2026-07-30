@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import { clampDecorationTransform, patchDecoration, resolveDecorationAsset } from '../config/decorations.js';
 import { filterFacingDecalTriangles } from './personalizationDecal.js';
+import { findNearestFacingIntersection, findVisibleElementIntersection } from './surfaceVisibility.js';
 
 const REGION_OFFSET = 0.026;
 const REGION_POSITION_SCALE = 0.48;
@@ -135,7 +136,8 @@ export function getDefaultDecorationPlacement(meshes, region, occupiedPlacements
         .addScaledVector(horizontal, offset.horizontal * horizontalSpan * 0.42)
         .addScaledVector(new THREE.Vector3(0, 1, 0), offset.vertical * verticalSpan * 0.42)
         .addScaledVector(direction, distance * 2);
-      const hit = new THREE.Raycaster(origin, direction.clone().negate()).intersectObjects(meshes, false)[0];
+      const raycaster = new THREE.Raycaster(origin, direction.clone().negate());
+      const hit = findNearestFacingIntersection(raycaster, meshes);
       return hit ? {
         ...placementFromIntersection(hit, region),
         normal: toPlainVector(direction),
@@ -242,7 +244,7 @@ function findGarmentMeshForPlacement(meshes, placement) {
     toVector(placement.position).addScaledVector(normal, 0.04),
     normal.negate(),
   );
-  return raycaster.intersectObjects(meshes, false)[0]?.object ?? null;
+  return findNearestFacingIntersection(raycaster, meshes)?.object ?? null;
 }
 
 function toPlainVector(vector) {
@@ -485,8 +487,11 @@ export class DecorationEditor {
   pickDecoration(event) {
     this.updatePointer(event);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const targets = [...this.surfaces.values()];
-    const hit = this.raycaster.intersectObjects(targets, false)[0];
+    const hit = findVisibleElementIntersection({
+      elements: [...this.surfaces.values()],
+      garmentMeshes: this.garmentMeshes,
+      raycaster: this.raycaster,
+    });
     if (!hit) return null;
     const decoration = this.decorations.find((item) => item.id === hit.object.userData.decorationId);
     return decoration ? { decoration, point: hit.point.clone() } : null;
@@ -495,7 +500,7 @@ export class DecorationEditor {
   pickGarment(event) {
     this.updatePointer(event);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    return this.raycaster.intersectObjects(this.garmentMeshes, false)[0] ?? null;
+    return findNearestFacingIntersection(this.raycaster, this.garmentMeshes);
   }
 
   intersectRegion(event, region) {

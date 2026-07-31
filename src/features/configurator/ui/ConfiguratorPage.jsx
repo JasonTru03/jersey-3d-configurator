@@ -15,7 +15,7 @@ import {
   Sun,
   Undo2,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigurator } from '../hooks/useConfigurator.js';
 import { usePersonalizationDeletion } from '../hooks/usePersonalizationDeletion.js';
 import { ProductStage } from '../scene/ProductStage.jsx';
@@ -100,6 +100,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     state,
     updateState,
   });
+  const handleRendererError = useCallback((error) => {
+    const message = typeof error?.message === 'string' ? error.message.trim() : '';
+    setFileError(message || '3D 服装预览加载失败，请稍后重试。');
+  }, []);
 
   const handlePersonalizationSidePendingChange = (pending) => {
     personalizationSidePendingRef.current = pending;
@@ -306,6 +310,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         <div className="workspace-grid">
           <ProductStage
             artworkFocusId={artworkFocusId}
+            onRendererError={handleRendererError}
             onProductionProvider={(provider) => { productionProviderRef.current = provider; }}
             onEditPersonalization={(id) => {
               setSelectedPersonalizationKey(id);

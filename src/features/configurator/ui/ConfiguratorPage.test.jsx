@@ -140,6 +140,25 @@ beforeEach(() => {
 });
 
 describe('ConfiguratorPage', () => {
+  it('shows a renderer error in the user-visible alert', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    expect(rendererHarness.options.onError).toBeTypeOf('function');
+    act(() => rendererHarness.options.onError(new Error('服装模型加载失败。')));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('服装模型加载失败。');
+  });
+
+  it('shows a Chinese fallback for an unknown renderer error', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    act(() => rendererHarness.options.onError({ message: '   ' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('3D 服装预览加载失败，请稍后重试。');
+  });
+
   it('shows the six task-based navigation sections', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');

@@ -160,6 +160,10 @@ export class GarmentRenderer {
     this.patternMeshes = [];
     this.modelUvLayout = null;
     this.modelUvLayoutKey = null;
+    this.currentModelUrl = null;
+    this.currentModelIdentity = null;
+    this.pendingModelIdentity = null;
+    this.pendingModelLoadToken = null;
     this.textureLoader = new THREE.TextureLoader();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -220,10 +224,37 @@ export class GarmentRenderer {
 
     const modelUrl = product.model?.glbUrl;
     const modelIdentity = modelUrl ? getModelLoadIdentity(product.model) : null;
-    if (modelUrl && modelIdentity !== this.currentModelIdentity) {
-      this.currentModelUrl = modelUrl;
-      this.currentModelIdentity = modelIdentity;
-      this.loadModel(modelUrl);
+    if (
+      modelUrl
+      && modelIdentity !== this.currentModelIdentity
+      && modelIdentity !== this.pendingModelIdentity
+    ) {
+      const pendingToken = Symbol(modelIdentity);
+      this.pendingModelIdentity = modelIdentity;
+      this.pendingModelLoadToken = pendingToken;
+      let loadResult;
+      try {
+        loadResult = this.loadModel(modelUrl);
+      } catch (error) {
+        if (this.pendingModelLoadToken === pendingToken) {
+          this.pendingModelIdentity = null;
+          this.pendingModelLoadToken = null;
+        }
+        throw error;
+      }
+      void Promise.resolve(loadResult).then((succeeded) => {
+        if (this.pendingModelLoadToken !== pendingToken) return;
+        this.pendingModelIdentity = null;
+        this.pendingModelLoadToken = null;
+        if (succeeded !== false) {
+          this.currentModelUrl = modelUrl;
+          this.currentModelIdentity = modelIdentity;
+        }
+      }, () => {
+        if (this.pendingModelLoadToken !== pendingToken) return;
+        this.pendingModelIdentity = null;
+        this.pendingModelLoadToken = null;
+      });
     }
 
     this.applyAppearance(selected.appearance);
@@ -343,16 +374,19 @@ export class GarmentRenderer {
     const requestedModel = this.product?.model;
     let stagedAppearanceTexture = null;
     let stagedModel = null;
+    let stagedModelMaterials = [];
+    let replacedBaseColorMaps = new Set();
+    let transactionSnapshot = null;
     try {
       const gltf = await this.loader.loadAsync(modelUrl);
       if (this.loadToken !== loadToken) {
         modelReadiness.reject(new Error('服装模型加载请求已被替换。'));
         disposeModelResources(gltf.scene);
-        return;
+        return false;
       }
 
       stagedModel = gltf.scene;
-      const stagedModelMaterials = [];
+      stagedModelMaterials = [];
       const stagedModelMeshes = [];
       stagedModel.traverse((item) => {
         if (!item.isMesh) return;
@@ -373,7 +407,7 @@ export class GarmentRenderer {
       const stagedAppearanceTextureKey = appearance
         ? getAppearanceTextureKey(appearance, stagedModelUvLayoutKey)
         : null;
-      const replacedBaseColorMaps = appearance
+      replacedBaseColorMaps = appearance
         ? new Set(stagedModelMaterials.map((material) => material.map).filter(Boolean))
         : new Set();
       if (appearance) {
@@ -386,9 +420,10 @@ export class GarmentRenderer {
         stagedAppearanceTexture.flipY = false;
       }
 
-      const previousModels = [...this.modelGroup.children];
-      this.disposeBottomPatternTexture();
-      this.disposeAppearanceTexture();
+      transactionSnapshot = captureModelLoadSnapshot(this);
+      this.fitModel(stagedModel);
+      stagedModel.updateMatrixWorld(true);
+
       this.modelGroup.clear();
       this.modelMaterials = stagedModelMaterials;
       this.modelMeshes = stagedModelMeshes;
@@ -398,6 +433,10 @@ export class GarmentRenderer {
       this.modelUvLayoutKey = stagedModelUvLayoutKey;
       this.appearanceTexture = stagedAppearanceTexture;
       this.appearanceTextureKey = stagedAppearanceTextureKey;
+      this.bottomPatternTexture = null;
+      this.bottomPatternKey = null;
+      this.bottomPatternRequest = Symbol('staged-bottom-pattern');
+      this.bottomPatternPendingKey = null;
       if (stagedAppearanceTexture) {
         stagedModelMaterials.forEach((material) => {
           material.map = stagedAppearanceTexture;
@@ -405,13 +444,8 @@ export class GarmentRenderer {
         });
       }
       this.modelGroup.add(stagedModel);
-      previousModels.forEach(disposeModelResources);
-      replacedBaseColorMaps.forEach((map) => map.dispose());
-      stagedAppearanceTexture = null;
       const model = stagedModel;
-      stagedModel = null;
 
-      this.fitModel(model);
       this.modelGroup.updateMatrixWorld(true);
       this.decorationEditor.setGarmentMeshes(this.decorationMeshes);
       this.decorationEditor.update(
@@ -426,7 +460,6 @@ export class GarmentRenderer {
       this.applyMaterial(this.selected?.material?.material);
       await this.updateBottomPattern();
       this.updatePrintLayer();
-      modelReadiness.resolve();
       gsap.fromTo(model.scale, { x: model.scale.x * 0.94, y: model.scale.y * 0.94, z: model.scale.z * 0.94 }, {
         x: model.scale.x,
         y: model.scale.y,
@@ -434,9 +467,35 @@ export class GarmentRenderer {
         duration: 0.55,
         ease: 'power2.out',
       });
+
+      disposeModelLoadSnapshotResources(transactionSnapshot);
+      replacedBaseColorMaps.forEach((map) => map.dispose());
+      transactionSnapshot = null;
+      stagedAppearanceTexture = null;
+      stagedModel = null;
+      stagedModelMaterials = [];
+      replacedBaseColorMaps = new Set();
+      modelReadiness.resolve();
+      return true;
     } catch (error) {
-      stagedAppearanceTexture?.dispose();
-      if (stagedModel) disposeModelResources(stagedModel);
+      if (transactionSnapshot) {
+        const stagedBottomPatternTexture = this.bottomPatternTexture === transactionSnapshot.bottomPatternTexture
+          ? null
+          : this.bottomPatternTexture;
+        restoreModelLoadSnapshot(this, transactionSnapshot);
+        disposeStagedModelResources({
+          appearanceTexture: stagedAppearanceTexture,
+          bottomPatternTexture: stagedBottomPatternTexture,
+          model: stagedModel,
+          modelMaterials: stagedModelMaterials,
+          replacedBaseColorMaps,
+        });
+      } else if (stagedModel) {
+        stagedAppearanceTexture?.dispose();
+        disposeModelResources(stagedModel);
+      } else {
+        stagedAppearanceTexture?.dispose();
+      }
       if (this.loadToken === loadToken) {
         const reportedError = new Error('服装模型加载失败。', { cause: error });
         modelReadiness.reject(reportedError);
@@ -447,6 +506,7 @@ export class GarmentRenderer {
         }
         console.error(`Unable to load garment model: ${modelUrl}`, error);
       }
+      return false;
     }
   }
 
@@ -1768,6 +1828,185 @@ function disposeModelResources(group) {
     if (item.geometry) item.geometry.dispose();
     if (item.material) disposeMaterials(item.material);
   });
+}
+
+function captureModelLoadSnapshot(renderer) {
+  return {
+    appearanceTexture: renderer.appearanceTexture,
+    appearanceTextureKey: renderer.appearanceTextureKey,
+    bottomPatternKey: renderer.bottomPatternKey,
+    bottomPatternPendingKey: renderer.bottomPatternPendingKey,
+    bottomPatternRequest: renderer.bottomPatternRequest,
+    bottomPatternTexture: renderer.bottomPatternTexture,
+    cameraPosition: renderer.camera.position.clone(),
+    cameraQuaternion: renderer.camera.quaternion.clone(),
+    controlsEnabled: renderer.controls.enabled,
+    controlsTarget: renderer.controls.target.clone(),
+    decorationEditor: captureDecorationEditorSnapshot(renderer.decorationEditor),
+    decorationMeshes: renderer.decorationMeshes,
+    modelGroupChildren: [...renderer.modelGroup.children],
+    modelMaterials: renderer.modelMaterials,
+    modelMaterialMaps: renderer.modelMaterials.map((material) => [material, material.map]),
+    modelMeshes: renderer.modelMeshes,
+    modelUvLayout: renderer.modelUvLayout,
+    modelUvLayoutKey: renderer.modelUvLayoutKey,
+    patternMeshes: renderer.patternMeshes,
+    printColor: renderer.printColor,
+    printState: capturePrintState(renderer),
+  };
+}
+
+function restoreModelLoadSnapshot(renderer, snapshot) {
+  renderer.modelGroup.clear();
+  snapshot.modelGroupChildren.forEach((model) => renderer.modelGroup.add(model));
+  renderer.modelMaterials = snapshot.modelMaterials;
+  renderer.modelMeshes = snapshot.modelMeshes;
+  renderer.decorationMeshes = snapshot.decorationMeshes;
+  renderer.patternMeshes = snapshot.patternMeshes;
+  renderer.modelUvLayout = snapshot.modelUvLayout;
+  renderer.modelUvLayoutKey = snapshot.modelUvLayoutKey;
+  renderer.appearanceTexture = snapshot.appearanceTexture;
+  renderer.appearanceTextureKey = snapshot.appearanceTextureKey;
+  renderer.bottomPatternTexture = snapshot.bottomPatternTexture;
+  renderer.bottomPatternKey = snapshot.bottomPatternKey;
+  renderer.bottomPatternRequest = snapshot.bottomPatternRequest;
+  renderer.bottomPatternPendingKey = snapshot.bottomPatternPendingKey;
+  renderer.printColor = snapshot.printColor;
+  snapshot.modelMaterialMaps.forEach(([material, map]) => {
+    material.map = map;
+    material.needsUpdate = true;
+  });
+  renderer.camera.position.copy(snapshot.cameraPosition);
+  renderer.camera.quaternion.copy(snapshot.cameraQuaternion);
+  renderer.controls.target.copy(snapshot.controlsTarget);
+  renderer.controls.enabled = snapshot.controlsEnabled;
+  restoreDecorationEditorSnapshot(renderer.decorationEditor, snapshot.decorationEditor);
+  restorePrintState(renderer, snapshot.printState);
+}
+
+function disposeModelLoadSnapshotResources(snapshot) {
+  const textures = new Set([
+    ...snapshot.modelMaterialMaps.map(([, map]) => map),
+    snapshot.appearanceTexture,
+    snapshot.bottomPatternTexture,
+  ].filter(Boolean));
+  snapshot.modelMaterialMaps.forEach(([material]) => { material.map = null; });
+  snapshot.modelGroupChildren.forEach(disposeModelResources);
+  textures.forEach((texture) => texture.dispose());
+}
+
+function disposeStagedModelResources({
+  appearanceTexture,
+  bottomPatternTexture,
+  model,
+  modelMaterials,
+  replacedBaseColorMaps,
+}) {
+  const stagedTextures = new Set([appearanceTexture, bottomPatternTexture].filter(Boolean));
+  modelMaterials.forEach((material) => {
+    if (stagedTextures.has(material.map)) material.map = null;
+  });
+  stagedTextures.forEach((texture) => texture.dispose());
+  replacedBaseColorMaps.forEach((map) => {
+    if (!modelMaterials.some((material) => material.map === map)) map.dispose();
+  });
+  if (model) disposeModelResources(model);
+}
+
+function captureDecorationEditorSnapshot(editor) {
+  const surfaces = new Map(editor.surfaces ?? []);
+  return {
+    decorations: editor.decorations,
+    garmentMeshes: editor.garmentMeshes,
+    groupChildren: [...(editor.group?.children ?? [])],
+    groupVisible: editor.group?.visible,
+    presets: editor.presets,
+    selectedId: editor.selectedId,
+    surfaceStates: new Map([...surfaces.values()].map((surface) => [surface, {
+      materialOpacity: surface.material?.opacity,
+      visible: surface.visible,
+    }])),
+    surfaces,
+  };
+}
+
+function restoreDecorationEditorSnapshot(editor, snapshot) {
+  if (!editor || !snapshot) return;
+  (editor.surfaces ?? new Map()).forEach((surface, id) => {
+    if (snapshot.surfaces.get(id) === surface) return;
+    surface.geometry?.dispose();
+    surface.material?.map?.dispose();
+    surface.material?.dispose();
+  });
+  editor.garmentMeshes = snapshot.garmentMeshes;
+  editor.decorations = snapshot.decorations;
+  editor.presets = snapshot.presets;
+  editor.selectedId = snapshot.selectedId;
+  editor.surfaces = new Map(snapshot.surfaces);
+  if (editor.group) {
+    editor.group.clear();
+    snapshot.groupChildren.forEach((surface) => editor.group.add(surface));
+    editor.group.visible = snapshot.groupVisible;
+  }
+  snapshot.surfaceStates.forEach((state, surface) => {
+    surface.visible = state.visible;
+    if (surface.material && Number.isFinite(state.materialOpacity)) {
+      surface.material.opacity = state.materialOpacity;
+    }
+  });
+}
+
+function capturePrintState(renderer) {
+  return {
+    activePrintDrag: renderer.activePrintDrag,
+    activePrintId: renderer.activePrintId,
+    isDraggingPrint: renderer.isDraggingPrint,
+    lastPrintAnchor: renderer.lastPrintAnchor,
+    layers: new Map(renderer.printLayers),
+    layerStates: new Map([...renderer.printLayers.values()].map((layer) => [layer, {
+      decalGeometry: layer.decal?.geometry,
+      decalVisible: layer.decal?.visible,
+      planeOpacity: layer.plane?.material?.opacity,
+      planePosition: layer.plane?.position.clone(),
+      planeQuaternion: layer.plane?.quaternion.clone(),
+      planeScale: layer.plane?.scale.clone(),
+      planeVisible: layer.plane?.visible,
+    }])),
+    pendingPrintDrag: renderer.pendingPrintDrag,
+    rotationPreviewKey: renderer.rotationPreviewKey,
+  };
+}
+
+function restorePrintState(renderer, snapshot) {
+  renderer.printLayers.forEach((layer, key) => {
+    if (snapshot.layers.get(key) === layer) return;
+    renderer.disposePrintLayerEntry(layer);
+  });
+  snapshot.layerStates.forEach((state, layer) => {
+    if (layer.decal) {
+      if (layer.decal.geometry !== state.decalGeometry) layer.decal.geometry?.dispose();
+      layer.decal.geometry = state.decalGeometry;
+      layer.decal.visible = state.decalVisible;
+      if (layer.decal.parent !== renderer.scene) renderer.scene.add(layer.decal);
+    }
+    if (layer.plane) {
+      layer.plane.visible = state.planeVisible;
+      if (layer.plane.material && Number.isFinite(state.planeOpacity)) {
+        layer.plane.material.opacity = state.planeOpacity;
+      }
+      if (state.planePosition) layer.plane.position.copy(state.planePosition);
+      if (state.planeQuaternion) layer.plane.quaternion.copy(state.planeQuaternion);
+      if (state.planeScale) layer.plane.scale.copy(state.planeScale);
+      if (layer.plane.parent !== renderer.scene) renderer.scene.add(layer.plane);
+    }
+  });
+  renderer.printLayers = new Map(snapshot.layers);
+  renderer.activePrintId = snapshot.activePrintId;
+  renderer.lastPrintAnchor = snapshot.lastPrintAnchor;
+  renderer.isDraggingPrint = snapshot.isDraggingPrint;
+  renderer.pendingPrintDrag = snapshot.pendingPrintDrag;
+  renderer.activePrintDrag = snapshot.activePrintDrag;
+  renderer.rotationPreviewKey = snapshot.rotationPreviewKey;
 }
 
 function getAppearanceTextureKey(appearance, modelUvLayoutKey = null) {

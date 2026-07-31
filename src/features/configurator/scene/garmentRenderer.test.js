@@ -133,7 +133,8 @@ function installLoadedModelState(renderer) {
   const modelMeshes = [...model.children];
   const modelMaterials = modelMeshes.map(({ material }) => material);
   const texture = new THREE.Texture();
-  modelMaterials.forEach((material) => { material.map = texture; });
+  const bottomTexture = new THREE.Texture();
+  modelMaterials.forEach((material) => { material.map = bottomTexture; });
   renderer.modelGroup.add(model);
   renderer.modelMeshes = modelMeshes;
   renderer.patternMeshes = modelMeshes;
@@ -143,12 +144,44 @@ function installLoadedModelState(renderer) {
   renderer.modelUvLayoutKey = 'previous-layout:v1';
   renderer.appearanceTexture = texture;
   renderer.appearanceTextureKey = 'previous-appearance';
+  renderer.bottomPatternTexture = bottomTexture;
+  renderer.bottomPatternKey = 'previous-bottom-pattern';
+  renderer.decorationEditor.garmentMeshes = modelMeshes;
+  const decorationTexture = new THREE.Texture();
+  const decorationSurface = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.4, 0.4),
+    new THREE.MeshBasicMaterial({ map: decorationTexture }),
+  );
+  decorationSurface.visible = false;
+  renderer.decorationEditor.group.add(decorationSurface);
+  renderer.decorationEditor.surfaces.set('previous-decoration', decorationSurface);
+  renderer.decorationEditor.decorations = [{ id: 'previous-decoration' }];
+  const printTexture = new THREE.Texture();
+  const printMaterial = new THREE.MeshBasicMaterial({ map: printTexture });
+  const printDecalMaterial = new THREE.MeshBasicMaterial({ map: printTexture });
+  const printPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.3), printMaterial);
+  const printDecal = new THREE.Mesh(new THREE.BufferGeometry(), printDecalMaterial);
+  printPlane.visible = false;
+  printDecal.visible = true;
+  renderer.scene.add(printPlane);
+  renderer.scene.add(printDecal);
+  const printLayer = {
+    decal: printDecal,
+    decalMaterial: printDecalMaterial,
+    material: printMaterial,
+    plane: printPlane,
+    texture: printTexture,
+  };
+  renderer.printLayers.set('previous-print', printLayer);
   return {
+    bottomTexture,
     decorationMeshes: renderer.decorationMeshes,
+    decorationSurface,
     model,
     modelMaterials,
     modelMeshes,
     patternMeshes: renderer.patternMeshes,
+    printLayer,
     texture,
     uvLayout: renderer.modelUvLayout,
   };
@@ -159,6 +192,39 @@ function deferred() {
   const promise = new Promise((nextResolve) => { resolve = nextResolve; });
   return { promise, resolve };
 }
+
+function makeModelIdentityRenderer(loadModel) {
+  const renderer = Object.create(GarmentRenderer.prototype);
+  renderer.loadModel = loadModel;
+  renderer.applyAppearance = vi.fn();
+  renderer.applyMaterial = vi.fn();
+  renderer.updateBottomPattern = vi.fn();
+  renderer.updatePrintLayer = vi.fn();
+  renderer.decorationEditor = {
+    update: vi.fn(),
+    isEditing: vi.fn(() => false),
+  };
+  renderer.controls = {};
+  renderer.isDraggingPrint = false;
+  return renderer;
+}
+
+function modelIdentityProduct() {
+  return {
+    decorationPresets: [],
+    model: {
+      glbUrl: '/models/shared.glb',
+      id: 'catalog-a',
+      version: '1',
+      uvExportLayoutId: 'chelsea-jersey@1',
+    },
+  };
+}
+
+const modelIdentitySelected = {
+  appearance: { template: 'solid', colors: {} },
+  material: { material: {} },
+};
 
 function enabledBottomPattern(id = 'pattern') {
   return {
@@ -265,11 +331,72 @@ describe('garment decoration mesh selection', () => {
       appearanceError: new Error('appearance painter failed'),
       errorMessage: 'appearance painter failed',
     },
+    {
+      failure: 'fitModel failure',
+      modelDefinition: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+      createScene: () => makeConfiguredUvModel(new THREE.Texture()),
+      errorMessage: 'fitModel failed',
+      setupFailure: (renderer, error) => vi.spyOn(renderer, 'fitModel').mockImplementation(() => { throw error; }),
+    },
+    {
+      failure: 'decoration mesh setup failure',
+      modelDefinition: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+      createScene: () => makeConfiguredUvModel(new THREE.Texture()),
+      errorMessage: 'decoration mesh setup failed',
+      setupFailure: (renderer, error) => vi.spyOn(renderer.decorationEditor, 'setGarmentMeshes').mockImplementation(() => { throw error; }),
+    },
+    {
+      failure: 'decoration update failure',
+      modelDefinition: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+      createScene: () => makeConfiguredUvModel(new THREE.Texture()),
+      errorMessage: 'decoration update failed',
+      setupFailure: (renderer, error) => {
+        const newDecorationSurface = new THREE.Mesh(
+          new THREE.PlaneGeometry(0.2, 0.2),
+          new THREE.MeshBasicMaterial({ map: new THREE.Texture() }),
+        );
+        vi.spyOn(renderer.decorationEditor, 'update').mockImplementation(() => {
+          renderer.decorationEditor.group.add(newDecorationSurface);
+          renderer.decorationEditor.surfaces.set('new-decoration', newDecorationSurface);
+          throw error;
+        });
+        return { newDecorationSurface };
+      },
+    },
+    {
+      failure: 'bottom pattern update failure',
+      modelDefinition: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+      createScene: () => makeConfiguredUvModel(new THREE.Texture()),
+      errorMessage: 'bottom pattern update failed',
+      setupFailure: (renderer, error) => vi.spyOn(renderer, 'updateBottomPattern').mockRejectedValue(error),
+    },
+    {
+      failure: 'print layer update failure',
+      modelDefinition: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+      createScene: () => makeConfiguredUvModel(new THREE.Texture()),
+      errorMessage: 'print layer update failed',
+      setupFailure: (renderer, error) => {
+        const texture = new THREE.Texture();
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        const decalMaterial = new THREE.MeshBasicMaterial({ map: texture });
+        const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), material);
+        const decal = new THREE.Mesh(new THREE.BufferGeometry(), decalMaterial);
+        const newPrintLayer = { decal, decalMaterial, material, plane, texture };
+        vi.spyOn(renderer, 'updatePrintLayer').mockImplementation(() => {
+          renderer.scene.add(plane);
+          renderer.scene.add(decal);
+          renderer.printLayers.set('new-print', newPrintLayer);
+          throw error;
+        });
+        return { newPrintLayer };
+      },
+    },
   ])('keeps the previous model atomically when $failure occurs', async ({
     appearanceError,
     createScene,
     errorMessage,
     modelDefinition,
+    setupFailure,
   }) => {
     productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
     if (appearanceError) productionArtifactMocks.createGarmentAppearanceCanvas.mockImplementation(() => { throw appearanceError; });
@@ -281,6 +408,7 @@ describe('garment decoration mesh selection', () => {
     const renderer = new GarmentRenderer(host, { onError });
     const previous = installLoadedModelState(renderer);
     const previousTextureDispose = vi.spyOn(previous.texture, 'dispose');
+    const previousBottomTextureDispose = vi.spyOn(previous.bottomTexture, 'dispose');
     const previousGeometryDispose = vi.spyOn(previous.modelMeshes[0].geometry, 'dispose');
     renderer.selected = {
       appearance: { template: 'solid', colors: { body: '#F7F5EF', number: '#20242A' } },
@@ -293,6 +421,7 @@ describe('garment decoration mesh selection', () => {
     const nextMap = nextScene.children[0].material.map;
     const nextMapDispose = vi.spyOn(nextMap, 'dispose');
     renderer.loader = { loadAsync: vi.fn().mockResolvedValue({ scene: nextScene }) };
+    const failureArtifacts = setupFailure?.(renderer, new Error(errorMessage)) ?? {};
 
     try {
       await renderer.loadModel('/models/next.glb');
@@ -308,7 +437,19 @@ describe('garment decoration mesh selection', () => {
       expect(renderer.modelMaterials).toBe(previous.modelMaterials);
       expect(renderer.modelUvLayout).toBe(previous.uvLayout);
       expect(renderer.appearanceTexture).toBe(previous.texture);
+      expect(renderer.bottomPatternTexture).toBe(previous.bottomTexture);
+      expect(renderer.decorationEditor.garmentMeshes).toBe(previous.decorationMeshes);
+      expect(previous.decorationSurface.parent).toBe(renderer.decorationEditor.group);
+      expect(previous.decorationSurface.visible).toBe(false);
+      expect(previous.printLayer.plane.parent).toBe(renderer.scene);
+      expect(previous.printLayer.plane.visible).toBe(false);
+      expect(previous.printLayer.decal.parent).toBe(renderer.scene);
+      expect(previous.printLayer.decal.visible).toBe(true);
+      expect(failureArtifacts.newDecorationSurface?.parent ?? null).toBeNull();
+      expect(failureArtifacts.newPrintLayer?.plane.parent ?? null).toBeNull();
+      expect(failureArtifacts.newPrintLayer?.decal.parent ?? null).toBeNull();
       expect(previousTextureDispose).not.toHaveBeenCalled();
+      expect(previousBottomTextureDispose).not.toHaveBeenCalled();
       expect(previousGeometryDispose).not.toHaveBeenCalled();
       expect(nextGeometryDispose).toHaveBeenCalled();
       expect(nextMapDispose).toHaveBeenCalled();
@@ -319,6 +460,41 @@ describe('garment decoration mesh selection', () => {
       productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
       productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
       consoleError.mockRestore();
+      renderer.dispose();
+    }
+  });
+
+  it('releases previous model textures once after a successful atomic commit', async () => {
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const previous = installLoadedModelState(renderer);
+    const previousTextureDispose = vi.spyOn(previous.texture, 'dispose');
+    const previousBottomTextureDispose = vi.spyOn(previous.bottomTexture, 'dispose');
+    const previousGeometryDispose = previous.modelMeshes.map(({ geometry }) => (
+      vi.spyOn(geometry, 'dispose')
+    ));
+    renderer.selected = {
+      appearance: { template: 'solid', colors: { body: '#F7F5EF', number: '#20242A' } },
+      material: { material: { roughness: 0.7, metalness: 0 } },
+    };
+    renderer.state = { lighting: 'none', overrides: {} };
+    renderer.product = {
+      decorationPresets: [],
+      model: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+    };
+    const nextScene = makeConfiguredUvModel(new THREE.Texture());
+    renderer.loader = { loadAsync: vi.fn().mockResolvedValue({ scene: nextScene }) };
+
+    try {
+      await expect(renderer.loadModel('/models/next.glb')).resolves.toBe(true);
+
+      expect(renderer.modelGroup.children).toEqual([nextScene]);
+      expect(previousTextureDispose).toHaveBeenCalledOnce();
+      expect(previousBottomTextureDispose).toHaveBeenCalledOnce();
+      previousGeometryDispose.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+    } finally {
       renderer.dispose();
     }
   });
@@ -699,9 +875,9 @@ describe('garment decoration mesh selection', () => {
     renderer.dispose();
   });
 
-  it('reloads a shared GLB URL when the model UV identity changes', () => {
+  it('reloads a shared GLB URL when the model UV identity changes', async () => {
     const renderer = Object.create(GarmentRenderer.prototype);
-    renderer.loadModel = vi.fn();
+    renderer.loadModel = vi.fn().mockResolvedValue(true);
     renderer.applyAppearance = vi.fn();
     renderer.applyMaterial = vi.fn();
     renderer.updateBottomPattern = vi.fn();
@@ -732,10 +908,61 @@ describe('garment decoration mesh selection', () => {
       version: '2',
       uvExportLayoutId: 'fn8788-jersey@1',
     }), state, selected);
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(renderer.loadModel).toHaveBeenCalledTimes(2);
     expect(renderer.currentModelIdentity).toContain('"layoutVersion":1');
     expect(renderer.currentModelIdentity).toContain('"uvExportLayoutId":"fn8788-jersey@1"');
+  });
+
+  it('does not start a duplicate load while the same model identity is pending', () => {
+    const pending = deferred();
+    const loadModel = vi.fn(() => pending.promise);
+    const renderer = makeModelIdentityRenderer(loadModel);
+    const product = modelIdentityProduct();
+
+    renderer.update(product, { overrides: {} }, modelIdentitySelected);
+    renderer.update(product, { overrides: {} }, modelIdentitySelected);
+
+    expect(loadModel).toHaveBeenCalledOnce();
+    expect(renderer.currentModelIdentity).toBeUndefined();
+    expect(renderer.pendingModelIdentity).toContain('"uvExportLayoutId":"chelsea-jersey@1"');
+  });
+
+  it('retries the same model identity after a failed pending load', async () => {
+    const first = deferred();
+    const second = deferred();
+    const loadModel = vi.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const renderer = makeModelIdentityRenderer(loadModel);
+    const product = modelIdentityProduct();
+
+    renderer.update(product, { overrides: {} }, modelIdentitySelected);
+    first.resolve(false);
+    await first.promise;
+    await Promise.resolve();
+    renderer.update(product, { overrides: {} }, modelIdentitySelected);
+
+    expect(loadModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reload a model identity after its load succeeds', async () => {
+    const loaded = deferred();
+    const loadModel = vi.fn(() => loaded.promise);
+    const renderer = makeModelIdentityRenderer(loadModel);
+    const product = modelIdentityProduct();
+
+    renderer.update(product, { overrides: {} }, modelIdentitySelected);
+    loaded.resolve(true);
+    await loaded.promise;
+    await Promise.resolve();
+    renderer.update(product, { overrides: {} }, modelIdentitySelected);
+
+    expect(loadModel).toHaveBeenCalledOnce();
+    expect(renderer.pendingModelIdentity).toBeNull();
+    expect(renderer.currentModelIdentity).toContain('"uvExportLayoutId":"chelsea-jersey@1"');
   });
 
   it('uses a baked bottom-pattern texture for garment meshes and restores the appearance map when disabled', async () => {

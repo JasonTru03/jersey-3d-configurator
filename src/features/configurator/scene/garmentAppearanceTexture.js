@@ -63,6 +63,10 @@ export function renderModelUvAppearance(
   });
 }
 
+export function getGarmentAppearancePathCacheStats(uvLayout) {
+  return { entries: layoutPathCache.get(uvLayout)?.paths.size ?? 0 };
+}
+
 function resolveConfiguredGroupMeshes(modelMeshes, groups) {
   const referencedNames = new Set();
   const ownerByMeshName = new Map();
@@ -136,6 +140,7 @@ function getMeshUvData(mesh) {
 
   const spans = getGeometryRenderSpans(mesh, index?.count ?? position.count);
   const coordinates = [];
+  const triangleKeys = new Set();
   let minU = Infinity;
   let minV = Infinity;
   let maxU = -Infinity;
@@ -147,6 +152,9 @@ function getMeshUvData(mesh) {
       const second = readUvVertex(index, uv, position.count, offset + 1, mesh.name);
       const third = readUvVertex(index, uv, position.count, offset + 2, mesh.name);
       if (!first || !second || !third || isDegenerateUvTriangle(first, second, third)) continue;
+      const triangleKey = `${first.vertexIndex}:${second.vertexIndex}:${third.vertexIndex}`;
+      if (triangleKeys.has(triangleKey)) continue;
+      triangleKeys.add(triangleKey);
       coordinates.push(first.u, first.v, second.u, second.v, third.u, third.v);
       minU = Math.min(minU, first.u, second.u, third.u);
       minV = Math.min(minV, first.v, second.v, third.v);
@@ -179,7 +187,7 @@ function getMeshUvSignature(mesh, position, uv, index) {
           material?.visible !== false,
         ].join(':');
       }).join(',')
-    : 'single-material';
+    : `single-material:${Boolean(mesh.material)}:${mesh.material?.visible !== false}`;
   return {
     geometry: mesh.geometry,
     position,
@@ -221,7 +229,9 @@ function getGeometryRenderSpans(mesh, elementCount) {
   );
   if (!drawSpan) return [];
 
-  if (!Array.isArray(mesh.material)) return [drawSpan];
+  if (!Array.isArray(mesh.material)) {
+    return mesh.material && mesh.material.visible !== false ? [drawSpan] : [];
+  }
   const groups = mesh.geometry.groups ?? [];
   if (groups.length === 0) return [];
 
@@ -239,7 +249,7 @@ function getGeometryRenderSpans(mesh, elementCount) {
     );
     if (span) spans.push(span);
   }
-  return mergeOverlappingSpans(spans);
+  return spans;
 }
 
 function intersectRenderSpan(baseStart, baseEnd, rangeStart, rangeCount) {
@@ -251,19 +261,6 @@ function intersectRenderSpan(baseStart, baseEnd, rangeStart, rangeCount) {
   return end > start ? { start, end } : null;
 }
 
-function mergeOverlappingSpans(spans) {
-  if (spans.length < 2) return spans;
-  spans.sort((left, right) => left.start - right.start || left.end - right.end);
-  const merged = [spans[0]];
-  for (let index = 1; index < spans.length; index += 1) {
-    const next = spans[index];
-    const previous = merged[merged.length - 1];
-    if (next.start < previous.end) previous.end = Math.max(previous.end, next.end);
-    else merged.push(next);
-  }
-  return merged;
-}
-
 function readUvVertex(index, uv, positionCount, offset, meshName) {
   const vertexIndex = index ? index.getX(offset) : offset;
   if (!Number.isFinite(vertexIndex) || !Number.isInteger(vertexIndex) || vertexIndex < 0) return null;
@@ -273,7 +270,7 @@ function readUvVertex(index, uv, positionCount, offset, meshName) {
   }
   const u = uv.getX(vertexIndex);
   const v = uv.getY(vertexIndex);
-  return Number.isFinite(u) && Number.isFinite(v) ? { u, v } : null;
+  return Number.isFinite(u) && Number.isFinite(v) ? { u, v, vertexIndex } : null;
 }
 
 function isDegenerateUvTriangle(first, second, third) {
@@ -313,13 +310,14 @@ function getCachedGroupPath(uvLayout, group, meshUvData, width, height) {
   }
   const meshNames = group.islandRefs.map(({ meshName }) => meshName).join(',');
   const revisions = meshUvData.map(({ revision }) => revision).join(',');
-  const key = `${group.id}|${meshNames}|${revisions}|${width}x${height}`;
+  const key = `${group.id}|${width}x${height}`;
+  const signature = `${meshNames}|${revisions}`;
   const cached = cache.paths.get(key);
-  if (cached) return cached;
+  if (cached?.signature === signature) return cached.path;
 
   const path = new PathConstructor();
   appendUvTrianglesToPath(path, meshUvData, width, height);
-  cache.paths.set(key, path);
+  cache.paths.set(key, { path, signature });
   return path;
 }
 

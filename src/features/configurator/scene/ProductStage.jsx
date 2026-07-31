@@ -29,6 +29,7 @@ export function ProductStage({
   onDeletePersonalization,
   onEditPersonalization,
   onPersonalizationSelect,
+  onRendererError,
   onStatePatch,
   personalizationFocusId,
   personalizationMutationDisabled = false,
@@ -74,6 +75,10 @@ export function ProductStage({
   const handleStateNormalize = useCallback(
     (patch) => onStatePatch(patch, { quote: false, recordHistory: false }),
     [onStatePatch],
+  );
+  const reportRendererError = useCallback(
+    (error) => onRendererError?.(error),
+    [onRendererError],
   );
   const handleViewSelect = (nextView) => {
     if (nextView === view) {
@@ -181,6 +186,7 @@ export function ProductStage({
 
     try {
       rendererRef.current = new Renderer(hostRef.current, {
+        onError: reportRendererError,
         onPrintAnchorChange: setPrintAnchor,
         onPrintSelectionChange: handlePrintSelectionChange,
         onStatePatch,
@@ -188,6 +194,7 @@ export function ProductStage({
       });
       rendererRef.current.update(product, state, selected);
     } catch (error) {
+      reportRendererError(error);
       console.error(error);
     }
 
@@ -202,14 +209,21 @@ export function ProductStage({
     if (!renderer) return;
     renderer.onStatePatch = onStatePatch;
     renderer.onStateNormalize = handleStateNormalize;
+    renderer.onError = reportRendererError;
     renderer.onPrintAnchorChange = setPrintAnchor;
     renderer.onPrintSelectionChange = handlePrintSelectionChange;
-    renderer.update(product, state, selected);
+    try {
+      renderer.update(product, state, selected);
+    } catch (error) {
+      reportRendererError(error);
+      console.error(error);
+    }
   }, [
     handlePrintSelectionChange,
     handleStateNormalize,
     onStatePatch,
     product,
+    reportRendererError,
     selected,
     state,
   ]);

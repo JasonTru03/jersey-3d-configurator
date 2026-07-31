@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getModelUvLayout } from '../config/modelUvLayouts.js';
+import * as appearanceTextureModule from './garmentAppearanceTexture.js';
 import {
   createGarmentAppearanceCanvas,
   renderGarmentAppearance,
@@ -295,6 +296,75 @@ describe('garment appearance texture', () => {
     ]);
   });
 
+  it('preserves independent triangle phases for overlapping material groups', () => {
+    const material = new THREE.MeshBasicMaterial();
+    const mesh = createUvMesh('front-mesh', [
+      0, 0,
+      0.2, 0,
+      0, 0.2,
+      0.5, 0.5,
+      0.8, 0.5,
+      0.5, 0.8,
+    ], null, { material: [material] });
+    mesh.geometry.addGroup(0, 4, 0);
+    mesh.geometry.addGroup(2, 4, 0);
+
+    const context = renderSingleConfiguredMesh(mesh);
+    const moves = context.calls.filter(([name]) => name === 'moveTo');
+
+    expect(moves).toHaveLength(2);
+    expect(moves[0]).toEqual(['moveTo', 0, 100]);
+    expect(moves[1][1]).toBeCloseTo(0);
+    expect(moves[1][2]).toBeCloseTo(80);
+  });
+
+  it('does not paint the same triangle twice for overlapping material groups', () => {
+    const material = new THREE.MeshBasicMaterial();
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 1, 0, 0, 1,
+    ], null, { material: [material] });
+    mesh.geometry.addGroup(0, 3, 0);
+    mesh.geometry.addGroup(0, 3, 0);
+
+    const context = renderSingleConfiguredMesh(mesh);
+
+    expect(context.calls.filter(([name]) => name === 'moveTo')).toEqual([
+      ['moveTo', 0, 100],
+    ]);
+  });
+
+  it('invalidates cached triangles when a single material becomes invisible', () => {
+    const material = new THREE.MeshBasicMaterial();
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 1, 0, 0, 1,
+    ], null, { material });
+
+    renderSingleConfiguredMesh(mesh);
+    material.visible = false;
+
+    expect(() => renderSingleConfiguredMesh(mesh))
+      .toThrow('模型 UV 裁片组 "front" 没有可绘制的 UV 三角形。');
+  });
+
+  it('draws only visible material-array groups after visibility changes', () => {
+    const firstMaterial = new THREE.MeshBasicMaterial();
+    const secondMaterial = new THREE.MeshBasicMaterial();
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 0.25, 0, 0, 0.25,
+      0.5, 0.5, 0.75, 0.5, 0.5, 0.75,
+    ], null, { material: [firstMaterial, secondMaterial] });
+    mesh.geometry.addGroup(0, 3, 0);
+    mesh.geometry.addGroup(3, 3, 1);
+
+    renderSingleConfiguredMesh(mesh);
+    firstMaterial.visible = false;
+    const context = renderSingleConfiguredMesh(mesh);
+
+    expect(context.calls.filter(([name]) => name === 'moveTo')).toEqual([
+      ['moveTo', 50, 50],
+    ]);
+  });
+
   it('ignores geometry groups for a single-material mesh', () => {
     const mesh = createUvMesh('front-mesh', [
       0, 0, 0.25, 0, 0, 0.25,
@@ -536,6 +606,46 @@ describe('garment appearance texture', () => {
 
       expect(paths).toHaveLength(2);
       expect(paths[1].calls).toContainEqual(['moveTo', 25, 75]);
+    } finally {
+      if (OriginalPath2D === undefined) delete globalThis.Path2D;
+      else globalThis.Path2D = OriginalPath2D;
+    }
+  });
+
+  it('bounds Path2D cache entries across repeated geometry revisions', () => {
+    const OriginalPath2D = globalThis.Path2D;
+    const paths = [];
+    class RecordingPath2D {
+      constructor() { paths.push(this); }
+      moveTo() {}
+      lineTo() {}
+      closePath() {}
+    }
+    globalThis.Path2D = RecordingPath2D;
+    try {
+      const mesh = createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1]);
+      const uv = mesh.geometry.getAttribute('uv');
+      const uvLayout = createSingleMeshLayout();
+      const render = (size) => renderModelUvAppearance(
+        createNoopContext(),
+        { width: size, height: size },
+        appearance,
+        { modelMeshes: [mesh], uvLayout },
+      );
+
+      render(2048);
+      render(4096);
+      for (let revision = 1; revision <= 8; revision += 1) {
+        uv.setXY(0, revision / 100, revision / 100);
+        uv.needsUpdate = true;
+        render(2048);
+      }
+
+      expect(appearanceTextureModule.getGarmentAppearancePathCacheStats)
+        .toBeTypeOf('function');
+      expect(appearanceTextureModule.getGarmentAppearancePathCacheStats(uvLayout))
+        .toEqual({ entries: 2 });
+      expect(paths).toHaveLength(10);
     } finally {
       if (OriginalPath2D === undefined) delete globalThis.Path2D;
       else globalThis.Path2D = OriginalPath2D;

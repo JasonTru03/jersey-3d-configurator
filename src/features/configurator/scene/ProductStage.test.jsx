@@ -5,6 +5,7 @@ import { ProductStage } from './ProductStage.jsx';
 
 const rendererHarness = vi.hoisted(() => ({
   activePrintId: null,
+  constructorError: null,
   rotationGestureEnds: [],
   rotationGestureStarts: [],
   rotationPreviews: [],
@@ -15,10 +16,12 @@ const rendererHarness = vi.hoisted(() => ({
   finalResizeItem: null,
   resizePreviews: [],
   focusedDecorationId: null,
+  instance: null,
   options: null,
   personalizationMutationDisabled: null,
   productionRequests: [],
   productionResult: null,
+  updateError: null,
   normalizationForUpdate: null,
   updateArgs: null,
   viewCalls: [],
@@ -36,11 +39,14 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
     GarmentRenderer: class {
       constructor(host, options) {
         rendererHarness.options = options;
+        rendererHarness.instance = this;
+        if (rendererHarness.constructorError) throw rendererHarness.constructorError;
         this.onPrintAnchorChange = options.onPrintAnchorChange;
         this.onStateNormalize = options.onStateNormalize;
       }
 
       update(...args) {
+        if (rendererHarness.updateError) throw rendererHarness.updateError;
         rendererHarness.updateArgs = args;
         const normalization = rendererHarness.normalizationForUpdate?.(args[1]);
         if (normalization) this.onStateNormalize?.(normalization);
@@ -122,6 +128,7 @@ afterAll(() => {
 
 beforeEach(() => {
   rendererHarness.activePrintId = null;
+  rendererHarness.constructorError = null;
   rendererHarness.rotationGestureEnds = [];
   rendererHarness.rotationGestureStarts = [];
   rendererHarness.rotationPreviews = [];
@@ -132,10 +139,12 @@ beforeEach(() => {
   rendererHarness.finalResizeItem = null;
   rendererHarness.resizePreviews = [];
   rendererHarness.focusedDecorationId = null;
+  rendererHarness.instance = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
   rendererHarness.productionRequests = [];
   rendererHarness.productionResult = null;
+  rendererHarness.updateError = null;
   rendererHarness.normalizationForUpdate = null;
   rendererHarness.updateArgs = null;
   rendererHarness.viewCalls = [];
@@ -163,6 +172,49 @@ describe('ProductStage production provider', () => {
 
     view.unmount();
     expect(onProductionProvider).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe('ProductStage renderer errors', () => {
+  it.each(['constructor', 'update'])('reports a synchronous renderer %s error', (phase) => {
+    const error = new Error(`${phase} failed`);
+    rendererHarness[`${phase}Error`] = error;
+    const onRendererError = vi.fn();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(
+      <ProductStage
+        onRendererError={onRendererError}
+        onStatePatch={vi.fn()}
+        product={product}
+        selected={selected}
+        state={{ lighting: 'none', overrides: {} }}
+      />,
+    );
+
+    expect(onRendererError).toHaveBeenCalledWith(error);
+    consoleError.mockRestore();
+  });
+
+  it('uses the latest renderer error handler after the prop changes', () => {
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+    const props = {
+      onStatePatch: vi.fn(),
+      product,
+      selected,
+      state: { lighting: 'none', overrides: {} },
+    };
+    const { rerender } = render(
+      <ProductStage {...props} onRendererError={firstHandler} />,
+    );
+
+    act(() => rendererHarness.instance.onError(new Error('first error')));
+    rerender(<ProductStage {...props} onRendererError={secondHandler} />);
+    act(() => rendererHarness.instance.onError(new Error('second error')));
+
+    expect(firstHandler).toHaveBeenCalledWith(expect.objectContaining({ message: 'first error' }));
+    expect(secondHandler).toHaveBeenCalledWith(expect.objectContaining({ message: 'second error' }));
   });
 });
 

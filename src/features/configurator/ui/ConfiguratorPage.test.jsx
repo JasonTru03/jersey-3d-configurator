@@ -169,6 +169,45 @@ describe('ConfiguratorPage', () => {
     consoleError.mockRestore();
   });
 
+  it('shows an unavailable renderer alert and keeps save disabled', async () => {
+    const definition = await productApi.getProductDefinition('fn8788-jersey');
+    const definitionSpy = vi.spyOn(productApi, 'getProductDefinition').mockResolvedValueOnce({
+      ...definition,
+      renderer: 'missing',
+    });
+
+    try {
+      render(<ConfiguratorPage />);
+      await screen.findByText('Chelsea Match Jersey');
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        '当前产品的 3D 渲染器不可用。',
+      );
+      expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
+      expect(screen.getAllByRole('alert')).toHaveLength(1);
+    } finally {
+      definitionSpy.mockRestore();
+    }
+  });
+
+  it('shows a WebGL unavailable alert and keeps save disabled', async () => {
+    const WebGLRenderingContext = window.WebGLRenderingContext;
+    vi.stubGlobal('WebGLRenderingContext', undefined);
+
+    try {
+      render(<ConfiguratorPage />);
+      await screen.findByText('Chelsea Match Jersey');
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        '当前浏览器无法使用 3D 定制功能。',
+      );
+      expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
+      expect(screen.getAllByRole('alert')).toHaveLength(1);
+    } finally {
+      vi.stubGlobal('WebGLRenderingContext', WebGLRenderingContext);
+    }
+  });
+
   it('shows a Chinese fallback for an unknown renderer error', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');

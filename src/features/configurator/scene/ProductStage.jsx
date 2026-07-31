@@ -41,6 +41,7 @@ export function ProductStage({
   const hostRef = useRef(null);
   const rendererRef = useRef(null);
   const mountedRef = useRef(false);
+  const rendererAvailabilityErrorKeyRef = useRef(null);
   const copyTokenRef = useRef(0);
   const selectionIntentRef = useRef(null);
   const reportedNullSelectionRef = useRef(null);
@@ -181,8 +182,24 @@ export function ProductStage({
 
   useEffect(() => {
     const Renderer = rendererRegistry[product.renderer];
-    if (!hostRef.current || rendererRef.current || !Renderer) return;
-    if (!canUseWebGl()) return;
+    if (!hostRef.current || rendererRef.current) return;
+    if (!Renderer) {
+      const errorKey = `renderer:${product.renderer}`;
+      if (rendererAvailabilityErrorKeyRef.current !== errorKey) {
+        rendererAvailabilityErrorKeyRef.current = errorKey;
+        reportRendererError(new Error('当前产品的 3D 渲染器不可用。'));
+      }
+      return;
+    }
+    if (!canUseWebGl()) {
+      const errorKey = 'webgl';
+      if (rendererAvailabilityErrorKeyRef.current !== errorKey) {
+        rendererAvailabilityErrorKeyRef.current = errorKey;
+        reportRendererError(new Error('当前浏览器无法使用 3D 定制功能。'));
+      }
+      return;
+    }
+    rendererAvailabilityErrorKeyRef.current = null;
 
     try {
       rendererRef.current = new Renderer(hostRef.current, {

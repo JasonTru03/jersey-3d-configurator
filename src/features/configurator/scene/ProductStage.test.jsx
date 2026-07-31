@@ -216,6 +216,60 @@ describe('ProductStage renderer errors', () => {
     expect(firstHandler).toHaveBeenCalledWith(expect.objectContaining({ message: 'first error' }));
     expect(secondHandler).toHaveBeenCalledWith(expect.objectContaining({ message: 'second error' }));
   });
+
+  it('reports an unsupported renderer once and keeps the provider unavailable', () => {
+    const onProductionProvider = vi.fn();
+    const onRendererError = vi.fn();
+
+    render(
+      <StrictMode>
+        <ProductStage
+          onProductionProvider={onProductionProvider}
+          onRendererError={onRendererError}
+          onStatePatch={vi.fn()}
+          product={{ ...product, renderer: 'missing' }}
+          selected={selected}
+          state={{ lighting: 'none', overrides: {} }}
+        />
+      </StrictMode>,
+    );
+
+    expect(onRendererError).toHaveBeenCalledTimes(1);
+    expect(onRendererError).toHaveBeenCalledWith(expect.objectContaining({
+      message: '当前产品的 3D 渲染器不可用。',
+    }));
+    expect(onProductionProvider).toHaveBeenLastCalledWith(null);
+  });
+
+  it('reports unavailable WebGL once and keeps the provider unavailable', () => {
+    const WebGLRenderingContext = window.WebGLRenderingContext;
+    const onProductionProvider = vi.fn();
+    const onRendererError = vi.fn();
+    vi.stubGlobal('WebGLRenderingContext', undefined);
+
+    try {
+      render(
+        <StrictMode>
+          <ProductStage
+            onProductionProvider={onProductionProvider}
+            onRendererError={onRendererError}
+            onStatePatch={vi.fn()}
+            product={product}
+            selected={selected}
+            state={{ lighting: 'none', overrides: {} }}
+          />
+        </StrictMode>,
+      );
+
+      expect(onRendererError).toHaveBeenCalledTimes(1);
+      expect(onRendererError).toHaveBeenCalledWith(expect.objectContaining({
+        message: '当前浏览器无法使用 3D 定制功能。',
+      }));
+      expect(onProductionProvider).toHaveBeenLastCalledWith(null);
+    } finally {
+      vi.stubGlobal('WebGLRenderingContext', WebGLRenderingContext);
+    }
+  });
 });
 
 describe('ProductStage print toolbar', () => {

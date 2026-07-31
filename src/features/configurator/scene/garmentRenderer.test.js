@@ -272,11 +272,11 @@ function createConcurrentModelLoadHarness() {
     aScene,
     bLoader,
     bScene,
-    cleanup() {
+    cleanup({ disposeRenderer = true } = {}) {
       consoleError.mockRestore();
       productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
       productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
-      renderer.dispose();
+      if (disposeRenderer) renderer.dispose();
     },
     onError,
     productA,
@@ -427,10 +427,21 @@ describe('garment decoration mesh selection', () => {
       bScene,
       onError,
       renderer,
+      updateBottomPattern,
       updatePrintLayer,
     } = harness;
+    const previous = installLoadedModelState(renderer);
+    const previousGeometryDisposes = previous.modelMeshes.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+    const previousMaterialDisposes = previous.modelMaterials.map((material) => vi.spyOn(material, 'dispose'));
+    const previousAppearanceDispose = vi.spyOn(previous.texture, 'dispose');
+    const previousBottomDispose = vi.spyOn(previous.bottomTexture, 'dispose');
+    const aReplacedBaseColorMap = aScene.children[0].material.map;
+    const aReplacedBaseColorMapDispose = vi.spyOn(aReplacedBaseColorMap, 'dispose');
     const aGeometryDisposes = aScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
     const bGeometryDisposes = bScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+    let bMaterialDisposes = [];
+    let bAppearanceDispose;
+    let rendererDisposed = false;
 
     try {
       const { load: aLoad, readiness: aReadiness } = harness.startA();
@@ -438,8 +449,16 @@ describe('garment decoration mesh selection', () => {
       await aBottomEntered.promise;
       const aAppearance = renderer.appearanceTexture;
       const aAppearanceDispose = vi.spyOn(aAppearance, 'dispose');
+      const aMaterialDisposes = renderer.modelMaterials.map((material) => vi.spyOn(material, 'dispose'));
       expect(renderer.modelGroup.children).toEqual([aScene]);
 
+      updateBottomPattern.mockImplementation(() => {
+        if (renderer.modelGroup.children[0] === bScene && !bAppearanceDispose) {
+          bMaterialDisposes = renderer.modelMaterials.map((material) => vi.spyOn(material, 'dispose'));
+          bAppearanceDispose = vi.spyOn(renderer.appearanceTexture, 'dispose');
+        }
+        return Promise.resolve();
+      });
       const { load: bLoad, readiness: bReadiness } = harness.startB();
       bLoader.resolve({ scene: bScene });
       await expect(bLoad).resolves.toBe(true);
@@ -458,7 +477,16 @@ describe('garment decoration mesh selection', () => {
       expect(renderer.currentModelIdentity).toContain('"glbUrl":"/models/b.glb"');
       expect(renderer.currentModelIdentity).toContain('"uvExportLayoutId":"fn8788-jersey@1"');
       aGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      aMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
       expect(aAppearanceDispose).toHaveBeenCalledOnce();
+      expect(aReplacedBaseColorMapDispose).not.toHaveBeenCalled();
+      previousGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      previousMaterialDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      expect(previousAppearanceDispose).not.toHaveBeenCalled();
+      expect(previousBottomDispose).not.toHaveBeenCalled();
+      bGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      bMaterialDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      expect(bAppearanceDispose).not.toHaveBeenCalled();
 
       updatePrintLayer.mockClear();
       updatePrintLayer.mockImplementation(() => {
@@ -480,12 +508,34 @@ describe('garment decoration mesh selection', () => {
       expect(renderer.appearanceTextureKey).toBe(committedBAppearanceKey);
       expect(renderer.currentModelIdentity).toContain('"glbUrl":"/models/b.glb"');
       aGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      aMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
       expect(aAppearanceDispose).toHaveBeenCalledOnce();
+      previousGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      previousMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(previousAppearanceDispose).toHaveBeenCalledOnce();
+      expect(previousBottomDispose).toHaveBeenCalledOnce();
+      expect(aReplacedBaseColorMapDispose).toHaveBeenCalledOnce();
       bGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      bMaterialDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
       expect(committedBAppearanceDispose).not.toHaveBeenCalled();
       expect(onError).not.toHaveBeenCalled();
+
+      renderer.dispose();
+      rendererDisposed = true;
+
+      previousGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      previousMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(previousAppearanceDispose).toHaveBeenCalledOnce();
+      expect(previousBottomDispose).toHaveBeenCalledOnce();
+      expect(aReplacedBaseColorMapDispose).toHaveBeenCalledOnce();
+      aGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      aMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(aAppearanceDispose).toHaveBeenCalledOnce();
+      bGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      bMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(committedBAppearanceDispose).toHaveBeenCalledOnce();
     } finally {
-      harness.cleanup();
+      harness.cleanup({ disposeRenderer: !rendererDisposed });
     }
   });
 
@@ -500,10 +550,20 @@ describe('garment decoration mesh selection', () => {
       bScene,
       onError,
       renderer,
+      updateBottomPattern,
       updatePrintLayer,
     } = harness;
+    const previous = installLoadedModelState(renderer);
+    const previousGeometryDisposes = previous.modelMeshes.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+    const previousMaterialDisposes = previous.modelMaterials.map((material) => vi.spyOn(material, 'dispose'));
+    const previousAppearanceDispose = vi.spyOn(previous.texture, 'dispose');
+    const previousBottomDispose = vi.spyOn(previous.bottomTexture, 'dispose');
+    const aReplacedBaseColorMap = aScene.children[0].material.map;
+    const aReplacedBaseColorMapDispose = vi.spyOn(aReplacedBaseColorMap, 'dispose');
     const aGeometryDisposes = aScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
     const bGeometryDisposes = bScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+    let bMaterialDisposes = [];
+    let rendererDisposed = false;
 
     try {
       const { load: aLoad, readiness: aReadiness } = harness.startA();
@@ -518,13 +578,20 @@ describe('garment decoration mesh selection', () => {
       const stagedAAppearance = renderer.appearanceTexture;
       const stagedAAppearanceKey = renderer.appearanceTextureKey;
       const stagedAAppearanceDispose = vi.spyOn(stagedAAppearance, 'dispose');
+      const aMaterialDisposes = renderer.modelMaterials.map((material) => vi.spyOn(material, 'dispose'));
 
       const { load: bLoad, readiness: bReadiness } = harness.startB();
       const bFailure = new Error('B print update failed');
       let stagedBAppearanceDispose;
+      updateBottomPattern.mockImplementation(() => {
+        if (renderer.modelGroup.children[0] === bScene && !stagedBAppearanceDispose) {
+          bMaterialDisposes = renderer.modelMaterials.map((material) => vi.spyOn(material, 'dispose'));
+          stagedBAppearanceDispose = vi.spyOn(renderer.appearanceTexture, 'dispose');
+        }
+        return Promise.resolve();
+      });
       updatePrintLayer.mockImplementation(() => {
         if (renderer.modelGroup.children[0] !== bScene) return;
-        stagedBAppearanceDispose = vi.spyOn(renderer.appearanceTexture, 'dispose');
         throw bFailure;
       });
       bLoader.resolve({ scene: bScene });
@@ -545,8 +612,15 @@ describe('garment decoration mesh selection', () => {
       expect(renderer.appearanceTextureKey).toBe(stagedAAppearanceKey);
       expect(renderer.currentModelIdentity).toBe('committed-before-a');
       aGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      aMaterialDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
       expect(stagedAAppearanceDispose).not.toHaveBeenCalled();
+      expect(aReplacedBaseColorMapDispose).not.toHaveBeenCalled();
+      previousGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      previousMaterialDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      expect(previousAppearanceDispose).not.toHaveBeenCalled();
+      expect(previousBottomDispose).not.toHaveBeenCalled();
       bGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      bMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
       expect(stagedBAppearanceDispose).toHaveBeenCalledOnce();
       expect(onError).toHaveBeenCalledTimes(1);
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ cause: bFailure }));
@@ -571,12 +645,34 @@ describe('garment decoration mesh selection', () => {
       expect(renderer.appearanceTextureKey).toBe(stagedAAppearanceKey);
       expect(renderer.currentModelIdentity).toBe('committed-before-a');
       aGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      aMaterialDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
       expect(stagedAAppearanceDispose).not.toHaveBeenCalled();
+      previousGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      previousMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(previousAppearanceDispose).toHaveBeenCalledOnce();
+      expect(previousBottomDispose).toHaveBeenCalledOnce();
+      expect(aReplacedBaseColorMapDispose).toHaveBeenCalledOnce();
       bGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      bMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
       expect(stagedBAppearanceDispose).toHaveBeenCalledOnce();
       expect(onError).toHaveBeenCalledTimes(1);
+
+      renderer.dispose();
+      rendererDisposed = true;
+
+      previousGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      previousMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(previousAppearanceDispose).toHaveBeenCalledOnce();
+      expect(previousBottomDispose).toHaveBeenCalledOnce();
+      expect(aReplacedBaseColorMapDispose).toHaveBeenCalledOnce();
+      aGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      aMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(stagedAAppearanceDispose).toHaveBeenCalledOnce();
+      bGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      bMaterialDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(stagedBAppearanceDispose).toHaveBeenCalledOnce();
     } finally {
-      harness.cleanup();
+      harness.cleanup({ disposeRenderer: !rendererDisposed });
     }
   });
 

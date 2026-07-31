@@ -377,9 +377,21 @@ export class GarmentRenderer {
     let stagedModelMaterials = [];
     let replacedBaseColorMaps = new Set();
     let transactionSnapshot = null;
+    const finalizeSupersededTransaction = () => {
+      if (this.loadToken === loadToken) return false;
+      if (transactionSnapshot) {
+        const supersededSnapshot = transactionSnapshot;
+        const supersededBaseColorMaps = replacedBaseColorMaps;
+        transactionSnapshot = null;
+        replacedBaseColorMaps = new Set();
+        disposeModelLoadSnapshotResources(supersededSnapshot);
+        supersededBaseColorMaps.forEach((map) => map.dispose());
+      }
+      return true;
+    };
     try {
       const gltf = await this.loader.loadAsync(modelUrl);
-      if (this.loadToken !== loadToken) {
+      if (finalizeSupersededTransaction()) {
         modelReadiness.reject(new Error('服装模型加载请求已被替换。'));
         disposeModelResources(gltf.scene);
         return false;
@@ -459,9 +471,9 @@ export class GarmentRenderer {
       }
       this.applyMaterial(this.selected?.material?.material);
       await this.updateBottomPattern();
-      if (this.loadToken !== loadToken) return false;
+      if (finalizeSupersededTransaction()) return false;
       this.updatePrintLayer();
-      if (this.loadToken !== loadToken) return false;
+      if (finalizeSupersededTransaction()) return false;
       gsap.fromTo(model.scale, { x: model.scale.x * 0.94, y: model.scale.y * 0.94, z: model.scale.z * 0.94 }, {
         x: model.scale.x,
         y: model.scale.y,
@@ -469,7 +481,7 @@ export class GarmentRenderer {
         duration: 0.55,
         ease: 'power2.out',
       });
-      if (this.loadToken !== loadToken) return false;
+      if (finalizeSupersededTransaction()) return false;
 
       disposeModelLoadSnapshotResources(transactionSnapshot);
       replacedBaseColorMaps.forEach((map) => map.dispose());
@@ -481,7 +493,7 @@ export class GarmentRenderer {
       modelReadiness.resolve();
       return true;
     } catch (error) {
-      if (this.loadToken !== loadToken) return false;
+      if (finalizeSupersededTransaction()) return false;
       if (transactionSnapshot) {
         const stagedBottomPatternTexture = this.bottomPatternTexture === transactionSnapshot.bottomPatternTexture
           ? null

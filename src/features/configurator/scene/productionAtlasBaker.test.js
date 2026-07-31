@@ -151,6 +151,43 @@ describe('production atlas baker', () => {
     expect(intersectObjects).toHaveBeenCalledTimes(3);
   });
 
+  it('yields between atlas raster batches', async () => {
+    installCanvasHarness();
+    const garment = createGarmentMesh([
+      [0.05, 0.1],
+      [0.45, 0.1],
+      [0.25, 0.9],
+    ]);
+    const layer = createLayer({ garmentMesh: garment, id: 'batched', renderOrder: 8 });
+    const basePositions = [...layer.geometry.getAttribute('position').array];
+    const baseUvs = [...layer.geometry.getAttribute('uv').array];
+    layer.geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(
+        Array.from({ length: 201 }, () => basePositions).flat(),
+        3,
+      ),
+    );
+    layer.geometry.setAttribute(
+      'uv',
+      new THREE.Float32BufferAttribute(
+        Array.from({ length: 201 }, () => baseUvs).flat(),
+        2,
+      ),
+    );
+    const yieldControl = vi.fn(() => Promise.resolve());
+
+    await bakeProductionAtlas({
+      appearanceCanvas: { id: 'appearance', width: 32, height: 32 },
+      atlasSize: 64,
+      garmentMeshes: [garment],
+      layers: [layer],
+      yieldControl,
+    });
+
+    expect(yieldControl.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('fails when a printable garment mesh has no UVs', async () => {
     const garment = createGarmentMesh(undefined, 'Body');
     garment.geometry.deleteAttribute('uv');

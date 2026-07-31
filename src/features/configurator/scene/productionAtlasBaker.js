@@ -10,6 +10,7 @@ export async function bakeProductionAtlas({
   garmentMeshes,
   layers,
   legacyPatternCanvas = null,
+  yieldControl = yieldToBrowser,
 }) {
   if (!Number.isInteger(atlasSize) || atlasSize < 1) {
     throw new Error('UV Atlas 尺寸无效。');
@@ -36,7 +37,9 @@ export async function bakeProductionAtlas({
       || first.index - second.index
     ))
     .map(({ layer }) => layer);
-  for (const layer of orderedLayers) rasterizeLayer(context, atlasSize, layer);
+  for (const layer of orderedLayers) {
+    await rasterizeLayer(context, atlasSize, layer, yieldControl);
+  }
 
   const blob = await canvasToPngBlob(canvas);
   return {
@@ -59,7 +62,7 @@ function validateGarmentUvs(meshes) {
   });
 }
 
-function rasterizeLayer(context, size, layer) {
+async function rasterizeLayer(context, size, layer, yieldControl) {
   const position = layer?.geometry?.attributes?.position;
   const sourceUv = layer?.geometry?.attributes?.uv;
   const textureSource = layer?.textureSource;
@@ -88,6 +91,7 @@ function rasterizeLayer(context, size, layer) {
   const projectionCache = new Map();
 
   for (let offset = 0; offset < triangleCount * 3; offset += 3) {
+    if (offset > 0 && offset % (96 * 3) === 0) await yieldControl();
     const vertexIndexes = [0, 1, 2].map((corner) => (
       index ? index.getX(offset + corner) : offset + corner
     ));
@@ -147,6 +151,16 @@ function rasterizeLayer(context, size, layer) {
       `生产图层 "${layer.label || layer.id || 'unknown'}" 无法完整映射到服装 UV。`,
     );
   }
+}
+
+function yieldToBrowser() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
 }
 
 function getClosestProjection(garmentMeshes, point, projectionCache, size) {

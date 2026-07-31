@@ -141,7 +141,12 @@ function buildUniqueGroups(pieceGroups, meshes) {
   const referencedMeshes = new Set();
   const resolvedGroups = [...pieceGroups]
     .sort((left, right) => left.order - right.order)
-    .map((group) => ({ ...group, aliases: [], meshes: [] }));
+    .map((group) => ({
+      ...group,
+      duplicateGroup: normalizeDuplicateGroup(group),
+      aliases: [],
+      meshes: [],
+    }));
 
   for (const group of resolvedGroups) {
     for (const { meshName } of group.islandRefs) {
@@ -178,6 +183,14 @@ function buildUniqueGroups(pieceGroups, meshes) {
   return uniqueGroups;
 }
 
+function normalizeDuplicateGroup(group) {
+  if (!Object.hasOwn(group, 'duplicateGroup')) return null;
+  if (typeof group.duplicateGroup !== 'string' || group.duplicateGroup.trim().length === 0) {
+    throw new Error(`模型 UV 裁片配置错误：裁片组 "${group.id}" 的 duplicateGroup 必须是非空字符串。`);
+  }
+  return group.duplicateGroup.trim();
+}
+
 function extractGroupTriangles(group, atlasSize) {
   return group.meshes.flatMap((mesh) => extractMeshTriangles(mesh, atlasSize));
 }
@@ -186,7 +199,7 @@ function extractMeshTriangles(mesh, atlasSize) {
   const geometry = mesh.geometry;
   const position = geometry?.getAttribute?.('position');
   const uv = geometry?.getAttribute?.('uv');
-  if (!position || !uv || position.count !== uv.count) return [];
+  if (!position || !uv) return [];
   if (Array.isArray(mesh.material)) {
     if (mesh.material.length === 0) return [];
   } else if (!mesh.material || mesh.material.visible === false) {
@@ -198,16 +211,22 @@ function extractMeshTriangles(mesh, atlasSize) {
   const triangles = [];
   const offsets = new Set();
   for (const { start, end } of getVisibleRenderSpans(geometry, mesh.material, elementCount)) {
-    const firstTriangle = Math.ceil(start / 3) * 3;
-    for (let offset = firstTriangle; offset + 2 < end; offset += 3) {
+    for (let offset = start; offset + 2 < end; offset += 3) {
       if (offsets.has(offset)) continue;
       offsets.add(offset);
       const vertexIndices = [0, 1, 2].map((delta) => (
         index ? index.getX(offset + delta) : offset + delta
       ));
       if (!vertexIndices.every((vertexIndex) => (
-        Number.isInteger(vertexIndex) && vertexIndex >= 0 && vertexIndex < position.count
-      ))) continue;
+        Number.isInteger(vertexIndex)
+        && vertexIndex >= 0
+        && vertexIndex < position.count
+      ))) {
+        throw new Error(`UV 裁片网格 "${mesh.name}" 的实际绘制索引超出 position 范围。`);
+      }
+      if (!vertexIndices.every((vertexIndex) => vertexIndex < uv.count)) {
+        throw new Error(`UV 裁片网格 "${mesh.name}" 的实际绘制范围超出 UV 属性。`);
+      }
       if (!vertexIndices.every((vertexIndex) => isFiniteAttributeItem(position, vertexIndex))) continue;
       const uvPoints = vertexIndices.map((vertexIndex) => ({
         u: uv.getX(vertexIndex),
@@ -230,9 +249,7 @@ function getVisibleRenderSpans(geometry, material, elementCount) {
 
   if (!Array.isArray(material)) return [{ start: drawStart, end: drawEnd }];
   const groups = geometry.groups ?? [];
-  if (groups.length === 0) {
-    return material[0]?.visible === false ? [] : [{ start: drawStart, end: drawEnd }];
-  }
+  if (groups.length === 0) return [];
   return groups.flatMap((group) => {
     if (material[group.materialIndex]?.visible === false || !material[group.materialIndex]) return [];
     const start = Math.max(drawStart, clampInteger(group.start, 0, elementCount));
@@ -293,7 +310,7 @@ function calculateSourceBounds(triangles, atlasSize) {
   };
 }
 
-async function drawTriangleBatches({
+export async function drawTriangleBatches({
   context,
   atlasCanvas,
   sourceBounds,
@@ -349,7 +366,7 @@ function getOrientedSize({ width, height }, transform) {
   };
 }
 
-function drawOrientedPiece(context, sourceCanvas, sourceBounds, { rotation, mirrorX }) {
+export function drawOrientedPiece(context, sourceCanvas, sourceBounds, { rotation, mirrorX }) {
   if (!context) throw new Error('无法创建 UV 裁片方向画布。');
   const { width, height } = sourceBounds;
   const outputWidth = rotation === 90 || rotation === 270 ? height : width;
@@ -429,7 +446,7 @@ function createPieceMetadata(group, mappedTriangles, sourceBounds, outputBounds)
   };
 }
 
-function countCoveragePixels(context, { x, y, width, height }) {
+export function countCoveragePixels(context, { x, y, width, height }) {
   const maximumPixelsPerRead = 262144;
   const rowsPerRead = Math.max(1, Math.floor(maximumPixelsPerRead / width));
   let coveragePixels = 0;

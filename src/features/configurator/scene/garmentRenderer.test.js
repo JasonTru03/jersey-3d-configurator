@@ -184,6 +184,107 @@ describe('garment decoration mesh selection', () => {
     expect(stale.mapDispose).toHaveBeenCalledOnce();
   });
 
+  it('waits for the current model and artwork textures before production', async () => {
+    const modelReady = deferred();
+    const waitForTextures = vi.fn();
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.modelReadiness = { promise: modelReady.promise };
+    renderer.decorationEditor = { waitForTextures };
+    renderer.updateBottomPattern = vi.fn();
+    renderer.bottomPatternPendingKey = null;
+    renderer.appearanceTexture = {};
+    renderer.modelMeshes = [{}];
+
+    let settled = false;
+    const ready = renderer.waitForProductionReady().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    modelReady.resolve();
+    await ready;
+
+    expect(waitForTextures).toHaveBeenCalledOnce();
+    expect(renderer.updateBottomPattern).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a production request for a stale design snapshot', async () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.waitForProductionReady = vi.fn();
+    renderer.product = {
+      model: {
+        id: 'chelsea-jersey',
+        version: '1',
+        uvExportVersion: '1',
+        uvAtlasSize: 4096,
+      },
+    };
+    renderer.state = {
+      productId: 'fn8788-jersey',
+      layout: 'm',
+      overrides: { customTextItems: [], printItems: [] },
+    };
+
+    await expect(renderer.prepareProductionArtifacts({
+      model: renderer.product.model,
+      stateSnapshot: { ...renderer.state, layout: 'xl' },
+    })).rejects.toThrow('设计已发生变化，请重新保存。');
+  });
+
+  it('does not treat derived bottom-pattern bake metadata as a design change', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const model = {
+      id: 'chelsea-jersey',
+      version: '1',
+      uvExportVersion: '1',
+      uvAtlasSize: 4096,
+    };
+    renderer.product = { model };
+    const stateSnapshot = {
+      productId: 'fn8788-jersey',
+      layout: 'm',
+      overrides: {
+        bottomPattern: {
+          enabled: true,
+          bakeMetadata: { atlasFilename: 'old.png', atlasSha256: 'sha256:old' },
+        },
+        customTextItems: [],
+        printItems: [],
+      },
+    };
+    renderer.state = structuredClone(stateSnapshot);
+    renderer.state.overrides.bottomPattern.bakeMetadata = {
+      atlasFilename: 'new.png',
+      atlasSha256: 'sha256:new',
+    };
+
+    expect(() => renderer.assertProductionSnapshot(model, stateSnapshot)).not.toThrow();
+  });
+
+  it('temporarily hides print proxies and restores capture state', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const visiblePlane = { userData: {}, visible: true };
+    const hiddenPlane = { userData: {}, visible: false };
+    renderer.printLayers = new Map([
+      ['visible', { plane: visiblePlane }],
+      ['hidden', { plane: hiddenPlane }],
+    ]);
+    renderer.decorationEditor = { setProductionCaptureMode: vi.fn() };
+
+    renderer.setProductionCaptureMode(true);
+
+    expect(visiblePlane.visible).toBe(false);
+    expect(hiddenPlane.visible).toBe(false);
+    expect(renderer.decorationEditor.setProductionCaptureMode).toHaveBeenCalledWith(true);
+
+    renderer.setProductionCaptureMode(false);
+
+    expect(visiblePlane.visible).toBe(true);
+    expect(hiddenPlane.visible).toBe(false);
+    expect(renderer.decorationEditor.setProductionCaptureMode).toHaveBeenLastCalledWith(false);
+  });
+
   it('replaces garment appearance textures and synchronizes the name-set color', () => {
     const host = document.createElement('div');
     document.body.append(host);

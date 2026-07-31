@@ -352,6 +352,22 @@ export class DecorationEditor {
     }).filter(Boolean);
   }
 
+  setProductionCaptureMode(enabled) {
+    this.surfaces.forEach((surface) => {
+      if (enabled) {
+        if (!Object.hasOwn(surface.userData, 'productionCaptureOpacity')) {
+          surface.userData.productionCaptureOpacity = surface.material.opacity;
+        }
+        surface.material.opacity = 1;
+        return;
+      }
+      if (Number.isFinite(surface.userData.productionCaptureOpacity)) {
+        surface.material.opacity = surface.userData.productionCaptureOpacity;
+      }
+      delete surface.userData.productionCaptureOpacity;
+    });
+  }
+
   update(decorations = [], selectedId = null, presets = []) {
     const previousSelectedId = this.selectedId;
     this.decorations = decorations;

@@ -6,6 +6,10 @@ export function canonicalizeProductionValue(value) {
   return JSON.stringify(sortValue(value));
 }
 
+export function normalizeProductionState(state) {
+  return stripVolatileFields(normalizeDesignState(structuredClone(state)));
+}
+
 export async function createDesignFingerprint({
   model,
   productId,
@@ -26,7 +30,7 @@ export async function createDesignFingerprint({
     packageSchemaVersion: PRODUCTION_PACKAGE_SCHEMA_VERSION,
     productId,
     size,
-    state: stripVolatileFields(normalizeDesignState(structuredClone(state))),
+    state: normalizeProductionState(state),
     uvExportVersion: model.uvExportVersion,
     variantId,
   });

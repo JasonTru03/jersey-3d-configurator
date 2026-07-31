@@ -115,9 +115,9 @@ function makeModel(map) {
   return model;
 }
 
-function makeConfiguredUvModel(map = null) {
+function makeConfiguredUvModel(map = null, meshNames = ['Cloth_mesh_7', 'Cloth_mesh_4']) {
   const model = new THREE.Group();
-  ['Cloth_mesh_7', 'Cloth_mesh_4'].forEach((name) => {
+  meshNames.forEach((name) => {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
       new THREE.MeshStandardMaterial({ map }),
@@ -191,6 +191,115 @@ function deferred() {
   let resolve;
   const promise = new Promise((nextResolve) => { resolve = nextResolve; });
   return { promise, resolve };
+}
+
+function createConcurrentModelLoadHarness() {
+  productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+  productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const onError = vi.fn();
+  const host = document.createElement('div');
+  document.body.append(host);
+  const renderer = new GarmentRenderer(host, { onError });
+  renderer.currentModelIdentity = 'committed-before-a';
+  renderer.currentModelUrl = '/models/committed-before-a.glb';
+  vi.spyOn(renderer, 'applyAppearance').mockImplementation(() => {});
+  vi.spyOn(renderer, 'applyMaterial').mockImplementation(() => {});
+  renderer.decorationEditor.update = vi.fn();
+
+  const productA = {
+    decorationPresets: [],
+    model: {
+      glbUrl: '/models/a.glb',
+      id: 'chelsea-jersey',
+      version: '1',
+      uvExportLayoutId: 'chelsea-jersey@1',
+    },
+  };
+  const productB = {
+    decorationPresets: [],
+    model: {
+      glbUrl: '/models/b.glb',
+      id: 'fn8788-jersey',
+      version: '1',
+      uvExportLayoutId: 'fn8788-jersey@1',
+    },
+  };
+  const selectedA = {
+    appearance: { template: 'solid', colors: { body: '#111111', number: '#AAAAAA' } },
+    material: { material: { roughness: 0.7, metalness: 0 } },
+  };
+  const selectedB = {
+    appearance: { template: 'solid', colors: { body: '#222222', number: '#BBBBBB' } },
+    material: { material: { roughness: 0.5, metalness: 0 } },
+  };
+  const stateA = { lighting: 'none', overrides: { decorations: [], printItems: [] } };
+  const stateB = { lighting: 'none', overrides: { decorations: [], printItems: [] } };
+  const aScene = makeConfiguredUvModel(new THREE.Texture());
+  const bScene = makeConfiguredUvModel(
+    new THREE.Texture(),
+    ['Cloth_mesh_1', 'Cloth_mesh_5'],
+  );
+  const aLoader = deferred();
+  const bLoader = deferred();
+  renderer.loader = {
+    loadAsync: vi.fn((url) => (url === productA.model.glbUrl ? aLoader.promise : bLoader.promise)),
+  };
+
+  const originalLoadModel = renderer.loadModel.bind(renderer);
+  const loadPromises = [];
+  vi.spyOn(renderer, 'loadModel').mockImplementation((url) => {
+    const promise = originalLoadModel(url);
+    loadPromises.push(promise);
+    return promise;
+  });
+  let aToken = null;
+  const aBottomEntered = deferred();
+  const aBottomRelease = deferred();
+  const updateBottomPattern = vi.spyOn(renderer, 'updateBottomPattern').mockImplementation(() => {
+    if (renderer.loadToken === aToken && renderer.modelGroup.children[0] === aScene) {
+      aBottomEntered.resolve();
+      return aBottomRelease.promise;
+    }
+    return Promise.resolve();
+  });
+  const updatePrintLayer = vi.spyOn(renderer, 'updatePrintLayer').mockImplementation(() => {});
+
+  return {
+    aBottomEntered,
+    aBottomRelease,
+    aLoader,
+    aScene,
+    bLoader,
+    bScene,
+    cleanup() {
+      consoleError.mockRestore();
+      productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+      productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+      renderer.dispose();
+    },
+    onError,
+    productA,
+    productB,
+    renderer,
+    selectedA,
+    selectedB,
+    startA() {
+      renderer.update(productA, stateA, selectedA);
+      aToken = renderer.loadToken;
+      const readiness = renderer.modelReadiness;
+      void readiness.promise.catch(() => {});
+      return { load: loadPromises[0], readiness };
+    },
+    startB() {
+      renderer.update(productB, stateB, selectedB);
+      const readiness = renderer.modelReadiness;
+      void readiness.promise.catch(() => {});
+      return { load: loadPromises[1], readiness };
+    },
+    updateBottomPattern,
+    updatePrintLayer,
+  };
 }
 
 function makeModelIdentityRenderer(loadModel) {
@@ -305,6 +414,170 @@ describe('garment decoration mesh selection', () => {
     expect(stale.geometryDispose).toHaveBeenCalledOnce();
     expect(stale.materialDispose).toHaveBeenCalledOnce();
     expect(stale.mapDispose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a newer committed model when a superseded transaction fails after its bottom-pattern wait', async () => {
+    const harness = createConcurrentModelLoadHarness();
+    const {
+      aBottomEntered,
+      aBottomRelease,
+      aLoader,
+      aScene,
+      bLoader,
+      bScene,
+      onError,
+      renderer,
+      updatePrintLayer,
+    } = harness;
+    const aGeometryDisposes = aScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+    const bGeometryDisposes = bScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+
+    try {
+      const { load: aLoad, readiness: aReadiness } = harness.startA();
+      aLoader.resolve({ scene: aScene });
+      await aBottomEntered.promise;
+      const aAppearance = renderer.appearanceTexture;
+      const aAppearanceDispose = vi.spyOn(aAppearance, 'dispose');
+      expect(renderer.modelGroup.children).toEqual([aScene]);
+
+      const { load: bLoad, readiness: bReadiness } = harness.startB();
+      bLoader.resolve({ scene: bScene });
+      await expect(bLoad).resolves.toBe(true);
+      await expect(bReadiness.promise).resolves.toBeUndefined();
+      await expect(aReadiness.promise).rejects.toBeInstanceOf(Error);
+
+      const committedBMeshes = renderer.modelMeshes;
+      const committedBMaterials = renderer.modelMaterials;
+      const committedBDecorationMeshes = renderer.decorationMeshes;
+      const committedBPatternMeshes = renderer.patternMeshes;
+      const committedBLayout = renderer.modelUvLayout;
+      const committedBLayoutKey = renderer.modelUvLayoutKey;
+      const committedBAppearance = renderer.appearanceTexture;
+      const committedBAppearanceKey = renderer.appearanceTextureKey;
+      const committedBAppearanceDispose = vi.spyOn(committedBAppearance, 'dispose');
+      expect(renderer.currentModelIdentity).toContain('"glbUrl":"/models/b.glb"');
+      expect(renderer.currentModelIdentity).toContain('"uvExportLayoutId":"fn8788-jersey@1"');
+      aGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(aAppearanceDispose).toHaveBeenCalledOnce();
+
+      updatePrintLayer.mockClear();
+      updatePrintLayer.mockImplementation(() => {
+        throw new Error('superseded A print update failed');
+      });
+      aBottomRelease.resolve();
+      await expect(aLoad).resolves.toBe(false);
+
+      expect(updatePrintLayer).not.toHaveBeenCalled();
+      expect(renderer.modelReadiness).toBe(bReadiness);
+      expect(renderer.modelGroup.children).toEqual([bScene]);
+      expect(renderer.modelMeshes).toBe(committedBMeshes);
+      expect(renderer.modelMaterials).toBe(committedBMaterials);
+      expect(renderer.decorationMeshes).toBe(committedBDecorationMeshes);
+      expect(renderer.patternMeshes).toBe(committedBPatternMeshes);
+      expect(renderer.modelUvLayout).toBe(committedBLayout);
+      expect(renderer.modelUvLayoutKey).toBe(committedBLayoutKey);
+      expect(renderer.appearanceTexture).toBe(committedBAppearance);
+      expect(renderer.appearanceTextureKey).toBe(committedBAppearanceKey);
+      expect(renderer.currentModelIdentity).toContain('"glbUrl":"/models/b.glb"');
+      aGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(aAppearanceDispose).toHaveBeenCalledOnce();
+      bGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      expect(committedBAppearanceDispose).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it('preserves staged A when current B rolls back and superseded A later resumes', async () => {
+    const harness = createConcurrentModelLoadHarness();
+    const {
+      aBottomEntered,
+      aBottomRelease,
+      aLoader,
+      aScene,
+      bLoader,
+      bScene,
+      onError,
+      renderer,
+      updatePrintLayer,
+    } = harness;
+    const aGeometryDisposes = aScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+    const bGeometryDisposes = bScene.children.map(({ geometry }) => vi.spyOn(geometry, 'dispose'));
+
+    try {
+      const { load: aLoad, readiness: aReadiness } = harness.startA();
+      aLoader.resolve({ scene: aScene });
+      await aBottomEntered.promise;
+      const stagedAMeshes = renderer.modelMeshes;
+      const stagedAMaterials = renderer.modelMaterials;
+      const stagedADecorationMeshes = renderer.decorationMeshes;
+      const stagedAPatternMeshes = renderer.patternMeshes;
+      const stagedALayout = renderer.modelUvLayout;
+      const stagedALayoutKey = renderer.modelUvLayoutKey;
+      const stagedAAppearance = renderer.appearanceTexture;
+      const stagedAAppearanceKey = renderer.appearanceTextureKey;
+      const stagedAAppearanceDispose = vi.spyOn(stagedAAppearance, 'dispose');
+
+      const { load: bLoad, readiness: bReadiness } = harness.startB();
+      const bFailure = new Error('B print update failed');
+      let stagedBAppearanceDispose;
+      updatePrintLayer.mockImplementation(() => {
+        if (renderer.modelGroup.children[0] !== bScene) return;
+        stagedBAppearanceDispose = vi.spyOn(renderer.appearanceTexture, 'dispose');
+        throw bFailure;
+      });
+      bLoader.resolve({ scene: bScene });
+      await expect(bLoad).resolves.toBe(false);
+      await expect(bReadiness.promise).rejects.toMatchObject({
+        cause: bFailure,
+      });
+      await expect(aReadiness.promise).rejects.toBeInstanceOf(Error);
+
+      expect(renderer.modelGroup.children).toEqual([aScene]);
+      expect(renderer.modelMeshes).toBe(stagedAMeshes);
+      expect(renderer.modelMaterials).toBe(stagedAMaterials);
+      expect(renderer.decorationMeshes).toBe(stagedADecorationMeshes);
+      expect(renderer.patternMeshes).toBe(stagedAPatternMeshes);
+      expect(renderer.modelUvLayout).toBe(stagedALayout);
+      expect(renderer.modelUvLayoutKey).toBe(stagedALayoutKey);
+      expect(renderer.appearanceTexture).toBe(stagedAAppearance);
+      expect(renderer.appearanceTextureKey).toBe(stagedAAppearanceKey);
+      expect(renderer.currentModelIdentity).toBe('committed-before-a');
+      aGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      expect(stagedAAppearanceDispose).not.toHaveBeenCalled();
+      bGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(stagedBAppearanceDispose).toHaveBeenCalledOnce();
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ cause: bFailure }));
+
+      updatePrintLayer.mockClear();
+      updatePrintLayer.mockImplementation(() => {
+        throw new Error('superseded A print update failed');
+      });
+      aBottomRelease.resolve();
+      await expect(aLoad).resolves.toBe(false);
+
+      expect(updatePrintLayer).not.toHaveBeenCalled();
+      expect(renderer.modelReadiness).toBe(bReadiness);
+      expect(renderer.modelGroup.children).toEqual([aScene]);
+      expect(renderer.modelMeshes).toBe(stagedAMeshes);
+      expect(renderer.modelMaterials).toBe(stagedAMaterials);
+      expect(renderer.decorationMeshes).toBe(stagedADecorationMeshes);
+      expect(renderer.patternMeshes).toBe(stagedAPatternMeshes);
+      expect(renderer.modelUvLayout).toBe(stagedALayout);
+      expect(renderer.modelUvLayoutKey).toBe(stagedALayoutKey);
+      expect(renderer.appearanceTexture).toBe(stagedAAppearance);
+      expect(renderer.appearanceTextureKey).toBe(stagedAAppearanceKey);
+      expect(renderer.currentModelIdentity).toBe('committed-before-a');
+      aGeometryDisposes.forEach((dispose) => expect(dispose).not.toHaveBeenCalled());
+      expect(stagedAAppearanceDispose).not.toHaveBeenCalled();
+      bGeometryDisposes.forEach((dispose) => expect(dispose).toHaveBeenCalledOnce());
+      expect(stagedBAppearanceDispose).toHaveBeenCalledOnce();
+      expect(onError).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.cleanup();
+    }
   });
 
   it.each([

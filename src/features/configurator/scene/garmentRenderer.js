@@ -459,7 +459,9 @@ export class GarmentRenderer {
       }
       this.applyMaterial(this.selected?.material?.material);
       await this.updateBottomPattern();
+      if (this.loadToken !== loadToken) return false;
       this.updatePrintLayer();
+      if (this.loadToken !== loadToken) return false;
       gsap.fromTo(model.scale, { x: model.scale.x * 0.94, y: model.scale.y * 0.94, z: model.scale.z * 0.94 }, {
         x: model.scale.x,
         y: model.scale.y,
@@ -467,6 +469,7 @@ export class GarmentRenderer {
         duration: 0.55,
         ease: 'power2.out',
       });
+      if (this.loadToken !== loadToken) return false;
 
       disposeModelLoadSnapshotResources(transactionSnapshot);
       replacedBaseColorMaps.forEach((map) => map.dispose());
@@ -478,6 +481,7 @@ export class GarmentRenderer {
       modelReadiness.resolve();
       return true;
     } catch (error) {
+      if (this.loadToken !== loadToken) return false;
       if (transactionSnapshot) {
         const stagedBottomPatternTexture = this.bottomPatternTexture === transactionSnapshot.bottomPatternTexture
           ? null

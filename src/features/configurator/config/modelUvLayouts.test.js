@@ -3,6 +3,7 @@ import { resolve as resolvePath } from 'node:path';
 import * as THREE from 'three';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { APPEARANCE_ZONES } from './appearance.js';
 import { jerseyProduct } from './productDefinitions.js';
 import {
   MODEL_UV_LAYOUTS,
@@ -131,6 +132,7 @@ describe('model UV seam layouts', () => {
     ['id 为空白', withGroup({ id: '  ' }), 'id'],
     ['label 为空', withGroup({ label: '' }), 'label'],
     ['zone 为空', withGroup({ zone: '' }), 'zone'],
+    ['zone 未知', withGroup({ zone: 'unknown-zone' }), 'zone'],
     ['order 为负数', withGroup({ order: -1 }), 'order'],
     ['order 为小数', withGroup({ order: 0.5 }), 'order'],
     ['rotation 为非有限数', withGroup({ rotation: Number.POSITIVE_INFINITY }), 'rotation'],
@@ -156,6 +158,10 @@ describe('model UV seam layouts', () => {
     layout.pieceGroups[1].order = 0;
 
     expect(() => validateModelUvLayout(layout, VALID_MESHES)).toThrow('order');
+  });
+
+  it.each(APPEARANCE_ZONES)('accepts the existing appearance zone %s', (zone) => {
+    expect(validateModelUvLayout(withGroup({ zone }), VALID_MESHES)).toBe(true);
   });
 
   it.each([

@@ -1,3 +1,5 @@
+import { APPEARANCE_ZONES } from './appearance.js';
+
 function freezeLayout(layout) {
   return Object.freeze({
     ...layout,
@@ -99,6 +101,9 @@ export function validateModelUvLayout(layout, meshes) {
     }
     if (!isNonEmptyString(group.zone)) {
       throwInvalidLayout(`裁片组 "${group.id}" 的 zone 必须是非空字符串`);
+    }
+    if (!APPEARANCE_ZONES.includes(group.zone)) {
+      throwInvalidLayout(`裁片组 "${group.id}" 的 zone "${group.zone}" 不受支持`);
     }
     if (!Number.isInteger(group.order) || group.order < 0) {
       throwInvalidLayout(`裁片组 "${group.id}" 的 order 必须是非负整数`);

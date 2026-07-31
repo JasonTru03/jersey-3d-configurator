@@ -36,6 +36,8 @@ Atlas 使用模型声明的 `4096 × 4096` UV 尺寸。生产层会先使用快�
 - `883a9c5`：生产包总编排
 - `f8f1a48`：保存设计接入生产 ZIP
 - `32a4eb4`：真实模型 Atlas 映射回退与投影缓存
+- `27ce2fa`：图集烘焙按三角形批次主动让出主线程
+- `330e574`：锁定异步图集、预览与生产包生成顺序
 
 ## 自动化验证
 
@@ -43,14 +45,14 @@ Atlas 使用模型声明的 `4096 × 4096` UV 尺寸。生产层会先使用快�
 
 ```powershell
 npm test
-# 69 个测试文件，796 项测试全部通过
+# 69 个测试文件，798 项测试全部通过
 
 npm run build:app
 npm run build:shopify
 
 npx vitest run src/features/configurator/scene/productionAtlasBaker.test.js `
   src/features/configurator/scene/productionAtlasBakerGarmentModels.test.js
-# 14 项真实/合成 Atlas 映射测试通过
+# 15 项真实/合成 Atlas 映射测试通过
 ```
 
 构建仅保留既有的大 JavaScript chunk 提示；没有 unresolved import 或构建失败。
@@ -68,11 +70,13 @@ npx vitest run src/features/configurator/scene/productionAtlasBaker.test.js `
 - 保存后出现 `Download production ZIP`；
 - 导出的 `design.json` 重新打开后恢复 2 个球员组、2 个文字组，页面总价恢复为 `$123`。
 
-复杂设计生成属于同步 CPU 工作，浏览器自动化的单次点击等待在约 20 秒处超时，但页面进程继续完成，重新连接后下载链接正常出现；这是需要后续优化为后台/Worker 生成的性能边界，不影响本阶段文件正确性。
+性能优化前，同一复杂设计的单次点击在约 20 秒处超时，期间页面主线程无法及时响应。优化后，Atlas 每处理 96 个三角形主动让出主线程；真实页面测得保存点击在 279ms 内返回，生成中 DOM 响应为 19ms，保存按钮保持禁用，约 12.5 秒内重新启用并发布下载链接。
+
+这次优化解决的是“生成期间页面卡死”，不是后台并行计算：总生成耗时没有证据表明明显缩短，Atlas、PDF 压缩和 ZIP 仍在浏览器内执行。后续如需进一步降低总耗时或承受更复杂模型，再评估 Web Worker。
 
 下载文件：
 
-`C:\Users\Administrator\Downloads\fn8788-jersey-design-950cdaa3.zip`
+`C:\Users\Administrator\Downloads\fn8788-jersey-design-950cdaa3 (1).zip`
 
 离线校验：
 

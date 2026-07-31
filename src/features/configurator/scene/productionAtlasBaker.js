@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 const MIN_LAYER_COVERAGE = 0.985;
+const MAX_SURFACE_FALLBACK_DISTANCE_SQ = 0.002 ** 2;
 const PNG_MIME_TYPE = 'image/png';
 
 export async function bakeProductionAtlas({
@@ -83,6 +84,8 @@ function rasterizeLayer(context, size, layer) {
   const indexCount = index ? index.count : position.count;
   const triangleCount = Math.floor(indexCount / 3);
   let mappedCount = 0;
+  const pendingTriangles = [];
+  const projectionCache = new Map();
 
   for (let offset = 0; offset < triangleCount * 3; offset += 3) {
     const vertexIndexes = [0, 1, 2].map((corner) => (
@@ -102,10 +105,18 @@ function rasterizeLayer(context, size, layer) {
       worldPoints[2],
     ).getNormal(new THREE.Vector3());
     if (normal.lengthSq() === 0) continue;
-    const targetPoints = worldPoints.map((point) => (
-      projectVertexToGarmentUv(garmentMeshes, point, normal, size)
-    ));
-    if (!targetPoints.every(Boolean)) continue;
+    const targetPoints = worldPoints.map((point) => {
+      const key = createProjectionKey(point);
+      const cached = projectionCache.get(key);
+      if (cached) return cached;
+      const target = projectVertexToGarmentUv(garmentMeshes, point, normal, size);
+      if (target) projectionCache.set(key, target);
+      return target;
+    });
+    if (!targetPoints.every(Boolean)) {
+      pendingTriangles.push({ sourcePoints, targetPoints, worldPoints });
+      continue;
+    }
 
     for (const seamCopy of getSeamTargets(targetPoints, size)) {
       drawMappedTriangle(context, textureSource, sourcePoints, seamCopy);
@@ -113,11 +124,42 @@ function rasterizeLayer(context, size, layer) {
     mappedCount += 1;
   }
 
+  if (mappedCount / triangleCount < MIN_LAYER_COVERAGE) {
+    for (const pending of pendingTriangles) {
+      const targetPoints = pending.targetPoints.map((target, index) => (
+        target ?? getClosestProjection(
+          garmentMeshes,
+          pending.worldPoints[index],
+          projectionCache,
+          size,
+        )
+      ));
+      if (!targetPoints.every(Boolean)) continue;
+      for (const seamCopy of getSeamTargets(targetPoints, size)) {
+        drawMappedTriangle(context, textureSource, pending.sourcePoints, seamCopy);
+      }
+      mappedCount += 1;
+    }
+  }
+
   if (!triangleCount || mappedCount / triangleCount < MIN_LAYER_COVERAGE) {
     throw new Error(
       `生产图层 "${layer.label || layer.id || 'unknown'}" 无法完整映射到服装 UV。`,
     );
   }
+}
+
+function getClosestProjection(garmentMeshes, point, projectionCache, size) {
+  const key = createProjectionKey(point);
+  const cached = projectionCache.get(key);
+  if (cached) return cached;
+  const target = projectClosestVertexToGarmentUv(garmentMeshes, point, size);
+  if (target) projectionCache.set(key, target);
+  return target;
+}
+
+function createProjectionKey(point) {
+  return `${point.x.toFixed(6)}:${point.y.toFixed(6)}:${point.z.toFixed(6)}`;
 }
 
 function projectVertexToGarmentUv(garmentMeshes, point, normal, size) {
@@ -132,6 +174,59 @@ function projectVertexToGarmentUv(garmentMeshes, point, normal, size) {
   return hit?.uv
     ? { x: hit.uv.x * size, y: (1 - hit.uv.y) * size }
     : null;
+}
+
+function projectClosestVertexToGarmentUv(garmentMeshes, point, size) {
+  const uv = findClosestGarmentUv(garmentMeshes, point);
+  return uv ? { x: uv.x * size, y: (1 - uv.y) * size } : null;
+}
+
+function findClosestGarmentUv(garmentMeshes, worldPoint) {
+  const triangle = new THREE.Triangle();
+  const first = new THREE.Vector3();
+  const second = new THREE.Vector3();
+  const third = new THREE.Vector3();
+  const closest = new THREE.Vector3();
+  const barycentric = new THREE.Vector3();
+  const candidateWorld = new THREE.Vector3();
+  let bestDistanceSq = MAX_SURFACE_FALLBACK_DISTANCE_SQ;
+  let bestUv = null;
+
+  for (const mesh of garmentMeshes) {
+    const position = mesh?.geometry?.attributes?.position;
+    const uv = mesh?.geometry?.attributes?.uv;
+    if (!position || !uv) continue;
+    const localPoint = mesh.worldToLocal(worldPoint.clone());
+    const index = mesh.geometry.index;
+    const indexCount = index ? index.count : position.count;
+
+    for (let offset = 0; offset + 2 < indexCount; offset += 3) {
+      const indexes = [0, 1, 2].map((corner) => (
+        index ? index.getX(offset + corner) : offset + corner
+      ));
+      first.fromBufferAttribute(position, indexes[0]);
+      second.fromBufferAttribute(position, indexes[1]);
+      third.fromBufferAttribute(position, indexes[2]);
+      triangle.set(first, second, third);
+      triangle.closestPointToPoint(localPoint, closest);
+      candidateWorld.copy(closest).applyMatrix4(mesh.matrixWorld);
+      const distanceSq = candidateWorld.distanceToSquared(worldPoint);
+      if (distanceSq > bestDistanceSq) continue;
+      triangle.getBarycoord(closest, barycentric);
+      if (![barycentric.x, barycentric.y, barycentric.z].every(Number.isFinite)) continue;
+      bestDistanceSq = distanceSq;
+      bestUv = new THREE.Vector2(
+        uv.getX(indexes[0]) * barycentric.x
+          + uv.getX(indexes[1]) * barycentric.y
+          + uv.getX(indexes[2]) * barycentric.z,
+        uv.getY(indexes[0]) * barycentric.x
+          + uv.getY(indexes[1]) * barycentric.y
+          + uv.getY(indexes[2]) * barycentric.z,
+      );
+    }
+  }
+
+  return bestUv;
 }
 
 function getSeamTargets(target, size) {

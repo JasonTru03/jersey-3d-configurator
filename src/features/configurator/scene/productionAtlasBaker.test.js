@@ -121,6 +121,36 @@ describe('production atlas baker', () => {
     );
   });
 
+  it('reuses a successful garment UV projection for duplicated decal vertices', async () => {
+    installCanvasHarness();
+    const garment = createGarmentMesh([
+      [0.05, 0.1],
+      [0.45, 0.1],
+      [0.25, 0.9],
+    ]);
+    const layer = createLayer({ garmentMesh: garment, id: 'shared', renderOrder: 8 });
+    const positions = [...layer.geometry.getAttribute('position').array];
+    const uvs = [...layer.geometry.getAttribute('uv').array];
+    layer.geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([...positions, ...positions], 3),
+    );
+    layer.geometry.setAttribute(
+      'uv',
+      new THREE.Float32BufferAttribute([...uvs, ...uvs], 2),
+    );
+    const intersectObjects = vi.spyOn(THREE.Raycaster.prototype, 'intersectObjects');
+
+    await bakeProductionAtlas({
+      appearanceCanvas: { id: 'appearance', width: 32, height: 32 },
+      atlasSize: 64,
+      garmentMeshes: [garment],
+      layers: [layer],
+    });
+
+    expect(intersectObjects).toHaveBeenCalledTimes(3);
+  });
+
   it('fails when a printable garment mesh has no UVs', async () => {
     const garment = createGarmentMesh(undefined, 'Body');
     garment.geometry.deleteAttribute('uv');

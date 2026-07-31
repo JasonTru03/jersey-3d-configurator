@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+const productionArtifactMocks = vi.hoisted(() => ({
+  bakeProductionAtlas: vi.fn(),
+  captureProductionPreviews: vi.fn(),
+  createGarmentAppearanceCanvas: vi.fn(),
+}));
 vi.mock('gsap', () => ({
   default: {
     killTweensOf: vi.fn(),
@@ -21,6 +26,19 @@ vi.mock('three', async () => {
       render() {}
       dispose() {}
     },
+  };
+});
+vi.mock('./productionAtlasBaker.js', () => ({
+  bakeProductionAtlas: productionArtifactMocks.bakeProductionAtlas,
+}));
+vi.mock('./productionPreviewCapture.js', () => ({
+  captureProductionPreviews: productionArtifactMocks.captureProductionPreviews,
+}));
+vi.mock('./garmentAppearanceTexture.js', async () => {
+  const actual = await vi.importActual('./garmentAppearanceTexture.js');
+  return {
+    ...actual,
+    createGarmentAppearanceCanvas: productionArtifactMocks.createGarmentAppearanceCanvas,
   };
 });
 vi.stubGlobal('ResizeObserver', class {
@@ -230,6 +248,50 @@ describe('garment decoration mesh selection', () => {
       model: renderer.product.model,
       stateSnapshot: { ...renderer.state, layout: 'xl' },
     })).rejects.toThrow('设计已发生变化，请重新保存。');
+  });
+
+  it('captures production previews only after the asynchronous atlas bake finishes', async () => {
+    let finishBake;
+    const atlasPromise = new Promise((resolve) => {
+      finishBake = resolve;
+    });
+    const atlas = { blob: new Blob(['atlas']) };
+    const previews = { front: new Blob(['front']), back: new Blob(['back']) };
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockReturnValue(atlasPromise);
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.waitForProductionReady = vi.fn();
+    renderer.assertProductionSnapshot = vi.fn();
+    renderer.selected = {
+      appearance: { template: 'solid', colors: { body: '#F7F5EF' } },
+    };
+    renderer.state = { overrides: { bottomPattern: { enabled: false } } };
+    renderer.decorationMeshes = [];
+    renderer.getProductionLayers = vi.fn(() => []);
+    renderer.camera = {};
+    renderer.controls = {};
+    renderer.renderer = {};
+    renderer.scene = {};
+    renderer.setProductionCaptureMode = vi.fn();
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: { uvAtlasSize: 64 },
+      stateSnapshot: {},
+    });
+    await Promise.resolve();
+
+    expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce();
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+
+    finishBake(atlas);
+    await expect(preparation).resolves.toMatchObject({ atlas, previews });
+    expect(productionArtifactMocks.captureProductionPreviews).toHaveBeenCalledOnce();
+    expect(renderer.assertProductionSnapshot).toHaveBeenCalledTimes(2);
   });
 
   it('does not treat derived bottom-pattern bake metadata as a design change', () => {

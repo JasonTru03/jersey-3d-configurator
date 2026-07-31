@@ -11,6 +11,10 @@ describe('productApi', () => {
       name: 'Chelsea Match Jersey',
       renderer: 'garmentRenderer',
       model: {
+        id: 'chelsea-jersey',
+        version: '1',
+        uvExportVersion: '1',
+        uvAtlasSize: 4096,
         glbUrl: '/models/chelsea-jersey.glb',
         assetName: 'chelsea-jersey.glb',
       },

@@ -14,20 +14,54 @@ const UV_REGIONS = {
   collar: [[0.12, 0], [0.22, 0], [0.24, 0.1], [0.17, 0.15], [0.1, 0.1]],
 };
 
-export function createGarmentAppearanceCanvas(size = 2048, appearance = { template: 'solid', colors: {} }) {
+export function createGarmentAppearanceCanvas(
+  size = 2048,
+  appearance = { template: 'solid', colors: {} },
+  { modelMeshes = [], uvLayout = null } = {},
+) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Unable to create garment appearance canvas context.');
-  renderGarmentAppearance(context, canvas, appearance);
+  if (modelMeshes.length > 0 && uvLayout) {
+    renderModelUvAppearance(context, canvas, appearance, { modelMeshes, uvLayout });
+  } else {
+    renderGarmentAppearance(context, canvas, appearance);
+  }
   return canvas;
 }
 
+export function renderModelUvAppearance(
+  context,
+  { width, height },
+  appearance,
+  { modelMeshes, uvLayout },
+) {
+  assertPositiveDimensions(width, height);
+
+  const meshesByName = new Map(modelMeshes.map((mesh) => [mesh.name, mesh]));
+  const groups = [...uvLayout.pieceGroups].sort((left, right) => left.order - right.order);
+  groups.forEach((group) => {
+    const triangles = group.islandRefs.flatMap(({ meshName }) => (
+      getMeshUvTriangles(meshesByName.get(meshName))
+    ));
+    if (triangles.length === 0) {
+      throw new Error(`模型 UV 裁片组 "${group.id}" 没有可绘制的 UV 三角形。`);
+    }
+    paintUvTriangles(context, triangles, width, height, () => {
+      paintAppearanceZone(context, group.zone, bodyBounds(
+        triangles.flat(),
+        width,
+        height,
+        true,
+      ), appearance);
+    });
+  });
+}
+
 export function renderGarmentAppearance(context, { width, height }, appearance) {
-  if (!(width > 0) || !(height > 0)) {
-    throw new Error('Appearance texture requires a positive width and height.');
-  }
+  assertPositiveDimensions(width, height);
 
   const colors = appearance.colors ?? {};
   const body = colors.body ?? '#F7F5EF';
@@ -40,6 +74,58 @@ export function renderGarmentAppearance(context, { width, height }, appearance) 
   UV_REGIONS.sleeves.forEach((region) => paintRegion(context, region, width, height, () => paintSolid(context, bodyBounds(region, width, height), { body: colors.sleeves ?? body })));
   UV_REGIONS.shoulderSide.forEach((region) => paintRegion(context, region, width, height, () => paintSolid(context, bodyBounds(region, width, height), { body: colors.shoulderSide ?? body })));
   paintRegion(context, UV_REGIONS.collar, width, height, () => paintSolid(context, bodyBounds(UV_REGIONS.collar, width, height), { body: colors.collar ?? body }));
+}
+
+function assertPositiveDimensions(width, height) {
+  if (!(width > 0) || !(height > 0)) {
+    throw new Error('Appearance texture requires a positive width and height.');
+  }
+}
+
+function getMeshUvTriangles(mesh) {
+  const uv = mesh?.geometry?.attributes?.uv;
+  if (!uv) return [];
+  const index = mesh.geometry.index;
+  const vertexCount = index?.count ?? uv.count;
+  const triangles = [];
+  for (let offset = 0; offset + 2 < vertexCount; offset += 3) {
+    triangles.push([0, 1, 2].map((step) => {
+      const vertexIndex = index ? index.getX(offset + step) : offset + step;
+      return [uv.getX(vertexIndex), uv.getY(vertexIndex)];
+    }));
+  }
+  return triangles;
+}
+
+function paintUvTriangles(context, triangles, width, height, painter) {
+  context.save();
+  try {
+    context.beginPath();
+    triangles.forEach((triangle) => {
+      triangle.forEach(([u, v], index) => {
+        const x = u * width;
+        const y = (1 - v) * height;
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.closePath();
+    });
+    context.clip();
+    painter();
+  } finally {
+    context.restore();
+  }
+}
+
+function paintAppearanceZone(context, zone, bounds, appearance) {
+  const colors = appearance.colors ?? {};
+  const body = colors.body ?? '#F7F5EF';
+  if (zone === 'body') {
+    const paintTemplate = templatePainters[appearance.template] ?? templatePainters.solid;
+    paintTemplate(context, bounds, { ...colors, body });
+    return;
+  }
+  paintSolid(context, bounds, { body: colors[zone] ?? body });
 }
 
 function paintRegion(context, region, width, height, painter) {
@@ -57,9 +143,9 @@ function paintRegion(context, region, width, height, painter) {
   context.restore();
 }
 
-function bodyBounds(region, width, height) {
+function bodyBounds(region, width, height, flipV = false) {
   const xs = region.map(([u]) => u * width);
-  const ys = region.map(([, v]) => v * height);
+  const ys = region.map(([, v]) => (flipV ? 1 - v : v) * height);
   return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
 }
 

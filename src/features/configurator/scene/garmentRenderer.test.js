@@ -115,6 +115,19 @@ function makeModel(map) {
   return model;
 }
 
+function makeConfiguredUvModel(map = null) {
+  const model = new THREE.Group();
+  ['Cloth_mesh_7', 'Cloth_mesh_4'].forEach((name) => {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshStandardMaterial({ map }),
+    );
+    mesh.name = name;
+    model.add(mesh);
+  });
+  return model;
+}
+
 function deferred() {
   let resolve;
   const promise = new Promise((nextResolve) => { resolve = nextResolve; });
@@ -272,6 +285,8 @@ describe('garment decoration mesh selection', () => {
     };
     renderer.state = { overrides: { bottomPattern: { enabled: false } } };
     renderer.decorationMeshes = [];
+    renderer.patternMeshes = [{ name: 'front-mesh' }];
+    renderer.modelUvLayout = { version: 3, pieceGroups: [] };
     renderer.getProductionLayers = vi.fn(() => []);
     renderer.camera = {};
     renderer.controls = {};
@@ -286,6 +301,11 @@ describe('garment decoration mesh selection', () => {
     await Promise.resolve();
 
     expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce();
+    expect(productionArtifactMocks.createGarmentAppearanceCanvas).toHaveBeenCalledWith(
+      64,
+      renderer.selected.appearance,
+      { modelMeshes: renderer.patternMeshes, uvLayout: renderer.modelUvLayout },
+    );
     expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
 
     finishBake(atlas);
@@ -386,6 +406,103 @@ describe('garment decoration mesh selection', () => {
     const currentDispose = vi.spyOn(renderer.appearanceTexture, 'dispose');
     renderer.dispose();
     expect(currentDispose).toHaveBeenCalledOnce();
+  });
+
+  it('passes loaded UV layout and pattern meshes to appearance rendering and rebuilds a legacy texture', async () => {
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockClear();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    const appearance = { template: 'solid', colors: {
+      body: '#F7F5EF', sleeves: '#1F5B4F', shoulderSide: '#20242A', collar: '#D1B05D', pattern: '#C84F3D', number: '#20242A',
+    } };
+    renderer.selected = {
+      appearance,
+      material: { material: { roughness: 0.7, metalness: 0 } },
+    };
+    renderer.state = { lighting: 'none', overrides: {} };
+    renderer.product = {
+      decorationPresets: [],
+      model: {
+        id: 'chelsea-jersey',
+        version: '1',
+        uvExportLayoutId: 'chelsea-jersey@1',
+      },
+    };
+
+    renderer.applyAppearance(appearance);
+    const legacyTexture = renderer.appearanceTexture;
+    const legacyDispose = vi.spyOn(legacyTexture, 'dispose');
+    renderer.loader = { loadAsync: vi.fn().mockResolvedValue({ scene: makeConfiguredUvModel() }) };
+
+    await renderer.loadModel('/models/chelsea-jersey.glb');
+
+    expect(renderer.modelUvLayout).toMatchObject({ version: 1 });
+    expect(renderer.modelUvLayoutKey).toBe('chelsea-jersey@1:v1');
+    expect(productionArtifactMocks.createGarmentAppearanceCanvas).toHaveBeenLastCalledWith(
+      2048,
+      appearance,
+      { modelMeshes: renderer.patternMeshes, uvLayout: renderer.modelUvLayout },
+    );
+    expect(legacyDispose).toHaveBeenCalledOnce();
+    expect(renderer.appearanceTexture).not.toBe(legacyTexture);
+    renderer.dispose();
+  });
+
+  it('resolves an explicit UV export layout independently from the model catalog id', async () => {
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host);
+    renderer.selected = {
+      appearance: { template: 'solid', colors: { body: '#F7F5EF', number: '#20242A' } },
+      material: { material: { roughness: 0.7, metalness: 0 } },
+    };
+    renderer.state = { lighting: 'none', overrides: {} };
+    renderer.product = {
+      decorationPresets: [],
+      model: {
+        id: 'catalog-alias',
+        version: '99',
+        uvExportLayoutId: 'chelsea-jersey@1',
+      },
+    };
+    renderer.loader = { loadAsync: vi.fn().mockResolvedValue({ scene: makeConfiguredUvModel() }) };
+
+    await renderer.loadModel('/models/shared.glb');
+
+    expect(renderer.modelUvLayout).toMatchObject({ version: 1 });
+    expect(renderer.modelUvLayoutKey).toBe('chelsea-jersey@1:v1');
+    renderer.dispose();
+  });
+
+  it('includes the model UV layout identity in the appearance cache key', () => {
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockClear();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const material = new THREE.MeshStandardMaterial();
+    const appearance = { template: 'solid', colors: { body: '#F7F5EF', number: '#20242A' } };
+    renderer.modelMaterials = [material];
+    renderer.patternMeshes = [{ name: 'front-mesh' }];
+    renderer.modelUvLayout = { version: 1, pieceGroups: [] };
+    renderer.modelUvLayoutKey = 'layout-a:v1';
+    renderer.appearanceTexture = null;
+    renderer.appearanceTextureKey = null;
+    renderer.bottomPatternTexture = null;
+    renderer.redrawPrintTexture = vi.fn();
+
+    renderer.applyAppearance(appearance);
+    const firstTexture = renderer.appearanceTexture;
+    const firstDispose = vi.spyOn(firstTexture, 'dispose');
+    renderer.modelUvLayoutKey = 'layout-b:v1';
+    renderer.applyAppearance(appearance);
+
+    expect(productionArtifactMocks.createGarmentAppearanceCanvas).toHaveBeenCalledTimes(2);
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(renderer.appearanceTexture).not.toBe(firstTexture);
+    renderer.disposeAppearanceTexture();
+    material.dispose();
   });
 
   it('keeps the scene background fixed while updating the body appearance color', () => {
@@ -584,11 +701,14 @@ describe('garment decoration mesh selection', () => {
     };
     renderer.selected = selected;
     renderer.state = { lighting: 'none', overrides: {} };
-    renderer.product = { decorationPresets: [] };
+    renderer.product = {
+      decorationPresets: [],
+      model: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+    };
     renderer.loader = {
       loadAsync: vi.fn()
-        .mockResolvedValueOnce({ scene: makeModel(firstMap) })
-        .mockResolvedValueOnce({ scene: makeModel(secondMap) }),
+        .mockResolvedValueOnce({ scene: makeConfiguredUvModel(firstMap) })
+        .mockResolvedValueOnce({ scene: makeConfiguredUvModel(secondMap) }),
     };
 
     await renderer.loadModel('first.glb');

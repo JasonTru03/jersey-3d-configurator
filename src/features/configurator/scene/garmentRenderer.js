@@ -33,6 +33,11 @@ import {
   canonicalizeProductionValue,
   normalizeProductionState,
 } from '../designs/productionFingerprint.js';
+import {
+  MODEL_UV_LAYOUTS,
+  getModelUvLayout,
+  validateModelUvLayout,
+} from '../config/modelUvLayouts.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DEFAULT_PRINT_NORMAL = { x: 0, y: 0, z: 1 };
@@ -152,6 +157,8 @@ export class GarmentRenderer {
     this.modelMeshes = [];
     this.decorationMeshes = [];
     this.patternMeshes = [];
+    this.modelUvLayout = null;
+    this.modelUvLayoutKey = null;
     this.textureLoader = new THREE.TextureLoader();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -359,6 +366,12 @@ export class GarmentRenderer {
 
       this.decorationMeshes = selectDecorationMeshes(this.modelMeshes);
       this.patternMeshes = selectGarmentPatternMeshes(this.modelMeshes);
+      this.modelUvLayout = null;
+      this.modelUvLayoutKey = null;
+      const modelUvLayout = resolveModelUvLayout(this.product?.model);
+      validateModelUvLayout(modelUvLayout, this.patternMeshes);
+      this.modelUvLayout = modelUvLayout;
+      this.modelUvLayoutKey = getModelUvLayoutIdentity(this.product?.model, modelUvLayout);
 
       this.modelGroup.add(model);
       this.fitModel(model);
@@ -440,12 +453,15 @@ export class GarmentRenderer {
 
   applyAppearance(appearance) {
     if (!appearance) return;
-    const appearanceKey = getAppearanceTextureKey(appearance);
+    const appearanceKey = getAppearanceTextureKey(appearance, this.modelUvLayoutKey);
     if (this.appearanceTexture && this.appearanceTextureKey === appearanceKey) return;
     const replacedBaseColorMaps = new Set(this.modelMaterials
       .map((material) => material.map)
       .filter((map) => map && map !== this.appearanceTexture && map !== this.bottomPatternTexture));
-    const texture = new THREE.CanvasTexture(createGarmentAppearanceCanvas(2048, appearance));
+    const texture = new THREE.CanvasTexture(createGarmentAppearanceCanvas(2048, appearance, {
+      modelMeshes: this.patternMeshes,
+      uvLayout: this.modelUvLayout,
+    }));
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.flipY = false;
     this.disposeAppearanceTexture();
@@ -561,6 +577,7 @@ export class GarmentRenderer {
     const appearanceCanvas = createGarmentAppearanceCanvas(
       model.uvAtlasSize,
       this.selected.appearance,
+      { modelMeshes: this.patternMeshes, uvLayout: this.modelUvLayout },
     );
     const legacyPatternCanvas = this.state.overrides?.bottomPattern?.enabled
       ? this.bottomPatternTexture?.image
@@ -1704,11 +1721,24 @@ function disposeModelResources(group) {
   });
 }
 
-function getAppearanceTextureKey(appearance) {
+function getAppearanceTextureKey(appearance, modelUvLayoutKey = null) {
   return JSON.stringify({
     template: appearance.template,
     colors: Object.entries(appearance.colors ?? {}).sort(([first], [second]) => first.localeCompare(second)),
+    modelUvLayout: modelUvLayoutKey ?? 'legacy',
   });
+}
+
+function getModelUvLayoutIdentity(model, layout) {
+  const identity = model?.uvExportLayoutId ?? `${model?.id}@${model?.version}`;
+  return `${identity}:v${layout.version}`;
+}
+
+function resolveModelUvLayout(model) {
+  if (!model?.uvExportLayoutId) return getModelUvLayout(model);
+  const layout = MODEL_UV_LAYOUTS[model.uvExportLayoutId];
+  if (!layout) throw new Error(`模型 "${model.uvExportLayoutId}" 缺少 UV 裁片配置。`);
+  return layout;
 }
 
 function getBottomPatternKey(pattern) {

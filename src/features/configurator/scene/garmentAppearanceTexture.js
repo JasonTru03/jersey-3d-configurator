@@ -127,7 +127,6 @@ function getMeshUvData(mesh) {
   const position = mesh?.geometry?.attributes?.position;
   const uv = mesh?.geometry?.attributes?.uv;
   if (!position || !uv || position.itemSize < 3 || uv.itemSize < 2) return null;
-  if (uv.count < position.count) return null;
 
   const index = mesh.geometry.index;
   if (index && index.itemSize < 1) return null;
@@ -144,9 +143,9 @@ function getMeshUvData(mesh) {
 
   for (const { start, end } of spans) {
     for (let offset = start; offset + 2 < end; offset += 3) {
-      const first = readUvVertex(index, uv, position.count, offset);
-      const second = readUvVertex(index, uv, position.count, offset + 1);
-      const third = readUvVertex(index, uv, position.count, offset + 2);
+      const first = readUvVertex(index, uv, position.count, offset, mesh.name);
+      const second = readUvVertex(index, uv, position.count, offset + 1, mesh.name);
+      const third = readUvVertex(index, uv, position.count, offset + 2, mesh.name);
       if (!first || !second || !third || isDegenerateUvTriangle(first, second, third)) continue;
       coordinates.push(first.u, first.v, second.u, second.v, third.u, third.v);
       minU = Math.min(minU, first.u, second.u, third.u);
@@ -184,17 +183,17 @@ function getMeshUvSignature(mesh, position, uv, index) {
   return {
     geometry: mesh.geometry,
     position,
-    positionVersion: position.version,
+    positionVersion: getBufferAttributeVersion(position),
     positionCount: position.count,
     positionItemSize: position.itemSize,
     positionNormalized: position.normalized,
     uv,
-    uvVersion: uv.version,
+    uvVersion: getBufferAttributeVersion(uv),
     uvCount: uv.count,
     uvItemSize: uv.itemSize,
     uvNormalized: uv.normalized,
     index,
-    indexVersion: index?.version ?? null,
+    indexVersion: getBufferAttributeVersion(index),
     indexCount: index?.count ?? null,
     indexItemSize: index?.itemSize ?? null,
     indexNormalized: index?.normalized ?? null,
@@ -203,6 +202,10 @@ function getMeshUvSignature(mesh, position, uv, index) {
     materialIsArray: Array.isArray(mesh.material),
     groups,
   };
+}
+
+function getBufferAttributeVersion(attribute) {
+  return attribute?.data?.version ?? attribute?.version ?? null;
 }
 
 function meshUvSignatureMatches(first, second) {
@@ -261,10 +264,13 @@ function mergeOverlappingSpans(spans) {
   return merged;
 }
 
-function readUvVertex(index, uv, positionCount, offset) {
+function readUvVertex(index, uv, positionCount, offset, meshName) {
   const vertexIndex = index ? index.getX(offset) : offset;
   if (!Number.isFinite(vertexIndex) || !Number.isInteger(vertexIndex) || vertexIndex < 0) return null;
-  if (vertexIndex >= positionCount || vertexIndex >= uv.count) return null;
+  if (vertexIndex >= positionCount) return null;
+  if (vertexIndex >= uv.count) {
+    throw new Error(`模型 UV 网格 "${meshName}" 的已绘制三角形引用了 UV 属性范围外的顶点。`);
+  }
   const u = uv.getX(vertexIndex);
   const v = uv.getY(vertexIndex);
   return Number.isFinite(u) && Number.isFinite(v) ? { u, v } : null;

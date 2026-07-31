@@ -229,6 +229,52 @@ describe('garment appearance texture', () => {
     expect(moves).toEqual([['moveTo', 50, 50]]);
   });
 
+  it('allows non-indexed drawRange spans covered by a shorter UV attribute', () => {
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 1, 0, 0, 1,
+    ], null, { positionCount: 6 });
+    mesh.geometry.setDrawRange(0, 3);
+
+    const context = renderSingleConfiguredMesh(mesh);
+
+    expect(context.calls.filter(([name]) => name === 'moveTo')).toEqual([
+      ['moveTo', 0, 100],
+    ]);
+  });
+
+  it('allows indexed drawRange spans whose referenced vertices are covered by UVs', () => {
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 1, 0, 0, 1,
+    ], [0, 1, 2, 3, 4, 5], { positionCount: 6 });
+    mesh.geometry.setDrawRange(0, 3);
+
+    const context = renderSingleConfiguredMesh(mesh);
+
+    expect(context.calls.filter(([name]) => name === 'moveTo')).toEqual([
+      ['moveTo', 0, 100],
+    ]);
+  });
+
+  it('rejects a rendered indexed triangle that references beyond the UV attribute', () => {
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 1, 0, 0, 1,
+    ], [0, 1, 2, 3, 4, 5], { positionCount: 6 });
+
+    expect(() => renderSingleConfiguredMesh(mesh)).toThrow(
+      '模型 UV 网格 "front-mesh" 的已绘制三角形引用了 UV 属性范围外的顶点。',
+    );
+  });
+
+  it('rejects a rendered non-indexed triangle that extends beyond the UV attribute', () => {
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 1, 0, 0, 1,
+    ], null, { positionCount: 6 });
+
+    expect(() => renderSingleConfiguredMesh(mesh)).toThrow(
+      '模型 UV 网格 "front-mesh" 的已绘制三角形引用了 UV 属性范围外的顶点。',
+    );
+  });
+
   it('intersects drawRange with valid groups for material-array meshes and de-duplicates overlaps', () => {
     const material = new THREE.MeshBasicMaterial();
     const mesh = createUvMesh('front-mesh', [
@@ -283,7 +329,6 @@ describe('garment appearance texture', () => {
     ['missing uv', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { withoutUv: true })],
     ['short position itemSize', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { positionItemSize: 2 })],
     ['short uv itemSize', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { uvItemSize: 1 })],
-    ['uv does not cover positions', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { positionCount: 6 })],
     ['out-of-range index', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], [0, 1, 4])],
     ['negative index', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], new THREE.BufferAttribute(new Float32Array([0, 1, -1]), 1))],
     ['fractional index', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], new THREE.BufferAttribute(new Float32Array([0, 1, 1.5]), 1))],
@@ -449,6 +494,48 @@ describe('garment appearance texture', () => {
       render(4096);
 
       expect(paths).toHaveLength(2);
+    } finally {
+      if (OriginalPath2D === undefined) delete globalThis.Path2D;
+      else globalThis.Path2D = OriginalPath2D;
+    }
+  });
+
+  it('invalidates UV data and Path2D when an interleaved buffer version changes', () => {
+    const OriginalPath2D = globalThis.Path2D;
+    const paths = [];
+    class RecordingPath2D {
+      constructor() {
+        this.calls = [];
+        paths.push(this);
+      }
+      moveTo(...args) { this.calls.push(['moveTo', ...args]); }
+      lineTo(...args) { this.calls.push(['lineTo', ...args]); }
+      closePath() { this.calls.push(['closePath']); }
+    }
+    globalThis.Path2D = RecordingPath2D;
+    try {
+      const uvBuffer = new THREE.InterleavedBuffer(new Float32Array([
+        0, 0,
+        1, 0,
+        0, 1,
+      ]), 2);
+      const uvAttribute = new THREE.InterleavedBufferAttribute(uvBuffer, 2, 0);
+      const mesh = createUvMesh('front-mesh', [], null, { uvAttribute });
+      const uvLayout = createSingleMeshLayout();
+      const render = () => renderModelUvAppearance(
+        createNoopContext(),
+        { width: 100, height: 100 },
+        appearance,
+        { modelMeshes: [mesh], uvLayout },
+      );
+
+      render();
+      uvAttribute.setXY(0, 0.25, 0.25);
+      uvBuffer.needsUpdate = true;
+      render();
+
+      expect(paths).toHaveLength(2);
+      expect(paths[1].calls).toContainEqual(['moveTo', 25, 75]);
     } finally {
       if (OriginalPath2D === undefined) delete globalThis.Path2D;
       else globalThis.Path2D = OriginalPath2D;

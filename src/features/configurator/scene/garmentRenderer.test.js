@@ -128,6 +128,32 @@ function makeConfiguredUvModel(map = null) {
   return model;
 }
 
+function installLoadedModelState(renderer) {
+  const model = makeConfiguredUvModel();
+  const modelMeshes = [...model.children];
+  const modelMaterials = modelMeshes.map(({ material }) => material);
+  const texture = new THREE.Texture();
+  modelMaterials.forEach((material) => { material.map = texture; });
+  renderer.modelGroup.add(model);
+  renderer.modelMeshes = modelMeshes;
+  renderer.patternMeshes = modelMeshes;
+  renderer.decorationMeshes = modelMeshes;
+  renderer.modelMaterials = modelMaterials;
+  renderer.modelUvLayout = { version: 1, pieceGroups: [] };
+  renderer.modelUvLayoutKey = 'previous-layout:v1';
+  renderer.appearanceTexture = texture;
+  renderer.appearanceTextureKey = 'previous-appearance';
+  return {
+    decorationMeshes: renderer.decorationMeshes,
+    model,
+    modelMaterials,
+    modelMeshes,
+    patternMeshes: renderer.patternMeshes,
+    texture,
+    uvLayout: renderer.modelUvLayout,
+  };
+}
+
 function deferred() {
   let resolve;
   const promise = new Promise((nextResolve) => { resolve = nextResolve; });
@@ -215,6 +241,88 @@ describe('garment decoration mesh selection', () => {
     expect(stale.mapDispose).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    {
+      failure: 'missing layout',
+      modelDefinition: { id: 'unknown-model', version: '1', uvExportLayoutId: 'unknown-model@1' },
+      createScene: () => makeConfiguredUvModel(new THREE.Texture()),
+      errorMessage: '缺少 UV 裁片配置',
+    },
+    {
+      failure: 'missing configured mesh',
+      modelDefinition: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+      createScene: () => {
+        const scene = makeConfiguredUvModel(new THREE.Texture());
+        scene.remove(scene.children.find(({ name }) => name === 'Cloth_mesh_4'));
+        return scene;
+      },
+      errorMessage: '找不到网格 "Cloth_mesh_4"',
+    },
+    {
+      failure: 'appearance painter failure',
+      modelDefinition: { id: 'chelsea-jersey', version: '1', uvExportLayoutId: 'chelsea-jersey@1' },
+      createScene: () => makeConfiguredUvModel(new THREE.Texture()),
+      appearanceError: new Error('appearance painter failed'),
+      errorMessage: 'appearance painter failed',
+    },
+  ])('keeps the previous model atomically when $failure occurs', async ({
+    appearanceError,
+    createScene,
+    errorMessage,
+    modelDefinition,
+  }) => {
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    if (appearanceError) productionArtifactMocks.createGarmentAppearanceCanvas.mockImplementation(() => { throw appearanceError; });
+    else productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onError = vi.fn();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const renderer = new GarmentRenderer(host, { onError });
+    const previous = installLoadedModelState(renderer);
+    const previousTextureDispose = vi.spyOn(previous.texture, 'dispose');
+    const previousGeometryDispose = vi.spyOn(previous.modelMeshes[0].geometry, 'dispose');
+    renderer.selected = {
+      appearance: { template: 'solid', colors: { body: '#F7F5EF', number: '#20242A' } },
+      material: { material: { roughness: 0.7, metalness: 0 } },
+    };
+    renderer.state = { lighting: 'none', overrides: {} };
+    renderer.product = { decorationPresets: [], model: modelDefinition };
+    const nextScene = createScene();
+    const nextGeometryDispose = vi.spyOn(nextScene.children[0].geometry, 'dispose');
+    const nextMap = nextScene.children[0].material.map;
+    const nextMapDispose = vi.spyOn(nextMap, 'dispose');
+    renderer.loader = { loadAsync: vi.fn().mockResolvedValue({ scene: nextScene }) };
+
+    try {
+      await renderer.loadModel('/models/next.glb');
+
+      await expect(renderer.modelReadiness.promise).rejects.toMatchObject({
+        message: '服装模型加载失败。',
+        cause: expect.objectContaining({ message: expect.stringContaining(errorMessage) }),
+      });
+      expect(renderer.modelGroup.children).toEqual([previous.model]);
+      expect(renderer.modelMeshes).toBe(previous.modelMeshes);
+      expect(renderer.patternMeshes).toBe(previous.patternMeshes);
+      expect(renderer.decorationMeshes).toBe(previous.decorationMeshes);
+      expect(renderer.modelMaterials).toBe(previous.modelMaterials);
+      expect(renderer.modelUvLayout).toBe(previous.uvLayout);
+      expect(renderer.appearanceTexture).toBe(previous.texture);
+      expect(previousTextureDispose).not.toHaveBeenCalled();
+      expect(previousGeometryDispose).not.toHaveBeenCalled();
+      expect(nextGeometryDispose).toHaveBeenCalled();
+      expect(nextMapDispose).toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: '服装模型加载失败。',
+      }));
+    } finally {
+      productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+      productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+      consoleError.mockRestore();
+      renderer.dispose();
+    }
+  });
+
   it('waits for the current model and artwork textures before production', async () => {
     const modelReady = deferred();
     const waitForTextures = vi.fn();
@@ -261,6 +369,29 @@ describe('garment decoration mesh selection', () => {
       model: renderer.product.model,
       stateSnapshot: { ...renderer.state, layout: 'xl' },
     })).rejects.toThrow('设计已发生变化，请重新保存。');
+  });
+
+  it('rejects production when the UV export layout identity changed', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.product = {
+      model: {
+        id: 'shared-model',
+        version: '1',
+        uvExportLayoutId: 'chelsea-jersey@1',
+        uvExportVersion: '1',
+        uvAtlasSize: 4096,
+      },
+    };
+    renderer.state = {
+      productId: 'fn8788-jersey',
+      layout: 'm',
+      overrides: { customTextItems: [], printItems: [] },
+    };
+
+    expect(() => renderer.assertProductionSnapshot({
+      ...renderer.product.model,
+      uvExportLayoutId: 'fn8788-jersey@1',
+    }, structuredClone(renderer.state))).toThrow('设计已发生变化，请重新保存。');
   });
 
   it('captures production previews only after the asynchronous atlas bake finishes', async () => {
@@ -566,6 +697,45 @@ describe('garment decoration mesh selection', () => {
     expect(renderer.appearanceTexture).toBe(texture);
     expect(dispose).not.toHaveBeenCalled();
     renderer.dispose();
+  });
+
+  it('reloads a shared GLB URL when the model UV identity changes', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.loadModel = vi.fn();
+    renderer.applyAppearance = vi.fn();
+    renderer.applyMaterial = vi.fn();
+    renderer.updateBottomPattern = vi.fn();
+    renderer.updatePrintLayer = vi.fn();
+    renderer.decorationEditor = {
+      update: vi.fn(),
+      isEditing: vi.fn(() => false),
+    };
+    renderer.controls = {};
+    renderer.isDraggingPrint = false;
+    const state = { overrides: {} };
+    const selected = {
+      appearance: { template: 'solid', colors: {} },
+      material: { material: {} },
+    };
+    const createProduct = (model) => ({
+      decorationPresets: [],
+      model: { glbUrl: '/models/shared.glb', ...model },
+    });
+
+    renderer.update(createProduct({
+      id: 'catalog-a',
+      version: '1',
+      uvExportLayoutId: 'chelsea-jersey@1',
+    }), state, selected);
+    renderer.update(createProduct({
+      id: 'catalog-b',
+      version: '2',
+      uvExportLayoutId: 'fn8788-jersey@1',
+    }), state, selected);
+
+    expect(renderer.loadModel).toHaveBeenCalledTimes(2);
+    expect(renderer.currentModelIdentity).toContain('"layoutVersion":1');
+    expect(renderer.currentModelIdentity).toContain('"uvExportLayoutId":"fn8788-jersey@1"');
   });
 
   it('uses a baked bottom-pattern texture for garment meshes and restores the appearance map when disabled', async () => {

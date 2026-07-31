@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { createGarmentAppearanceCanvas, renderGarmentAppearance } from './garmentAppearanceTexture.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { getModelUvLayout } from '../config/modelUvLayouts.js';
+import {
+  createGarmentAppearanceCanvas,
+  renderGarmentAppearance,
+  renderModelUvAppearance,
+} from './garmentAppearanceTexture.js';
 
 const appearance = {
   template: 'solid',
@@ -13,6 +21,16 @@ const appearance = {
     number: '#20242A',
   },
 };
+let chelseaMeshes;
+
+beforeAll(async () => {
+  vi.stubGlobal('createImageBitmap', async () => ({ close() {}, height: 1, width: 1 }));
+  chelseaMeshes = await loadModelMeshes('chelsea-jersey');
+}, 20_000);
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
 
 function createRecordingContext() {
   const calls = [];
@@ -34,13 +52,57 @@ function createRecordingContext() {
   };
 }
 
-function createUvMesh(name, uvs, indices = null) {
+function createUvMesh(name, uvs, indices = null, options = {}) {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  if (indices) geometry.setIndex(indices);
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+  const vertexCount = options.positionCount
+    ?? options.uvAttribute?.count
+    ?? Math.floor(uvs.length / 2);
+  const positions = options.positions ?? Array.from(
+    { length: vertexCount * 3 },
+    (_, index) => (index % 3 === 0 ? index / 3 : 0),
+  );
+  if (!options.withoutPosition) {
+    geometry.setAttribute('position', options.positionAttribute
+      ?? new THREE.Float32BufferAttribute(positions, options.positionItemSize ?? 3));
+  }
+  if (!options.withoutUv) {
+    geometry.setAttribute('uv', options.uvAttribute
+      ?? new THREE.Float32BufferAttribute(uvs, options.uvItemSize ?? 2));
+  }
+  if (indices !== null) geometry.setIndex(indices);
+  const mesh = new THREE.Mesh(geometry, options.material ?? new THREE.MeshBasicMaterial());
   mesh.name = name;
   return mesh;
+}
+
+function renderSingleConfiguredMesh(mesh, context = createRecordingContext()) {
+  renderModelUvAppearance(context, { width: 100, height: 100 }, appearance, {
+    modelMeshes: [mesh],
+    uvLayout: {
+      version: 1,
+      pieceGroups: [
+        { id: 'front', zone: 'body', order: 0, islandRefs: [{ meshName: mesh.name }] },
+      ],
+    },
+  });
+  return context;
+}
+
+function createSingleMeshLayout(meshName = 'front-mesh') {
+  return {
+    version: 1,
+    pieceGroups: [
+      { id: 'front', zone: 'body', order: 0, islandRefs: [{ meshName }] },
+    ],
+  };
+}
+
+function createNoopContext() {
+  return {
+    save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, clip() {},
+    fillRect() {},
+    set fillStyle(_) {},
+  };
 }
 
 describe('garment appearance texture', () => {
@@ -152,4 +214,279 @@ describe('garment appearance texture', () => {
       uvLayout,
     })).toThrow('模型 UV 裁片组 "front" 没有可绘制的 UV 三角形。');
   });
+
+  it('limits non-indexed triangles to the geometry position count and drawRange', () => {
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 0.25, 0, 0, 0.25,
+      0.5, 0.5, 0.75, 0.5, 0.5, 0.75,
+      0.9, 0.9,
+    ], null, { positionCount: 6 });
+    mesh.geometry.setDrawRange(3, 4);
+
+    const context = renderSingleConfiguredMesh(mesh);
+    const moves = context.calls.filter(([name]) => name === 'moveTo');
+
+    expect(moves).toEqual([['moveTo', 50, 50]]);
+  });
+
+  it('intersects drawRange with valid groups for material-array meshes and de-duplicates overlaps', () => {
+    const material = new THREE.MeshBasicMaterial();
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 0.25, 0, 0, 0.25,
+      0.5, 0.5, 0.75, 0.5, 0.5, 0.75,
+      0.75, 0.75, 1, 0.75, 0.75, 1,
+    ], null, { material: [material] });
+    mesh.geometry.setDrawRange(3, 6);
+    mesh.geometry.addGroup(3, 6, 0);
+    mesh.geometry.addGroup(6, 3, 0);
+    mesh.geometry.addGroup(0, 3, 5);
+
+    const context = renderSingleConfiguredMesh(mesh);
+
+    expect(context.calls.filter(([name]) => name === 'moveTo')).toEqual([
+      ['moveTo', 50, 50],
+      ['moveTo', 75, 25],
+    ]);
+  });
+
+  it('ignores geometry groups for a single-material mesh', () => {
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 0.25, 0, 0, 0.25,
+      0.5, 0.5, 0.75, 0.5, 0.5, 0.75,
+    ]);
+    mesh.geometry.addGroup(3, 3, 0);
+
+    const context = renderSingleConfiguredMesh(mesh);
+
+    expect(context.calls.filter(([name]) => name === 'moveTo')).toEqual([
+      ['moveTo', 0, 100],
+      ['moveTo', 50, 50],
+    ]);
+  });
+
+  it('reads normalized UV buffer attributes through BufferAttribute accessors', () => {
+    const normalizedUvs = new THREE.Uint16BufferAttribute([
+      0, 0,
+      65535, 0,
+      0, 65535,
+    ], 2, true);
+    const mesh = createUvMesh('front-mesh', [], [0, 1, 2], { uvAttribute: normalizedUvs });
+
+    const context = renderSingleConfiguredMesh(mesh);
+
+    expect(context.calls).toContainEqual(['lineTo', 100, 100]);
+    expect(context.calls).toContainEqual(['lineTo', 0, 0]);
+  });
+
+  it.each([
+    ['missing position', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { withoutPosition: true })],
+    ['missing uv', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { withoutUv: true })],
+    ['short position itemSize', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { positionItemSize: 2 })],
+    ['short uv itemSize', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { uvItemSize: 1 })],
+    ['uv does not cover positions', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { positionCount: 6 })],
+    ['out-of-range index', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], [0, 1, 4])],
+    ['negative index', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], new THREE.BufferAttribute(new Float32Array([0, 1, -1]), 1))],
+    ['fractional index', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], new THREE.BufferAttribute(new Float32Array([0, 1, 1.5]), 1))],
+    ['non-finite index', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], new THREE.BufferAttribute(new Float32Array([0, 1, Number.NaN]), 1))],
+    ['non-finite uv', () => createUvMesh('front-mesh', [0, 0, 1, 0, Number.NaN, 1])],
+    ['degenerate uv', () => createUvMesh('front-mesh', [0, 0, 0.5, 0.5, 1, 1])],
+    ['near-degenerate uv', () => createUvMesh('front-mesh', [0, 0, 1, 0, 1, Number.EPSILON])],
+    ['material array without groups', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { material: [new THREE.MeshBasicMaterial()] })],
+  ])('rejects %s geometry when no valid configured UV triangle remains', (_label, createMesh) => {
+    expect(() => renderSingleConfiguredMesh(createMesh()))
+      .toThrow('模型 UV 裁片组 "front" 没有可绘制的 UV 三角形。');
+  });
+
+  it('rejects a referenced mesh name that is not unique in the model', () => {
+    const first = createUvMesh('shared-mesh', [0, 0, 1, 0, 0, 1]);
+    const second = createUvMesh('shared-mesh', [0.5, 0.5, 1, 0.5, 0.5, 1]);
+    const uvLayout = {
+      version: 1,
+      pieceGroups: [
+        { id: 'front', zone: 'body', order: 0, islandRefs: [{ meshName: 'shared-mesh' }] },
+      ],
+    };
+
+    expect(() => renderModelUvAppearance(
+      createRecordingContext(),
+      { width: 100, height: 100 },
+      appearance,
+      { modelMeshes: [first, second], uvLayout },
+    )).toThrow('模型 UV 网格名称 "shared-mesh" 不唯一。');
+  });
+
+  it('rejects duplicate mesh references within one configured group', () => {
+    const mesh = createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1]);
+    const uvLayout = {
+      version: 1,
+      pieceGroups: [{
+        id: 'front',
+        zone: 'body',
+        order: 0,
+        islandRefs: [{ meshName: 'front-mesh' }, { meshName: 'front-mesh' }],
+      }],
+    };
+
+    expect(() => renderModelUvAppearance(
+      createRecordingContext(),
+      { width: 100, height: 100 },
+      appearance,
+      { modelMeshes: [mesh], uvLayout },
+    )).toThrow('模型 UV 裁片组 "front" 重复引用网格 "front-mesh"。');
+  });
+
+  it('rejects one mesh referenced by different configured groups', () => {
+    const mesh = createUvMesh('shared-mesh', [0, 0, 1, 0, 0, 1]);
+    const uvLayout = {
+      version: 1,
+      pieceGroups: [
+        { id: 'front', zone: 'body', order: 0, islandRefs: [{ meshName: 'shared-mesh' }] },
+        { id: 'back', zone: 'body', order: 1, islandRefs: [{ meshName: 'shared-mesh' }] },
+      ],
+    };
+
+    expect(() => renderModelUvAppearance(
+      createRecordingContext(),
+      { width: 100, height: 100 },
+      appearance,
+      { modelMeshes: [mesh], uvLayout },
+    )).toThrow('模型 UV 网格 "shared-mesh" 被裁片组 "front" 和 "back" 重复引用。');
+  });
+
+  it('reuses parsed UV triangles until a BufferAttribute version changes', () => {
+    const mesh = createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], [0, 1, 2]);
+    const uv = mesh.geometry.getAttribute('uv');
+    const getX = vi.spyOn(uv, 'getX');
+    const uvLayout = createSingleMeshLayout();
+    const render = () => renderModelUvAppearance(
+      createNoopContext(),
+      { width: 100, height: 100 },
+      appearance,
+      { modelMeshes: [mesh], uvLayout },
+    );
+
+    render();
+    const firstParseCalls = getX.mock.calls.length;
+    render();
+    expect(getX).toHaveBeenCalledTimes(firstParseCalls);
+
+    uv.needsUpdate = true;
+    render();
+    expect(getX.mock.calls.length).toBeGreaterThan(firstParseCalls);
+    const uvInvalidatedCalls = getX.mock.calls.length;
+
+    mesh.geometry.getAttribute('position').needsUpdate = true;
+    render();
+    expect(getX.mock.calls.length).toBeGreaterThan(uvInvalidatedCalls);
+    const positionInvalidatedCalls = getX.mock.calls.length;
+
+    mesh.geometry.index.needsUpdate = true;
+    render();
+    expect(getX.mock.calls.length).toBeGreaterThan(positionInvalidatedCalls);
+  });
+
+  it('invalidates parsed UV triangles when draw spans or material-array semantics change', () => {
+    const firstMaterial = new THREE.MeshBasicMaterial();
+    const secondMaterial = new THREE.MeshBasicMaterial();
+    const mesh = createUvMesh('front-mesh', [
+      0, 0, 0.25, 0, 0, 0.25,
+      0.5, 0.5, 0.75, 0.5, 0.5, 0.75,
+    ], null, { material: [firstMaterial, secondMaterial] });
+    mesh.geometry.addGroup(0, 3, 0);
+    mesh.geometry.addGroup(3, 3, 1);
+    const uv = mesh.geometry.getAttribute('uv');
+    const getX = vi.spyOn(uv, 'getX');
+    const uvLayout = createSingleMeshLayout();
+    const render = () => renderModelUvAppearance(
+      createNoopContext(),
+      { width: 100, height: 100 },
+      appearance,
+      { modelMeshes: [mesh], uvLayout },
+    );
+
+    render();
+    const initialCalls = getX.mock.calls.length;
+    render();
+    expect(getX).toHaveBeenCalledTimes(initialCalls);
+
+    mesh.geometry.setDrawRange(3, 3);
+    render();
+    expect(getX.mock.calls.length).toBeGreaterThan(initialCalls);
+    const drawRangeCalls = getX.mock.calls.length;
+
+    mesh.geometry.groups[1].materialIndex = 0;
+    render();
+    expect(getX.mock.calls.length).toBeGreaterThan(drawRangeCalls);
+    const groupsCalls = getX.mock.calls.length;
+
+    mesh.material = firstMaterial;
+    render();
+    expect(getX.mock.calls.length).toBeGreaterThan(groupsCalls);
+  });
+
+  it('caches Path2D per layout geometry signature and output size', () => {
+    const OriginalPath2D = globalThis.Path2D;
+    const paths = [];
+    class RecordingPath2D {
+      constructor() { paths.push(this); }
+      moveTo() {}
+      lineTo() {}
+      closePath() {}
+    }
+    globalThis.Path2D = RecordingPath2D;
+    try {
+      const mesh = createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1]);
+      const uvLayout = createSingleMeshLayout();
+      const render = (size) => renderModelUvAppearance(
+        createNoopContext(),
+        { width: size, height: size },
+        appearance,
+        { modelMeshes: [mesh], uvLayout },
+      );
+
+      render(2048);
+      render(2048);
+      render(4096);
+
+      expect(paths).toHaveLength(2);
+    } finally {
+      if (OriginalPath2D === undefined) delete globalThis.Path2D;
+      else globalThis.Path2D = OriginalPath2D;
+    }
+  });
+
+  it('does not reparse real Chelsea front and back BufferAttributes on a second render', () => {
+    const uvLayout = getModelUvLayout({ id: 'chelsea-jersey', version: '1' });
+    const configuredNames = new Set(uvLayout.pieceGroups
+      .flatMap(({ islandRefs }) => islandRefs.map(({ meshName }) => meshName)));
+    const configuredMeshes = chelseaMeshes.filter(({ name }) => configuredNames.has(name));
+    const getUvX = configuredMeshes.map((mesh) => vi.spyOn(mesh.geometry.getAttribute('uv'), 'getX'));
+    const render = () => renderModelUvAppearance(
+      createNoopContext(),
+      { width: 64, height: 64 },
+      appearance,
+      { modelMeshes: configuredMeshes, uvLayout },
+    );
+
+    render();
+    const firstParseCalls = getUvX.map((spy) => spy.mock.calls.length);
+    expect(firstParseCalls.every((count) => count > 0)).toBe(true);
+
+    render();
+    expect(getUvX.map((spy) => spy.mock.calls.length)).toEqual(firstParseCalls);
+  });
 });
+
+async function loadModelMeshes(modelId) {
+  const data = readFileSync(resolvePath(process.cwd(), `public/models/${modelId}.glb`));
+  const buffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buffer).set(data);
+  const gltf = await new Promise((resolve, reject) => {
+    new GLTFLoader().parse(buffer, '', resolve, reject);
+  });
+  const meshes = [];
+  gltf.scene.traverse((object) => {
+    if (object.isMesh) meshes.push(object);
+  });
+  return meshes;
+}

@@ -13,6 +13,10 @@ const UV_REGIONS = {
   ],
   collar: [[0.12, 0], [0.22, 0], [0.24, 0.1], [0.17, 0.15], [0.1, 0.1]],
 };
+const MIN_UV_TRIANGLE_AREA = 1e-12;
+const meshUvDataCache = new WeakMap();
+const layoutPathCache = new WeakMap();
+let meshUvDataRevision = 0;
 
 export function createGarmentAppearanceCanvas(
   size = 2048,
@@ -40,24 +44,61 @@ export function renderModelUvAppearance(
 ) {
   assertPositiveDimensions(width, height);
 
-  const meshesByName = new Map(modelMeshes.map((mesh) => [mesh.name, mesh]));
   const groups = [...uvLayout.pieceGroups].sort((left, right) => left.order - right.order);
-  groups.forEach((group) => {
-    const triangles = group.islandRefs.flatMap(({ meshName }) => (
-      getMeshUvTriangles(meshesByName.get(meshName))
-    ));
-    if (triangles.length === 0) {
+  const resolvedGroups = resolveConfiguredGroupMeshes(modelMeshes, groups);
+  resolvedGroups.forEach(({ group, meshes }) => {
+    const meshUvData = [];
+    for (const mesh of meshes) {
+      const data = getMeshUvData(mesh);
+      if (data) meshUvData.push(data);
+    }
+    if (meshUvData.length === 0) {
       throw new Error(`模型 UV 裁片组 "${group.id}" 没有可绘制的 UV 三角形。`);
     }
-    paintUvTriangles(context, triangles, width, height, () => {
-      paintAppearanceZone(context, group.zone, bodyBounds(
-        triangles.flat(),
-        width,
-        height,
-        true,
-      ), appearance);
+    const bounds = getGroupPixelBounds(meshUvData, width, height);
+    const path = getCachedGroupPath(uvLayout, group, meshUvData, width, height);
+    paintUvTriangles(context, meshUvData, width, height, path, () => {
+      paintAppearanceZone(context, group.zone, bounds, appearance);
     });
   });
+}
+
+function resolveConfiguredGroupMeshes(modelMeshes, groups) {
+  const referencedNames = new Set();
+  const ownerByMeshName = new Map();
+  for (const group of groups) {
+    const namesInGroup = new Set();
+    for (const { meshName } of group.islandRefs) {
+      if (namesInGroup.has(meshName)) {
+        throw new Error(`模型 UV 裁片组 "${group.id}" 重复引用网格 "${meshName}"。`);
+      }
+      namesInGroup.add(meshName);
+      const owner = ownerByMeshName.get(meshName);
+      if (ownerByMeshName.has(meshName)) {
+        throw new Error(`模型 UV 网格 "${meshName}" 被裁片组 "${owner}" 和 "${group.id}" 重复引用。`);
+      }
+      ownerByMeshName.set(meshName, group.id);
+      referencedNames.add(meshName);
+    }
+  }
+
+  const matchesByName = new Map();
+  for (const mesh of modelMeshes) {
+    if (!referencedNames.has(mesh?.name)) continue;
+    const matches = matchesByName.get(mesh.name) ?? [];
+    matches.push(mesh);
+    matchesByName.set(mesh.name, matches);
+  }
+
+  return groups.map((group) => ({
+    group,
+    meshes: group.islandRefs.map(({ meshName }) => {
+      const matches = matchesByName.get(meshName) ?? [];
+      if (matches.length > 1) throw new Error(`模型 UV 网格名称 "${meshName}" 不唯一。`);
+      if (matches.length === 0) throw new Error(`模型 UV 网格 "${meshName}" 不存在。`);
+      return matches[0];
+    }),
+  }));
 }
 
 export function renderGarmentAppearance(context, { width, height }, appearance) {
@@ -82,35 +123,221 @@ function assertPositiveDimensions(width, height) {
   }
 }
 
-function getMeshUvTriangles(mesh) {
+function getMeshUvData(mesh) {
+  const position = mesh?.geometry?.attributes?.position;
   const uv = mesh?.geometry?.attributes?.uv;
-  if (!uv) return [];
+  if (!position || !uv || position.itemSize < 3 || uv.itemSize < 2) return null;
+  if (uv.count < position.count) return null;
+
   const index = mesh.geometry.index;
-  const vertexCount = index?.count ?? uv.count;
-  const triangles = [];
-  for (let offset = 0; offset + 2 < vertexCount; offset += 3) {
-    triangles.push([0, 1, 2].map((step) => {
-      const vertexIndex = index ? index.getX(offset + step) : offset + step;
-      return [uv.getX(vertexIndex), uv.getY(vertexIndex)];
-    }));
+  if (index && index.itemSize < 1) return null;
+  const signature = getMeshUvSignature(mesh, position, uv, index);
+  const cached = meshUvDataCache.get(mesh);
+  if (cached && meshUvSignatureMatches(cached.signature, signature)) return cached.data;
+
+  const spans = getGeometryRenderSpans(mesh, index?.count ?? position.count);
+  const coordinates = [];
+  let minU = Infinity;
+  let minV = Infinity;
+  let maxU = -Infinity;
+  let maxV = -Infinity;
+
+  for (const { start, end } of spans) {
+    for (let offset = start; offset + 2 < end; offset += 3) {
+      const first = readUvVertex(index, uv, position.count, offset);
+      const second = readUvVertex(index, uv, position.count, offset + 1);
+      const third = readUvVertex(index, uv, position.count, offset + 2);
+      if (!first || !second || !third || isDegenerateUvTriangle(first, second, third)) continue;
+      coordinates.push(first.u, first.v, second.u, second.v, third.u, third.v);
+      minU = Math.min(minU, first.u, second.u, third.u);
+      minV = Math.min(minV, first.v, second.v, third.v);
+      maxU = Math.max(maxU, first.u, second.u, third.u);
+      maxV = Math.max(maxV, first.v, second.v, third.v);
+    }
   }
-  return triangles;
+  const data = coordinates.length === 0
+    ? null
+    : {
+        bounds: { minU, minV, maxU, maxV },
+        coordinates,
+        revision: ++meshUvDataRevision,
+      };
+  meshUvDataCache.set(mesh, { data, signature });
+  return data;
 }
 
-function paintUvTriangles(context, triangles, width, height, painter) {
+function getMeshUvSignature(mesh, position, uv, index) {
+  const groups = Array.isArray(mesh.material)
+    ? (mesh.geometry.groups ?? []).map((group) => {
+        const material = Number.isInteger(group.materialIndex)
+          ? mesh.material[group.materialIndex]
+          : null;
+        return [
+          group.start,
+          group.count,
+          group.materialIndex,
+          Boolean(material),
+          material?.visible !== false,
+        ].join(':');
+      }).join(',')
+    : 'single-material';
+  return {
+    geometry: mesh.geometry,
+    position,
+    positionVersion: position.version,
+    positionCount: position.count,
+    positionItemSize: position.itemSize,
+    positionNormalized: position.normalized,
+    uv,
+    uvVersion: uv.version,
+    uvCount: uv.count,
+    uvItemSize: uv.itemSize,
+    uvNormalized: uv.normalized,
+    index,
+    indexVersion: index?.version ?? null,
+    indexCount: index?.count ?? null,
+    indexItemSize: index?.itemSize ?? null,
+    indexNormalized: index?.normalized ?? null,
+    drawStart: mesh.geometry.drawRange?.start ?? 0,
+    drawCount: mesh.geometry.drawRange?.count ?? Infinity,
+    materialIsArray: Array.isArray(mesh.material),
+    groups,
+  };
+}
+
+function meshUvSignatureMatches(first, second) {
+  return Object.keys(first).every((key) => first[key] === second[key]);
+}
+
+function getGeometryRenderSpans(mesh, elementCount) {
+  const drawSpan = intersectRenderSpan(
+    0,
+    elementCount,
+    mesh.geometry.drawRange?.start ?? 0,
+    mesh.geometry.drawRange?.count ?? Infinity,
+  );
+  if (!drawSpan) return [];
+
+  if (!Array.isArray(mesh.material)) return [drawSpan];
+  const groups = mesh.geometry.groups ?? [];
+  if (groups.length === 0) return [];
+
+  const spans = [];
+  for (const group of groups) {
+    const material = Number.isInteger(group.materialIndex)
+      ? mesh.material[group.materialIndex]
+      : null;
+    if (!material || material.visible === false) continue;
+    const span = intersectRenderSpan(
+      drawSpan.start,
+      drawSpan.end,
+      group.start,
+      group.count,
+    );
+    if (span) spans.push(span);
+  }
+  return mergeOverlappingSpans(spans);
+}
+
+function intersectRenderSpan(baseStart, baseEnd, rangeStart, rangeCount) {
+  if (!Number.isFinite(rangeStart) || !(rangeCount > 0)) return null;
+  const rangeEnd = rangeCount === Infinity ? baseEnd : rangeStart + rangeCount;
+  if (!Number.isFinite(rangeEnd)) return null;
+  const start = Math.max(baseStart, 0, Math.ceil(rangeStart));
+  const end = Math.min(baseEnd, Math.floor(rangeEnd));
+  return end > start ? { start, end } : null;
+}
+
+function mergeOverlappingSpans(spans) {
+  if (spans.length < 2) return spans;
+  spans.sort((left, right) => left.start - right.start || left.end - right.end);
+  const merged = [spans[0]];
+  for (let index = 1; index < spans.length; index += 1) {
+    const next = spans[index];
+    const previous = merged[merged.length - 1];
+    if (next.start < previous.end) previous.end = Math.max(previous.end, next.end);
+    else merged.push(next);
+  }
+  return merged;
+}
+
+function readUvVertex(index, uv, positionCount, offset) {
+  const vertexIndex = index ? index.getX(offset) : offset;
+  if (!Number.isFinite(vertexIndex) || !Number.isInteger(vertexIndex) || vertexIndex < 0) return null;
+  if (vertexIndex >= positionCount || vertexIndex >= uv.count) return null;
+  const u = uv.getX(vertexIndex);
+  const v = uv.getY(vertexIndex);
+  return Number.isFinite(u) && Number.isFinite(v) ? { u, v } : null;
+}
+
+function isDegenerateUvTriangle(first, second, third) {
+  const area = (
+    (second.u - first.u) * (third.v - first.v)
+    - (second.v - first.v) * (third.u - first.u)
+  );
+  return Math.abs(area) <= MIN_UV_TRIANGLE_AREA;
+}
+
+function getGroupPixelBounds(meshUvData, width, height) {
+  let minU = Infinity;
+  let minV = Infinity;
+  let maxU = -Infinity;
+  let maxV = -Infinity;
+  for (const { bounds } of meshUvData) {
+    minU = Math.min(minU, bounds.minU);
+    minV = Math.min(minV, bounds.minV);
+    maxU = Math.max(maxU, bounds.maxU);
+    maxV = Math.max(maxV, bounds.maxV);
+  }
+  return {
+    x: minU * width,
+    y: (1 - maxV) * height,
+    width: (maxU - minU) * width,
+    height: (maxV - minV) * height,
+  };
+}
+
+function getCachedGroupPath(uvLayout, group, meshUvData, width, height) {
+  const PathConstructor = globalThis.Path2D;
+  if (typeof PathConstructor !== 'function') return null;
+  let cache = layoutPathCache.get(uvLayout);
+  if (!cache || cache.PathConstructor !== PathConstructor) {
+    cache = { PathConstructor, paths: new Map() };
+    layoutPathCache.set(uvLayout, cache);
+  }
+  const meshNames = group.islandRefs.map(({ meshName }) => meshName).join(',');
+  const revisions = meshUvData.map(({ revision }) => revision).join(',');
+  const key = `${group.id}|${meshNames}|${revisions}|${width}x${height}`;
+  const cached = cache.paths.get(key);
+  if (cached) return cached;
+
+  const path = new PathConstructor();
+  appendUvTrianglesToPath(path, meshUvData, width, height);
+  cache.paths.set(key, path);
+  return path;
+}
+
+function appendUvTrianglesToPath(path, meshUvData, width, height) {
+  for (const { coordinates } of meshUvData) {
+    for (let index = 0; index < coordinates.length; index += 6) {
+      path.moveTo(coordinates[index] * width, (1 - coordinates[index + 1]) * height);
+      path.lineTo(coordinates[index + 2] * width, (1 - coordinates[index + 3]) * height);
+      path.lineTo(coordinates[index + 4] * width, (1 - coordinates[index + 5]) * height);
+      path.closePath();
+    }
+  }
+}
+
+function paintUvTriangles(context, meshUvData, width, height, path, painter) {
   context.save();
   try {
-    context.beginPath();
-    triangles.forEach((triangle) => {
-      triangle.forEach(([u, v], index) => {
-        const x = u * width;
-        const y = (1 - v) * height;
-        if (index === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
-      });
-      context.closePath();
-    });
-    context.clip();
+    if (path) {
+      context.clip(path);
+    } else {
+      context.beginPath();
+      appendUvTrianglesToPath(context, meshUvData, width, height);
+      context.clip();
+    }
     painter();
   } finally {
     context.restore();
@@ -143,9 +370,9 @@ function paintRegion(context, region, width, height, painter) {
   context.restore();
 }
 
-function bodyBounds(region, width, height, flipV = false) {
+function bodyBounds(region, width, height) {
   const xs = region.map(([u]) => u * width);
-  const ys = region.map(([, v]) => (flipV ? 1 - v : v) * height);
+  const ys = region.map(([, v]) => v * height);
   return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
 }
 

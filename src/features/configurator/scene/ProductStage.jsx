@@ -251,11 +251,14 @@ export function ProductStage({
   }, [personalizationSideFocus, product.renderer]);
 
   useEffect(() => {
-    onProductionProvider?.((request) => (
-      rendererRef.current?.prepareProductionArtifacts?.(request)
-    ));
+    const renderer = rendererRef.current;
+    if (!renderer?.prepareProductionArtifacts) {
+      onProductionProvider?.(null);
+      return undefined;
+    }
+    onProductionProvider?.((request) => renderer.prepareProductionArtifacts(request));
     return () => onProductionProvider?.(null);
-  }, [onProductionProvider]);
+  }, [onProductionProvider, product.renderer]);
 
   return (
     <section className="stage-wrap">

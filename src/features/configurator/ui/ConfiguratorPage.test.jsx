@@ -6,6 +6,7 @@ import { productApi } from '../api/productApi.js';
 const rendererHarness = vi.hoisted(() => ({
   bakeResult: null,
   configurationError: '',
+  constructorError: null,
   focusedDecorationId: null,
   options: null,
   personalizationMutationDisabled: null,
@@ -50,6 +51,7 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
     GarmentRenderer: class {
       constructor(host, options) {
         rendererHarness.options = options;
+        if (rendererHarness.constructorError) throw rendererHarness.constructorError;
         this.onPrintAnchorChange = options.onPrintAnchorChange;
         this.onStateNormalize = options.onStateNormalize;
       }
@@ -120,6 +122,7 @@ afterAll(() => {
 beforeEach(() => {
   vi.useRealTimers();
   rendererHarness.bakeResult = null;
+  rendererHarness.constructorError = null;
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
@@ -143,6 +146,7 @@ describe('ConfiguratorPage', () => {
   it('shows a renderer error in the user-visible alert', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
+    await getReadySaveButton();
 
     expect(rendererHarness.options.onError).toBeTypeOf('function');
     act(() => rendererHarness.options.onError(new Error('服装模型加载失败。')));
@@ -150,9 +154,25 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('服装模型加载失败。');
   });
 
+  it('keeps save disabled while the renderer production provider is unavailable', async () => {
+    rendererHarness.constructorError = new Error('renderer unavailable');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    const save = screen.getByRole('button', { name: 'Save design' });
+    expect(save).toBeDisabled();
+    expect(await screen.findByRole('alert')).toHaveTextContent('renderer unavailable');
+    fireEvent.click(save);
+    expect(productionPackageHarness.requests).toHaveLength(0);
+    consoleError.mockRestore();
+  });
+
   it('shows a Chinese fallback for an unknown renderer error', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
+    await getReadySaveButton();
 
     act(() => rendererHarness.options.onError({ message: '   ' }));
 
@@ -555,7 +575,7 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
     expect(screen.queryByRole('region', { name: 'Configurator status' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    fireEvent.click(await getReadySaveButton());
 
     const download = await screen.findByRole('link', { name: 'Download production ZIP' });
     const statusRegion = screen.getByRole('region', { name: 'Configurator status' });
@@ -571,13 +591,29 @@ describe('ConfiguratorPage', () => {
     }));
   });
 
+  it('keeps the registered production provider stable across save rerenders', async () => {
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    const save = await getReadySaveButton();
+    fireEvent.click(save);
+    await screen.findByRole('link', { name: 'Download production ZIP' });
+    const firstProvider = productionPackageHarness.requests[0].artifactProvider;
+
+    fireEvent.click(save);
+    await waitFor(() => expect(productionPackageHarness.requests).toHaveLength(2));
+
+    expect(firstProvider).toEqual(expect.any(Function));
+    expect(productionPackageHarness.requests[1].artifactProvider).toBe(firstProvider);
+  });
+
   it('disables duplicate saves and discards a production ZIP when the design changes while generation is pending', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
     const packageDeferred = createDeferred();
     productionPackageHarness.result = packageDeferred.promise;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    fireEvent.click(await getReadySaveButton());
     expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     expect(productionPackageHarness.requests).toHaveLength(1);
@@ -605,7 +641,7 @@ describe('ConfiguratorPage', () => {
     const packageDeferred = createDeferred();
     productionPackageHarness.result = packageDeferred.promise;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    fireEvent.click(await getReadySaveButton());
     unmount();
     await act(async () => {
       packageDeferred.resolve(createProductionResult());
@@ -836,7 +872,7 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
 
     await enableHiddenBottomPattern();
-    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    fireEvent.click(await getReadySaveButton());
     const productionDownload = await screen.findByRole('link', { name: 'Download production ZIP' });
     expect(productionDownload).toHaveAttribute('download', 'fn8788-jersey-design-12ab34cd.zip');
     expect(downloadClick).not.toHaveBeenCalled();
@@ -1135,7 +1171,7 @@ describe('ConfiguratorPage', () => {
     await screen.findByText('Chelsea Match Jersey');
 
     await enableHiddenBottomPattern();
-    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    fireEvent.click(await getReadySaveButton());
     fireEvent.click(await screen.findByRole('link', { name: 'Download production ZIP' }));
     fireEvent.click(screen.getByRole('button', { name: 'Size' }));
     fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
@@ -1238,6 +1274,12 @@ async function enableHiddenBottomPattern() {
   await waitFor(() => expect(
     rendererHarness.updateStates.at(-1).overrides.bottomPattern.enabled,
   ).toBe(true));
+}
+
+async function getReadySaveButton() {
+  const save = screen.getByRole('button', { name: 'Save design' });
+  await waitFor(() => expect(save).toBeEnabled());
+  return save;
 }
 
 function createDeferred() {

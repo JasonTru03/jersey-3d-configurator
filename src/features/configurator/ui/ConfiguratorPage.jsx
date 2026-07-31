@@ -81,6 +81,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
   const [preparedDownload, setPreparedDownload] = useState(null);
   const [productionPending, setProductionPending] = useState(false);
+  const [productionProviderReady, setProductionProviderReady] = useState(false);
   const productionProviderRef = useRef(null);
   const productionPendingRef = useRef(false);
   const activeCartRequestRef = useRef(null);
@@ -103,6 +104,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const handleRendererError = useCallback((error) => {
     const message = typeof error?.message === 'string' ? error.message.trim() : '';
     setFileError(message || '3D 服装预览加载失败，请稍后重试。');
+  }, []);
+  const handleProductionProvider = useCallback((provider) => {
+    productionProviderRef.current = provider;
+    setProductionProviderReady(typeof provider === 'function');
   }, []);
 
   const handlePersonalizationSidePendingChange = (pending) => {
@@ -161,6 +166,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       personalizationSidePendingRef.current
       || hasPendingMutation()
       || productionPendingRef.current
+      || !productionProviderRef.current
     ) return;
     const requestId = saveRequestIdRef.current + 1;
     const stateSnapshot = structuredClone(latestStateRef.current);
@@ -288,7 +294,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           onThemeToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')}
           onUndo={undo}
           product={product}
-          saveDisabled={snapshotMutationPending || productionPending}
+          saveDisabled={snapshotMutationPending || productionPending || !productionProviderReady}
           theme={theme}
         />
         <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
@@ -311,7 +317,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           <ProductStage
             artworkFocusId={artworkFocusId}
             onRendererError={handleRendererError}
-            onProductionProvider={(provider) => { productionProviderRef.current = provider; }}
+            onProductionProvider={handleProductionProvider}
             onEditPersonalization={(id) => {
               setSelectedPersonalizationKey(id);
               setSection('personalize');

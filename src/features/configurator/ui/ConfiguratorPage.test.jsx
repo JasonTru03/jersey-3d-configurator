@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConfiguratorPage, createLocalProductionFiles, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
+import { ConfiguratorPage, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
 import { productApi } from '../api/productApi.js';
 
 const rendererHarness = vi.hoisted(() => ({
@@ -9,12 +9,28 @@ const rendererHarness = vi.hoisted(() => ({
   focusedDecorationId: null,
   options: null,
   personalizationMutationDisabled: null,
+  productionRequests: [],
+  productionResult: null,
   updateStates: [],
   finalRotationItem: null,
   normalizationForUpdate: null,
   viewCalls: [],
 }));
+const productionPackageHarness = vi.hoisted(() => ({
+  requests: [],
+  result: null,
+}));
 let downloadClick;
+
+vi.mock('../designs/productionPackage.js', () => ({
+  createProductionPackage: vi.fn(async (request) => {
+    productionPackageHarness.requests.push(request);
+    if (typeof productionPackageHarness.result === 'function') {
+      return productionPackageHarness.result(request);
+    }
+    return productionPackageHarness.result;
+  }),
+}));
 
 vi.mock('../hooks/useConfigurator.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -69,6 +85,11 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
         };
       }
 
+      prepareProductionArtifacts(request) {
+        rendererHarness.productionRequests.push(request);
+        return rendererHarness.productionResult;
+      }
+
       focusDecoration(id) {
         rendererHarness.focusedDecorationId = id;
       }
@@ -102,11 +123,15 @@ beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
+  rendererHarness.productionRequests = [];
+  rendererHarness.productionResult = null;
   rendererHarness.updateStates = [];
   rendererHarness.finalRotationItem = null;
   rendererHarness.normalizationForUpdate = null;
   rendererHarness.configurationError = '';
   rendererHarness.viewCalls = [];
+  productionPackageHarness.requests = [];
+  productionPackageHarness.result = createProductionResult();
   downloadClick.mockClear();
   URL.createObjectURL.mockClear();
   URL.revokeObjectURL.mockClear();
@@ -513,20 +538,30 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
 
-    const download = await screen.findByRole('link', { name: 'Download design JSON' });
+    const download = await screen.findByRole('link', { name: 'Download production ZIP' });
     const statusRegion = screen.getByRole('region', { name: 'Configurator status' });
     expect(statusRegion).toContainElement(download);
     expect(statusRegion.nextElementSibling).toHaveClass('workspace-grid');
+    expect(download).toHaveAttribute('download', 'fn8788-jersey-design-12ab34cd.zip');
+    expect(productionPackageHarness.requests).toHaveLength(1);
+    expect(productionPackageHarness.requests[0]).toEqual(expect.objectContaining({
+      artifactProvider: expect.any(Function),
+      product: expect.objectContaining({ id: 'fn8788-jersey' }),
+      state: expect.objectContaining({ layout: 'm' }),
+      variantId: null,
+    }));
   });
 
-  it('discards a patterned save when the design changes while its bake is pending', async () => {
+  it('disables duplicate saves and discards a production ZIP when the design changes while generation is pending', async () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
-    await enableHiddenBottomPattern();
-    const bakeDeferred = createDeferred();
-    rendererHarness.bakeResult = bakeDeferred.promise;
+    const packageDeferred = createDeferred();
+    productionPackageHarness.result = packageDeferred.promise;
 
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    expect(productionPackageHarness.requests).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Size' }));
     fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
     await waitFor(() => expect(
@@ -534,35 +569,28 @@ describe('ConfiguratorPage', () => {
     ).toHaveAttribute('aria-pressed', 'true'));
 
     await act(async () => {
-      bakeDeferred.resolve({
-        blob: new Blob(['atlas'], { type: 'image/png' }),
-        metadata: { bakeKey: 'bottom-pattern-atlas:stale', atlasSize: 2048 },
-      });
-      await bakeDeferred.promise;
+      packageDeferred.resolve(createProductionResult());
+      await packageDeferred.promise;
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(screen.queryByRole('link', { name: 'Download production ZIP' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Download design JSON' })).not.toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Save design' })).toBeEnabled();
   });
 
-  it('discards a patterned save when the page unmounts while its bake is pending', async () => {
+  it('discards a production ZIP when the page unmounts while generation is pending', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { unmount } = render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
-    await enableHiddenBottomPattern();
-    const bakeDeferred = createDeferred();
-    rendererHarness.bakeResult = bakeDeferred.promise;
+    const packageDeferred = createDeferred();
+    productionPackageHarness.result = packageDeferred.promise;
 
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     unmount();
     await act(async () => {
-      bakeDeferred.resolve({
-        blob: new Blob(['atlas'], { type: 'image/png' }),
-        metadata: { bakeKey: 'bottom-pattern-atlas:unmounted', atlasSize: 2048 },
-      });
-      await bakeDeferred.promise;
+      packageDeferred.resolve(createProductionResult());
+      await packageDeferred.promise;
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
@@ -576,17 +604,6 @@ describe('ConfiguratorPage', () => {
   it('only requires a baked asset when the bottom pattern is enabled', () => {
     expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: false } } })).toBe(false);
     expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: true } } })).toBe(true);
-  });
-
-  it('prepares local production references without an upload URL or credential', async () => {
-    await expect(createLocalProductionFiles({
-      productId: 'fn8788-jersey',
-      bake: { blob: new Blob(['atlas'], { type: 'image/png' }), metadata: { atlasSize: 2048 } },
-    })).resolves.toMatchObject({
-      atlasFilename: 'fn8788-jersey-uv-atlas.png',
-      designFilename: 'fn8788-jersey-design.json',
-      atlasSha256: 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
-    });
   });
 
   it('initializes the layout from the Shopify-selected XL variant', async () => {
@@ -802,7 +819,7 @@ describe('ConfiguratorPage', () => {
     await enableHiddenBottomPattern();
     fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
     const productionDownload = await screen.findByRole('link', { name: 'Download production ZIP' });
-    expect(productionDownload).toHaveAttribute('download', 'fn8788-jersey-production.zip');
+    expect(productionDownload).toHaveAttribute('download', 'fn8788-jersey-design-12ab34cd.zip');
     expect(downloadClick).not.toHaveBeenCalled();
     fireEvent.click(productionDownload);
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
@@ -813,10 +830,10 @@ describe('ConfiguratorPage', () => {
       'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=test-token',
     );
     expect(JSON.parse(fetch.mock.calls[0][1].body).productionFiles).toEqual({
-      atlasFilename: 'fn8788-jersey-uv-atlas.png',
+      atlasFilename: 'uv-atlas.png',
       atlasSha256: 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
-      bundleFilename: 'fn8788-jersey-production.zip',
-      designFilename: 'fn8788-jersey-design.json',
+      bundleFilename: 'fn8788-jersey-design-12ab34cd.zip',
+      designFilename: 'design.json',
     });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -1212,4 +1229,36 @@ function createDeferred() {
     reject = fail;
   });
   return { promise, reject, resolve };
+}
+
+function createProductionResult() {
+  return {
+    blob: new Blob(['production-zip'], { type: 'application/zip' }),
+    filename: 'fn8788-jersey-design-12ab34cd.zip',
+    fingerprint: '12ab34cd5678',
+    manifest: {
+      files: [
+        {
+          name: 'design.json',
+          sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        },
+        {
+          name: 'uv-atlas.png',
+          sha256: '7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
+        },
+        {
+          name: 'uv-reference.pdf',
+          sha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        },
+        {
+          name: 'preview-front.png',
+          sha256: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        },
+        {
+          name: 'preview-back.png',
+          sha256: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        },
+      ],
+    },
+  };
 }

@@ -27,13 +27,12 @@ import { ZoneColorPanel } from './ZoneColorPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
 import { parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import { createSecureCartHandoff } from '../shopify/cartQuoteClient.js';
-import { hashAtlasBlob } from '../scene/bottomPatternBaker.js';
 import { createBrowserDownload } from '../designs/browserDownload.js';
 import {
   createLocalProductionReceipt,
   getCurrentLocalProductionFiles,
 } from '../designs/localProductionReceipt.js';
-import { createProductionBundle } from '../designs/productionBundle.js';
+import { createProductionPackage } from '../designs/productionPackage.js';
 import './configurator.css';
 import '../scene/personalization-controls.css';
 
@@ -58,7 +57,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     product,
     quote,
     redo,
-    saveDesignFile,
     selected,
     state,
     status,
@@ -82,7 +80,9 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [cartPending, setCartPending] = useState(false);
   const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
   const [preparedDownload, setPreparedDownload] = useState(null);
-  const bakeProviderRef = useRef(null);
+  const [productionPending, setProductionPending] = useState(false);
+  const productionProviderRef = useRef(null);
+  const productionPendingRef = useRef(false);
   const activeCartRequestRef = useRef(null);
   const cartPendingRef = useRef(false);
   const cartRequestIdRef = useRef(0);
@@ -123,6 +123,9 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
 
   function handleMutationStart() {
     saveRequestIdRef.current += 1;
+    productionPendingRef.current = false;
+    setProductionPending(false);
+    setPreparedDownload(null);
     cancelActiveCartRequest();
   }
 
@@ -131,6 +134,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     return () => {
       mountedRef.current = false;
       saveRequestIdRef.current += 1;
+      productionPendingRef.current = false;
       cancelActiveCartRequest({ updateUi: false });
     };
   }, []);
@@ -149,46 +153,46 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   }, [reviewOpen]);
 
   const handleSaveDesign = async () => {
-    if (personalizationSidePendingRef.current || hasPendingMutation()) return;
+    if (
+      personalizationSidePendingRef.current
+      || hasPendingMutation()
+      || productionPendingRef.current
+    ) return;
     const requestId = saveRequestIdRef.current + 1;
-    const stateSnapshot = latestStateRef.current;
+    const stateSnapshot = structuredClone(latestStateRef.current);
     saveRequestIdRef.current = requestId;
+    productionPendingRef.current = true;
+    setProductionPending(true);
     const isCurrentRequest = () => (
       mountedRef.current && saveRequestIdRef.current === requestId
     );
     try {
       setFileError('');
-      const productionFiles = shouldPrepareBottomPatternAsset(stateSnapshot)
-        ? await createLocalProductionFiles({ bake: await getLatestPatternBake(bakeProviderRef), productId: product.id })
+      const artifact = await createProductionPackage({
+        artifactProvider: productionProviderRef.current,
+        product,
+        selected: structuredClone(selected),
+        state: stateSnapshot,
+        variantId: shopifyContext?.variantId ?? null,
+      });
+      if (!isCurrentRequest()) return;
+      const receipt = shouldPrepareBottomPatternAsset(stateSnapshot)
+        ? createReceiptFromProductionPackage({ artifact, state: stateSnapshot })
         : null;
-      if (!isCurrentRequest()) return;
-      const download = saveDesignFile(productionFiles?.bakeMetadata, stateSnapshot);
-      if (!download) return;
-      let artifact = download;
-      let receipt = null;
-      if (productionFiles) {
-        const bundle = await createProductionBundle({
-          productId: product.id,
-          design: download,
-          atlas: { blob: productionFiles.atlas, filename: productionFiles.atlasFilename },
-        });
-        if (!isCurrentRequest()) return;
-        artifact = bundle;
-        receipt = createLocalProductionReceipt({
-          state: stateSnapshot,
-          productionFiles: { ...productionFiles, bundleFilename: bundle.filename },
-        });
-      }
-      if (!isCurrentRequest()) return;
       setLocalProductionReceipt(null);
       setPreparedDownload({
         ...createBrowserDownload(artifact),
-        label: productionFiles ? 'Download production ZIP' : 'Download design JSON',
+        label: 'Download production ZIP',
         receipt,
       });
     } catch (error) {
       if (!isCurrentRequest()) return;
       setFileError(error instanceof Error ? error.message : 'Design file preparation failed.');
+    } finally {
+      if (isCurrentRequest()) {
+        productionPendingRef.current = false;
+        setProductionPending(false);
+      }
     }
   };
 
@@ -280,7 +284,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           onThemeToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')}
           onUndo={undo}
           product={product}
-          saveDisabled={snapshotMutationPending}
+          saveDisabled={snapshotMutationPending || productionPending}
           theme={theme}
         />
         <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
@@ -302,7 +306,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         <div className="workspace-grid">
           <ProductStage
             artworkFocusId={artworkFocusId}
-            onBakeProvider={(provider) => { bakeProviderRef.current = provider; }}
+            onProductionProvider={(provider) => { productionProviderRef.current = provider; }}
             onEditPersonalization={(id) => {
               setSelectedPersonalizationKey(id);
               setSection('personalize');
@@ -341,7 +345,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       <DesignReviewDialog
         cartError={cartError}
         cartPending={cartPending}
-        mutationPending={snapshotMutationPending}
+        mutationPending={snapshotMutationPending || productionPending}
         onClose={handleCloseReview}
         onAddToCart={handleAddToCart}
         onDownload={() => setLocalProductionReceipt(preparedDownload?.receipt ?? null)}
@@ -362,21 +366,20 @@ export function shouldPrepareBottomPatternAsset(state) {
   return state?.overrides?.bottomPattern?.enabled === true;
 }
 
-export async function createLocalProductionFiles({ bake, productId }) {
-  if (!bake?.blob || !bake?.metadata) throw new Error('The latest UV atlas is not ready.');
-  const atlasFilename = `${productId}-uv-atlas.png`;
-  const atlasSha256 = await hashAtlasBlob(bake.blob);
-  return {
-    atlas: bake.blob,
-    atlasFilename,
-    atlasSha256,
-    designFilename: `${productId}-design.json`,
-    bakeMetadata: { ...structuredClone(bake.metadata), atlasFilename, atlasSha256 },
-  };
-}
-
-async function getLatestPatternBake(bakeProviderRef) {
-  return bakeProviderRef.current?.();
+function createReceiptFromProductionPackage({ artifact, state }) {
+  const atlas = artifact.manifest?.files?.find((file) => file.name === 'uv-atlas.png');
+  if (!atlas?.sha256) {
+    throw new Error('生产文件清单缺少 uv-atlas.png。');
+  }
+  return createLocalProductionReceipt({
+    state,
+    productionFiles: {
+      atlasFilename: 'uv-atlas.png',
+      atlasSha256: `sha256:${atlas.sha256}`,
+      bundleFilename: artifact.filename,
+      designFilename: 'design.json',
+    },
+  });
 }
 
 function defaultNavigateToCart(url) {

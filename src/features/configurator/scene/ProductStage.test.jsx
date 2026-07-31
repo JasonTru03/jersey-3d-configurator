@@ -17,6 +17,8 @@ const rendererHarness = vi.hoisted(() => ({
   focusedDecorationId: null,
   options: null,
   personalizationMutationDisabled: null,
+  productionRequests: [],
+  productionResult: null,
   normalizationForUpdate: null,
   updateArgs: null,
   viewCalls: [],
@@ -97,6 +99,11 @@ vi.mock('./garmentRenderer.js', async (importOriginal) => {
         rendererHarness.focusedDecorationId = id;
       }
 
+      prepareProductionArtifacts(request) {
+        rendererHarness.productionRequests.push(request);
+        return rendererHarness.productionResult;
+      }
+
       dispose() {}
     },
   };
@@ -127,9 +134,36 @@ beforeEach(() => {
   rendererHarness.focusedDecorationId = null;
   rendererHarness.options = null;
   rendererHarness.personalizationMutationDisabled = null;
+  rendererHarness.productionRequests = [];
+  rendererHarness.productionResult = null;
   rendererHarness.normalizationForUpdate = null;
   rendererHarness.updateArgs = null;
   rendererHarness.viewCalls = [];
+});
+
+describe('ProductStage production provider', () => {
+  it('registers the renderer provider and unregisters it on unmount', async () => {
+    const onProductionProvider = vi.fn();
+    rendererHarness.productionResult = Promise.resolve({ atlas: 'ready' });
+    const state = { lighting: 'none', overrides: {} };
+    const view = render(
+      <ProductStage
+        onProductionProvider={onProductionProvider}
+        onStatePatch={vi.fn()}
+        product={product}
+        selected={selected}
+        state={state}
+      />,
+    );
+    const provider = onProductionProvider.mock.calls.at(-1)[0];
+    const request = { model: { id: 'chelsea' }, stateSnapshot: state };
+
+    await expect(provider(request)).resolves.toEqual({ atlas: 'ready' });
+    expect(rendererHarness.productionRequests).toEqual([request]);
+
+    view.unmount();
+    expect(onProductionProvider).toHaveBeenLastCalledWith(null);
+  });
 });
 
 describe('ProductStage print toolbar', () => {

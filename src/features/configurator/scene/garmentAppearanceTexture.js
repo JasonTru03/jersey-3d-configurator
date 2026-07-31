@@ -1,3 +1,5 @@
+import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
+
 const UV_REGIONS = {
   bodyFront: [[0.03, 0.05], [0.31, 0.05], [0.34, 0.82], [0.24, 0.95], [0.1, 0.95], [0, 0.82]],
   bodyBack: [[0.37, 0.05], [0.65, 0.05], [0.68, 0.82], [0.58, 0.95], [0.44, 0.95], [0.34, 0.82]],
@@ -13,10 +15,7 @@ const UV_REGIONS = {
   ],
   collar: [[0.12, 0], [0.22, 0], [0.24, 0.1], [0.17, 0.15], [0.1, 0.1]],
 };
-const MIN_UV_TRIANGLE_AREA = 1e-12;
-const meshUvDataCache = new WeakMap();
 const layoutPathCache = new WeakMap();
-let meshUvDataRevision = 0;
 
 export function createGarmentAppearanceCanvas(
   size = 2048,
@@ -49,7 +48,7 @@ export function renderModelUvAppearance(
   resolvedGroups.forEach(({ group, meshes }) => {
     const meshUvData = [];
     for (const mesh of meshes) {
-      const data = getMeshUvData(mesh);
+      const data = collectRenderableUvTriangles(mesh);
       if (data) meshUvData.push(data);
     }
     if (meshUvData.length === 0) {
@@ -125,160 +124,6 @@ function assertPositiveDimensions(width, height) {
   if (!(width > 0) || !(height > 0)) {
     throw new Error('Appearance texture requires a positive width and height.');
   }
-}
-
-function getMeshUvData(mesh) {
-  const position = mesh?.geometry?.attributes?.position;
-  const uv = mesh?.geometry?.attributes?.uv;
-  if (!position || !uv || position.itemSize < 3 || uv.itemSize < 2) return null;
-
-  const index = mesh.geometry.index;
-  if (index && index.itemSize < 1) return null;
-  const signature = getMeshUvSignature(mesh, position, uv, index);
-  const cached = meshUvDataCache.get(mesh);
-  if (cached && meshUvSignatureMatches(cached.signature, signature)) return cached.data;
-
-  const spans = getGeometryRenderSpans(mesh, index?.count ?? position.count);
-  const coordinates = [];
-  const triangleKeys = new Set();
-  let minU = Infinity;
-  let minV = Infinity;
-  let maxU = -Infinity;
-  let maxV = -Infinity;
-
-  for (const { start, end } of spans) {
-    for (let offset = start; offset + 2 < end; offset += 3) {
-      const first = readUvVertex(index, uv, position.count, offset, mesh.name);
-      const second = readUvVertex(index, uv, position.count, offset + 1, mesh.name);
-      const third = readUvVertex(index, uv, position.count, offset + 2, mesh.name);
-      if (!first || !second || !third || isDegenerateUvTriangle(first, second, third)) continue;
-      const triangleKey = `${first.vertexIndex}:${second.vertexIndex}:${third.vertexIndex}`;
-      if (triangleKeys.has(triangleKey)) continue;
-      triangleKeys.add(triangleKey);
-      coordinates.push(first.u, first.v, second.u, second.v, third.u, third.v);
-      minU = Math.min(minU, first.u, second.u, third.u);
-      minV = Math.min(minV, first.v, second.v, third.v);
-      maxU = Math.max(maxU, first.u, second.u, third.u);
-      maxV = Math.max(maxV, first.v, second.v, third.v);
-    }
-  }
-  const data = coordinates.length === 0
-    ? null
-    : {
-        bounds: { minU, minV, maxU, maxV },
-        coordinates,
-        revision: ++meshUvDataRevision,
-      };
-  meshUvDataCache.set(mesh, { data, signature });
-  return data;
-}
-
-function getMeshUvSignature(mesh, position, uv, index) {
-  const groups = Array.isArray(mesh.material)
-    ? (mesh.geometry.groups ?? []).map((group) => {
-        const material = Number.isInteger(group.materialIndex)
-          ? mesh.material[group.materialIndex]
-          : null;
-        return [
-          group.start,
-          group.count,
-          group.materialIndex,
-          Boolean(material),
-          material?.visible !== false,
-        ].join(':');
-      }).join(',')
-    : `single-material:${Boolean(mesh.material)}:${mesh.material?.visible !== false}`;
-  return {
-    geometry: mesh.geometry,
-    position,
-    positionVersion: getBufferAttributeVersion(position),
-    positionCount: position.count,
-    positionItemSize: position.itemSize,
-    positionNormalized: position.normalized,
-    uv,
-    uvVersion: getBufferAttributeVersion(uv),
-    uvCount: uv.count,
-    uvItemSize: uv.itemSize,
-    uvNormalized: uv.normalized,
-    index,
-    indexVersion: getBufferAttributeVersion(index),
-    indexCount: index?.count ?? null,
-    indexItemSize: index?.itemSize ?? null,
-    indexNormalized: index?.normalized ?? null,
-    drawStart: mesh.geometry.drawRange?.start ?? 0,
-    drawCount: mesh.geometry.drawRange?.count ?? Infinity,
-    materialIsArray: Array.isArray(mesh.material),
-    groups,
-  };
-}
-
-function getBufferAttributeVersion(attribute) {
-  return attribute?.data?.version ?? attribute?.version ?? null;
-}
-
-function meshUvSignatureMatches(first, second) {
-  return Object.keys(first).every((key) => first[key] === second[key]);
-}
-
-function getGeometryRenderSpans(mesh, elementCount) {
-  const drawSpan = intersectRenderSpan(
-    0,
-    elementCount,
-    mesh.geometry.drawRange?.start ?? 0,
-    mesh.geometry.drawRange?.count ?? Infinity,
-  );
-  if (!drawSpan) return [];
-
-  if (!Array.isArray(mesh.material)) {
-    return mesh.material && mesh.material.visible !== false ? [drawSpan] : [];
-  }
-  const groups = mesh.geometry.groups ?? [];
-  if (groups.length === 0) return [];
-
-  const spans = [];
-  for (const group of groups) {
-    const material = Number.isInteger(group.materialIndex)
-      ? mesh.material[group.materialIndex]
-      : null;
-    if (!material || material.visible === false) continue;
-    const span = intersectRenderSpan(
-      drawSpan.start,
-      drawSpan.end,
-      group.start,
-      group.count,
-    );
-    if (span) spans.push(span);
-  }
-  return spans;
-}
-
-function intersectRenderSpan(baseStart, baseEnd, rangeStart, rangeCount) {
-  if (!Number.isFinite(rangeStart) || !(rangeCount > 0)) return null;
-  const rangeEnd = rangeCount === Infinity ? baseEnd : rangeStart + rangeCount;
-  if (!Number.isFinite(rangeEnd)) return null;
-  const start = Math.max(baseStart, 0, Math.ceil(rangeStart));
-  const end = Math.min(baseEnd, Math.floor(rangeEnd));
-  return end > start ? { start, end } : null;
-}
-
-function readUvVertex(index, uv, positionCount, offset, meshName) {
-  const vertexIndex = index ? index.getX(offset) : offset;
-  if (!Number.isFinite(vertexIndex) || !Number.isInteger(vertexIndex) || vertexIndex < 0) return null;
-  if (vertexIndex >= positionCount) return null;
-  if (vertexIndex >= uv.count) {
-    throw new Error(`模型 UV 网格 "${meshName}" 的已绘制三角形引用了 UV 属性范围外的顶点。`);
-  }
-  const u = uv.getX(vertexIndex);
-  const v = uv.getY(vertexIndex);
-  return Number.isFinite(u) && Number.isFinite(v) ? { u, v, vertexIndex } : null;
-}
-
-function isDegenerateUvTriangle(first, second, third) {
-  const area = (
-    (second.u - first.u) * (third.v - first.v)
-    - (second.v - first.v) * (third.u - first.u)
-  );
-  return Math.abs(area) <= MIN_UV_TRIANGLE_AREA;
 }
 
 function getGroupPixelBounds(meshUvData, width, height) {

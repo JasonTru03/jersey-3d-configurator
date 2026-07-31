@@ -1,4 +1,5 @@
 import { validateModelUvLayout } from '../config/modelUvLayouts.js';
+import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
 
 const OUTPUT_SIZE = 4096;
 const TRIANGLE_BATCH_SIZE = 128;
@@ -45,88 +46,113 @@ export async function createUvPatternPieces({
   validateModelUvLayout(uvLayout, meshes);
   validateSourceAtlas(atlasCanvas, atlasSize);
   const groups = buildUniqueGroups(uvLayout.pieceGroups, meshes);
-  const canvas = document.createElement('canvas');
-  canvas.width = OUTPUT_SIZE;
-  canvas.height = OUTPUT_SIZE;
+  const extractedPieces = [];
+  for (const group of groups) {
+    const triangles = await collectGroupTriangles(group, atlasSize, yieldControl);
+    if (triangles.length === 0) {
+      throw new Error(`UV 裁片 "${group.id}" 没有可映射的有效三角形。`);
+    }
+    const sourceBounds = calculateSourceBounds(triangles, atlasSize);
+    extractedPieces.push({
+      group,
+      mappedTriangles: triangles.length,
+      sourceBounds,
+      orientedSize: getOrientedSize(sourceBounds, group),
+      triangles,
+    });
+  }
+
+  const layout = calculatePieceLayout(extractedPieces);
+  const canvas = createCanvas(OUTPUT_SIZE, OUTPUT_SIZE);
   const context = canvas.getContext('2d');
   if (!context) throw new Error('无法创建 UV 裁片画布。');
   context.clearRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
+  const pieces = [];
 
-  const temporaryCanvases = [];
-  try {
-    const extractedPieces = [];
-    for (const group of groups) {
-      const triangles = extractGroupTriangles(group, atlasSize);
-      if (triangles.length === 0) {
-        throw new Error(`UV 裁片 "${group.id}" 没有可映射的有效三角形。`);
-      }
-      const sourceBounds = calculateSourceBounds(triangles, atlasSize);
-      const sourceCanvas = createCanvas(sourceBounds.width, sourceBounds.height);
+  for (let index = 0; index < extractedPieces.length; index += 1) {
+    const extracted = extractedPieces[index];
+    const { outputBounds, scale } = layout[index];
+    const temporaryCanvases = [];
+    try {
+      const maskCanvas = createCanvas(extracted.sourceBounds.width, extracted.sourceBounds.height);
+      temporaryCanvases.push(maskCanvas);
+      const sourceCanvas = createCanvas(extracted.sourceBounds.width, extracted.sourceBounds.height);
       temporaryCanvases.push(sourceCanvas);
-      await drawTriangleBatches({
-        context: sourceCanvas.getContext('2d'),
-        atlasCanvas,
-        sourceBounds,
-        triangles,
+      const orientedCanvas = createCanvas(extracted.orientedSize.width, extracted.orientedSize.height);
+      temporaryCanvases.push(orientedCanvas);
+
+      await drawTriangleMaskBatches({
+        context: maskCanvas.getContext('2d'),
+        sourceBounds: extracted.sourceBounds,
+        triangles: extracted.triangles,
         yieldControl,
       });
-      const orientedSize = getOrientedSize(sourceBounds, group);
-      const orientedCanvas = createCanvas(orientedSize.width, orientedSize.height);
-      temporaryCanvases.push(orientedCanvas);
-      drawOrientedPiece(orientedCanvas.getContext('2d'), sourceCanvas, sourceBounds, group);
-      extractedPieces.push({
-        group,
-        mappedTriangles: triangles.length,
-        sourceBounds,
-        orientedCanvas,
-        orientedSize,
+      applyPieceMask({
+        context: sourceCanvas.getContext('2d'),
+        atlasCanvas,
+        maskCanvas,
+        sourceBounds: extracted.sourceBounds,
       });
-    }
-
-    const layout = calculatePieceLayout(extractedPieces);
-    const pieces = extractedPieces.map((extracted, index) => {
-      const outputBounds = layout[index];
+      drawOrientedPiece(
+        orientedCanvas.getContext('2d'),
+        sourceCanvas,
+        extracted.sourceBounds,
+        extracted.group,
+      );
       context.drawImage(
-        extracted.orientedCanvas,
+        orientedCanvas,
         outputBounds.x,
         outputBounds.y,
         outputBounds.width,
         outputBounds.height,
       );
-      return createPieceMetadata(
+      const piece = createPieceMetadata(
         extracted.group,
         extracted.mappedTriangles,
         extracted.sourceBounds,
         outputBounds,
+        scale,
       );
-    });
-    for (const piece of pieces) {
-      piece.coveragePixels = countCoveragePixels(context, piece.outputBounds);
+      piece.coveragePixels = await scanCoveragePixels(
+        context,
+        piece.outputBounds,
+        yieldControl,
+      );
       if (piece.coveragePixels === 0) {
         throw new Error(`UV 裁片 "${piece.id}" 提取结果为空。`);
       }
-    }
-    const layoutFingerprint = createLayoutFingerprint(uvLayout.version, pieces);
-    const blob = await canvasToPngBlob(canvas);
-    return {
-      blob,
-      canvas,
-      width: OUTPUT_SIZE,
-      height: OUTPUT_SIZE,
-      pieces,
-      layoutFingerprint,
-    };
-  } finally {
-    for (const temporaryCanvas of temporaryCanvases) {
-      temporaryCanvas.width = 0;
-      temporaryCanvas.height = 0;
+      pieces.push(piece);
+    } finally {
+      releaseCanvases(temporaryCanvases);
     }
   }
+
+  const layoutFingerprint = createLayoutFingerprint(uvLayout.version, pieces);
+  const blob = await canvasToPngBlob(canvas);
+  return {
+    blob,
+    canvas,
+    width: OUTPUT_SIZE,
+    height: OUTPUT_SIZE,
+    pieces,
+    layoutFingerprint,
+  };
 }
 
 function validateSourceAtlas(atlasCanvas, atlasSize) {
-  if (!atlasCanvas || !Number.isFinite(atlasSize) || atlasSize <= 0) {
-    throw new Error('UV 裁片需要有效的源 Atlas 和 atlasSize。');
+  if (!Number.isInteger(atlasSize) || atlasSize <= 0) {
+    throw new Error('UV 裁片源 Atlas 的 atlasSize 必须是正整数。');
+  }
+  if (
+    !atlasCanvas
+    || !Number.isInteger(atlasCanvas.width)
+    || !Number.isInteger(atlasCanvas.height)
+    || atlasCanvas.width <= 0
+    || atlasCanvas.height <= 0
+    || atlasCanvas.width !== atlasSize
+    || atlasCanvas.height !== atlasSize
+  ) {
+    throw new Error(`UV 裁片源 Atlas 尺寸必须精确等于 ${atlasSize}×${atlasSize}。`);
   }
 }
 
@@ -180,6 +206,10 @@ function buildUniqueGroups(pieceGroups, meshes) {
       uniqueGroups.push(group);
     }
   }
+  const ids = new Set(uniqueGroups.map(({ id }) => id));
+  if (!ids.has('front') || !ids.has('back')) {
+    throw new Error('模型 UV 裁片配置去重后必须仍包含独立的正片和背片。');
+  }
   return uniqueGroups;
 }
 
@@ -191,98 +221,31 @@ function normalizeDuplicateGroup(group) {
   return group.duplicateGroup.trim();
 }
 
-function extractGroupTriangles(group, atlasSize) {
-  return group.meshes.flatMap((mesh) => extractMeshTriangles(mesh, atlasSize));
+async function collectGroupTriangles(group, atlasSize, yieldControl) {
+  const triangles = [];
+  try {
+    for (const mesh of group.meshes) {
+      await yieldControl();
+      triangles.push(...collectPieceAtlasTriangles(mesh, atlasSize));
+    }
+    return triangles;
+  } catch (error) {
+    throw new Error(`UV 裁片 "${group.id}" 无法提取：${error.message}`, { cause: error });
+  }
 }
 
-function extractMeshTriangles(mesh, atlasSize) {
-  const geometry = mesh.geometry;
-  const position = geometry?.getAttribute?.('position');
-  const uv = geometry?.getAttribute?.('uv');
-  if (!position || !uv) return [];
-  if (Array.isArray(mesh.material)) {
-    if (mesh.material.length === 0) return [];
-  } else if (!mesh.material || mesh.material.visible === false) {
-    return [];
-  }
-
-  const index = geometry.getIndex?.() ?? geometry.index;
-  const elementCount = index ? index.count : position.count;
+export function collectPieceAtlasTriangles(mesh, atlasSize) {
+  const data = collectRenderableUvTriangles(mesh);
+  if (!data) return [];
   const triangles = [];
-  const offsets = new Set();
-  for (const { start, end } of getVisibleRenderSpans(geometry, mesh.material, elementCount)) {
-    for (let offset = start; offset + 2 < end; offset += 3) {
-      if (offsets.has(offset)) continue;
-      offsets.add(offset);
-      const vertexIndices = [0, 1, 2].map((delta) => (
-        index ? index.getX(offset + delta) : offset + delta
-      ));
-      if (!vertexIndices.every((vertexIndex) => (
-        Number.isInteger(vertexIndex)
-        && vertexIndex >= 0
-        && vertexIndex < position.count
-      ))) {
-        throw new Error(`UV 裁片网格 "${mesh.name}" 的实际绘制索引超出 position 范围。`);
-      }
-      if (!vertexIndices.every((vertexIndex) => vertexIndex < uv.count)) {
-        throw new Error(`UV 裁片网格 "${mesh.name}" 的实际绘制范围超出 UV 属性。`);
-      }
-      if (!vertexIndices.every((vertexIndex) => isFiniteAttributeItem(position, vertexIndex))) continue;
-      const uvPoints = vertexIndices.map((vertexIndex) => ({
-        u: uv.getX(vertexIndex),
-        v: uv.getY(vertexIndex),
-      }));
-      if (!uvPoints.every(isValidUvPoint) || isDegenerateUvTriangle(uvPoints)) continue;
-      triangles.push(uvPoints.map((point) => uvToAtlasPoint(point, atlasSize)));
-    }
+  for (let offset = 0; offset < data.coordinates.length; offset += 6) {
+    triangles.push([
+      uvToAtlasPoint({ u: data.coordinates[offset], v: data.coordinates[offset + 1] }, atlasSize),
+      uvToAtlasPoint({ u: data.coordinates[offset + 2], v: data.coordinates[offset + 3] }, atlasSize),
+      uvToAtlasPoint({ u: data.coordinates[offset + 4], v: data.coordinates[offset + 5] }, atlasSize),
+    ]);
   }
   return triangles;
-}
-
-function getVisibleRenderSpans(geometry, material, elementCount) {
-  const drawStart = clampInteger(geometry.drawRange?.start ?? 0, 0, elementCount);
-  const requestedCount = geometry.drawRange?.count ?? Infinity;
-  const drawEnd = Number.isFinite(requestedCount)
-    ? clampInteger(drawStart + Math.max(0, requestedCount), drawStart, elementCount)
-    : elementCount;
-  if (drawStart >= drawEnd) return [];
-
-  if (!Array.isArray(material)) return [{ start: drawStart, end: drawEnd }];
-  const groups = geometry.groups ?? [];
-  if (groups.length === 0) return [];
-  return groups.flatMap((group) => {
-    if (material[group.materialIndex]?.visible === false || !material[group.materialIndex]) return [];
-    const start = Math.max(drawStart, clampInteger(group.start, 0, elementCount));
-    const end = Math.min(drawEnd, clampInteger(group.start + group.count, 0, elementCount));
-    return start < end ? [{ start, end }] : [];
-  });
-}
-
-function clampInteger(value, minimum, maximum) {
-  if (!Number.isFinite(value)) return maximum;
-  return Math.min(maximum, Math.max(minimum, Math.trunc(value)));
-}
-
-function isFiniteAttributeItem(attribute, index) {
-  for (let component = 0; component < attribute.itemSize; component += 1) {
-    const value = component === 0
-      ? attribute.getX(index)
-      : component === 1
-        ? attribute.getY(index)
-        : attribute.getZ(index);
-    if (!Number.isFinite(value)) return false;
-  }
-  return true;
-}
-
-function isValidUvPoint({ u, v }) {
-  return Number.isFinite(u) && Number.isFinite(v) && u >= 0 && u <= 1 && v >= 0 && v <= 1;
-}
-
-function isDegenerateUvTriangle([first, second, third]) {
-  const twiceArea = (second.u - first.u) * (third.v - first.v)
-    - (second.v - first.v) * (third.u - first.u);
-  return Math.abs(twiceArea) <= Number.EPSILON;
 }
 
 function calculateSourceBounds(triangles, atlasSize) {
@@ -310,43 +273,48 @@ function calculateSourceBounds(triangles, atlasSize) {
   };
 }
 
-export async function drawTriangleBatches({
+export async function drawTriangleMaskBatches({
   context,
-  atlasCanvas,
   sourceBounds,
   triangles,
   yieldControl,
 }) {
-  if (!context) throw new Error('无法创建 UV 裁片临时画布。');
+  if (!context) throw new Error('无法创建 UV 裁片遮罩画布。');
+  context.globalCompositeOperation = 'source-over';
+  context.fillStyle = '#FFFFFF';
   for (let start = 0; start < triangles.length; start += TRIANGLE_BATCH_SIZE) {
     const batch = triangles.slice(start, start + TRIANGLE_BATCH_SIZE);
-    context.save();
-    context.beginPath();
     for (const triangle of batch) {
       const [first, second, third] = triangle.map(({ x, y }) => ({
         x: x - sourceBounds.x,
         y: y - sourceBounds.y,
       }));
+      context.beginPath();
       context.moveTo(first.x, first.y);
       context.lineTo(second.x, second.y);
       context.lineTo(third.x, third.y);
       context.closePath();
+      context.fill();
     }
-    context.clip();
-    context.drawImage(
-      atlasCanvas,
-      sourceBounds.x,
-      sourceBounds.y,
-      sourceBounds.width,
-      sourceBounds.height,
-      0,
-      0,
-      sourceBounds.width,
-      sourceBounds.height,
-    );
-    context.restore();
     await yieldControl();
   }
+}
+
+export function applyPieceMask({ context, atlasCanvas, maskCanvas, sourceBounds }) {
+  if (!context) throw new Error('无法创建 UV 裁片源画布。');
+  context.drawImage(
+    atlasCanvas,
+    sourceBounds.x,
+    sourceBounds.y,
+    sourceBounds.width,
+    sourceBounds.height,
+    0,
+    0,
+    sourceBounds.width,
+    sourceBounds.height,
+  );
+  context.globalCompositeOperation = 'destination-in';
+  context.drawImage(maskCanvas, 0, 0);
 }
 
 function getOrientedSize({ width, height }, transform) {
@@ -419,15 +387,18 @@ function calculatePieceLayout(extractedPieces) {
     const cellX = LAYOUT_MARGIN + column * (cellWidth + PIECE_GAP);
     const cellY = LAYOUT_MARGIN + row * (cellHeight + PIECE_GAP);
     return {
-      x: Math.round(cellX + (cellWidth - width) / 2),
-      y: Math.round(cellY + (cellHeight - height) / 2),
-      width,
-      height,
+      scale,
+      outputBounds: {
+        x: Math.round(cellX + (cellWidth - width) / 2),
+        y: Math.round(cellY + (cellHeight - height) / 2),
+        width,
+        height,
+      },
     };
   });
 }
 
-function createPieceMetadata(group, mappedTriangles, sourceBounds, outputBounds) {
+function createPieceMetadata(group, mappedTriangles, sourceBounds, outputBounds, scale) {
   return {
     id: group.id,
     label: group.label,
@@ -441,21 +412,31 @@ function createPieceMetadata(group, mappedTriangles, sourceBounds, outputBounds)
     mappedTriangles,
     sourceBounds,
     outputBounds,
+    scale,
     coveragePixels: 0,
     aliases: [...group.aliases],
   };
 }
 
-export function countCoveragePixels(context, { x, y, width, height }) {
+export function countCoveragePixels(imageData) {
+  const data = imageData?.data ?? imageData;
+  let coveragePixels = 0;
+  for (let alphaIndex = 3; alphaIndex < data.length; alphaIndex += 4) {
+    if (data[alphaIndex] > 0) coveragePixels += 1;
+  }
+  return coveragePixels;
+}
+
+export async function scanCoveragePixels(context, { x, y, width, height }, yieldControl) {
   const maximumPixelsPerRead = 262144;
   const rowsPerRead = Math.max(1, Math.floor(maximumPixelsPerRead / width));
   let coveragePixels = 0;
   for (let offsetY = 0; offsetY < height; offsetY += rowsPerRead) {
     const blockHeight = Math.min(rowsPerRead, height - offsetY);
-    const { data } = context.getImageData(x, y + offsetY, width, blockHeight);
-    for (let alphaIndex = 3; alphaIndex < data.length; alphaIndex += 4) {
-      if (data[alphaIndex] > 0) coveragePixels += 1;
-    }
+    coveragePixels += countCoveragePixels(
+      context.getImageData(x, y + offsetY, width, blockHeight),
+    );
+    await yieldControl();
   }
   return coveragePixels;
 }
@@ -473,6 +454,7 @@ function createLayoutFingerprint(layoutVersion, pieces) {
       islandRefs: piece.islandRefs,
       sourceBounds: piece.sourceBounds,
       outputBounds: piece.outputBounds,
+      scale: piece.scale,
       aliases: piece.aliases,
     })),
   });
@@ -489,6 +471,13 @@ function createCanvas(width, height) {
   canvas.width = width;
   canvas.height = height;
   return canvas;
+}
+
+function releaseCanvases(canvases) {
+  for (const canvas of canvases) {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
 }
 
 function canvasToPngBlob(canvas) {

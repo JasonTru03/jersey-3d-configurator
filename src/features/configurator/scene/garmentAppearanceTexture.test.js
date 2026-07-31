@@ -10,6 +10,8 @@ import {
   renderGarmentAppearance,
   renderModelUvAppearance,
 } from './garmentAppearanceTexture.js';
+import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
+import { collectPieceAtlasTriangles } from './uvPatternPieces.js';
 
 const appearance = {
   template: 'solid',
@@ -195,6 +197,23 @@ describe('garment appearance texture', () => {
     expect(context.calls).toContainEqual(['moveTo', 62.5, 87.5]);
     expect(context.calls).not.toContainEqual(['moveTo', 0, 100]);
     expect(context.calls).not.toContainEqual(['fillRect', 0, 0, 100, 100]);
+  });
+
+  it('consumes the same fake-mesh triangle coordinates in appearance and pattern pieces', () => {
+    const mesh = createUvMesh('front-mesh', [
+      0.125, 0.25,
+      0.5, 0.25,
+      0.125, 0.5,
+      0.625, 0.125,
+      0.875, 0.125,
+      0.625, 0.375,
+    ], [0, 1, 2, 3, 4, 5]);
+    const context = renderSingleConfiguredMesh(mesh);
+    const shared = collectRenderableUvTriangles(mesh);
+    const pieceTriangles = collectPieceAtlasTriangles(mesh, 100);
+
+    expect(readRecordedTriangles(context.calls)).toEqual(pieceTriangles);
+    expect(pieceTriangles).toHaveLength(shared.triangleCount);
   });
 
   it('rejects a configured garment UV group without mapped triangles', () => {
@@ -672,7 +691,43 @@ describe('garment appearance texture', () => {
     render();
     expect(getUvX.map((spy) => spy.mock.calls.length)).toEqual(firstParseCalls);
   });
+
+  it('consumes the same real Chelsea triangle coordinates in appearance and pattern pieces', () => {
+    const size = 64;
+    const uvLayout = getModelUvLayout({ id: 'chelsea-jersey', version: '1' });
+    const meshesByName = new Map(chelseaMeshes.map((mesh) => [mesh.name, mesh]));
+    const configuredMeshes = uvLayout.pieceGroups.flatMap(({ islandRefs }) => (
+      islandRefs.map(({ meshName }) => meshesByName.get(meshName))
+    ));
+    const context = createRecordingContext();
+
+    renderModelUvAppearance(context, { width: size, height: size }, appearance, {
+      modelMeshes: configuredMeshes,
+      uvLayout,
+    });
+    const pieceTriangles = configuredMeshes.flatMap((mesh) => collectPieceAtlasTriangles(mesh, size));
+    const sharedTriangleCount = configuredMeshes.reduce((count, mesh) => (
+      count + collectRenderableUvTriangles(mesh).triangleCount
+    ), 0);
+
+    expect(readRecordedTriangles(context.calls)).toEqual(pieceTriangles);
+    expect(pieceTriangles).toHaveLength(sharedTriangleCount);
+  });
 });
+
+function readRecordedTriangles(calls) {
+  const triangles = [];
+  let triangle = null;
+  for (const [method, x, y] of calls) {
+    if (method === 'moveTo') triangle = [{ x, y }];
+    else if (method === 'lineTo') triangle?.push({ x, y });
+    else if (method === 'closePath' && triangle?.length === 3) {
+      triangles.push(triangle);
+      triangle = null;
+    }
+  }
+  return triangles;
+}
 
 async function loadModelMeshes(modelId) {
   const data = readFileSync(resolvePath(process.cwd(), `public/models/${modelId}.glb`));

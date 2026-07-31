@@ -27,8 +27,11 @@ describe('UV pattern pieces', () => {
 
     const [front, back] = result.pieces;
     expect(front.outputBounds.x + front.outputBounds.width).toBeLessThan(back.outputBounds.x);
-    expect(calls(harness.created, 'clip')).toHaveLength(2);
+    expect(calls(harness.created, 'clip')).toHaveLength(0);
+    expect(calls(harness.created, 'fill')).toHaveLength(4);
     expect(calls(harness.created, 'drawImage').filter(({ args }) => args[0] === harness.atlas)).toHaveLength(2);
+    expect(calls(harness.created, 'globalCompositeOperation'))
+      .toContainEqual(expect.objectContaining({ args: ['destination-in'] }));
     expectCoverageReadsStayInsidePieces(result, harness.created);
     expectTemporaryCanvasesReleased(result.canvas, harness.created);
   });
@@ -157,23 +160,35 @@ describe('UV pattern pieces', () => {
       .some(({ args }) => args[0] < 0)).toBe(mirrorX);
   });
 
-  it('executes triangle clipping against real pixels and preserves transparent exterior pixels', async () => {
-    expect(uvPatternPieces.drawTriangleBatches).toBeTypeOf('function');
+  it('unions reverse-wound triangle masks across batch boundaries and preserves transparent exterior pixels', async () => {
+    expect(uvPatternPieces.drawTriangleMaskBatches).toBeTypeOf('function');
+    expect(uvPatternPieces.applyPieceMask).toBeTypeOf('function');
     const atlas = new PixelSurface(4, 4);
     for (let y = 0; y < atlas.height; y += 1) {
       for (let x = 0; x < atlas.width; x += 1) setPixel(atlas, x, y, RED);
     }
+    const mask = new PixelSurface(4, 4);
     const output = new PixelSurface(4, 4);
-    const context = new ExtractionPixelContext(output);
+    const triangle = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 4 }];
+    const triangles = Array.from({ length: 129 }, (_, index) => (
+      index % 2 === 0 ? triangle : [...triangle].reverse()
+    ));
+    const yieldControl = vi.fn(() => Promise.resolve());
 
-    await uvPatternPieces.drawTriangleBatches({
-      context,
-      atlasCanvas: atlas,
+    await uvPatternPieces.drawTriangleMaskBatches({
+      context: new ExtractionPixelContext(mask),
       sourceBounds: { x: 0, y: 0, width: 4, height: 4 },
-      triangles: [[{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 4 }]],
-      yieldControl: () => Promise.resolve(),
+      triangles,
+      yieldControl,
+    });
+    uvPatternPieces.applyPieceMask({
+      context: new ExtractionPixelContext(output),
+      atlasCanvas: atlas,
+      maskCanvas: mask,
+      sourceBounds: { x: 0, y: 0, width: 4, height: 4 },
     });
 
+    expect(yieldControl).toHaveBeenCalledTimes(2);
     expect(getPixel(output, 0, 0)).toEqual(RED);
     expect(getPixel(output, 3, 3)).toEqual(TRANSPARENT);
   });
@@ -208,17 +223,24 @@ describe('UV pattern pieces', () => {
     expect(readCornerPixels(output)).toEqual(expectedCorners);
   });
 
-  it('counts alpha coverage from a real Uint8ClampedArray region', () => {
+  it('counts alpha coverage from a real Uint8ClampedArray region and yields while scanning', async () => {
     expect(uvPatternPieces.countCoveragePixels).toBeTypeOf('function');
+    expect(uvPatternPieces.scanCoveragePixels).toBeTypeOf('function');
     const surface = new PixelSurface(3, 2);
     setPixel(surface, 0, 0, RED);
     setPixel(surface, 2, 0, GREEN);
     setPixel(surface, 1, 1, BLUE);
+    const context = new ExtractionPixelContext(surface);
+    const imageData = context.getImageData(0, 0, 3, 2);
+    const yieldControl = vi.fn(() => Promise.resolve());
 
-    expect(uvPatternPieces.countCoveragePixels(
-      new ExtractionPixelContext(surface),
+    expect(uvPatternPieces.countCoveragePixels(imageData)).toBe(3);
+    await expect(uvPatternPieces.scanCoveragePixels(
+      context,
       { x: 0, y: 0, width: 3, height: 2 },
-    )).toBe(3);
+      yieldControl,
+    )).resolves.toBe(3);
+    expect(yieldControl).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -280,17 +302,36 @@ describe('UV pattern pieces', () => {
     expectTemporaryCanvasesReleased(harness.created[0], harness.created);
   });
 
-  it('renders only the first duplicateGroup and records stable aliases', async () => {
+  it('renders only the first duplicateGroup while preserving independent front/back pieces', async () => {
     const harness = installCanvasHarness();
     const layout = createLayout();
     layout.pieceGroups[0].duplicateGroup = 'body-copy';
-    layout.pieceGroups[1].duplicateGroup = 'body-copy';
+    layout.pieceGroups.push({
+      ...createGroup('front-inner', '正片内层', 2, 'front-inner-mesh'),
+      duplicateGroup: 'body-copy',
+    });
 
-    const result = await createUvPatternPieces(createInput(harness, { uvLayout: layout }));
+    const result = await createUvPatternPieces(createInput(harness, {
+      uvLayout: layout,
+      meshes: [
+        createRectMesh('front-mesh', 0, 0, 0.5, 1),
+        createRectMesh('back-mesh', 0.5, 0, 1, 1),
+        createRectMesh('front-inner-mesh', 0, 0, 0.5, 1),
+      ],
+    }));
 
-    expect(result.pieces).toHaveLength(1);
-    expect(result.pieces[0]).toMatchObject({ id: 'front', aliases: ['back'] });
-    expect(calls(harness.created, 'drawImage').filter(({ args }) => args[0] === harness.atlas)).toHaveLength(1);
+    expect(result.pieces.map(({ id }) => id)).toEqual(['front', 'back']);
+    expect(result.pieces[0]).toMatchObject({ id: 'front', aliases: ['front-inner'] });
+    expect(calls(harness.created, 'drawImage').filter(({ args }) => args[0] === harness.atlas)).toHaveLength(2);
+  });
+
+  it('rejects a duplicateGroup that would merge front and back', async () => {
+    const harness = installCanvasHarness();
+    const layout = createLayout();
+    layout.pieceGroups.forEach((group) => { group.duplicateGroup = 'body-copy'; });
+
+    await expect(createUvPatternPieces(createInput(harness, { uvLayout: layout })))
+      .rejects.toThrow('正片和背片');
   });
 
   it.each([
@@ -310,17 +351,27 @@ describe('UV pattern pieces', () => {
   it('normalizes duplicateGroup keys and keeps the lowest order when input is reversed', async () => {
     const harness = installCanvasHarness();
     const layout = createLayout();
-    layout.pieceGroups[0].duplicateGroup = ' body-copy ';
-    layout.pieceGroups[1].duplicateGroup = 'body-copy';
+    layout.pieceGroups.push(
+      { ...createGroup('side', 'side', 2, 'side-mesh'), duplicateGroup: ' body-copy ' },
+      { ...createGroup('side-copy', 'side copy', 3, 'side-copy-mesh'), duplicateGroup: 'body-copy' },
+    );
     layout.pieceGroups.reverse();
 
-    const result = await createUvPatternPieces(createInput(harness, { uvLayout: layout }));
+    const result = await createUvPatternPieces(createInput(harness, {
+      uvLayout: layout,
+      meshes: [
+        createRectMesh('front-mesh', 0, 0, 0.25, 1),
+        createRectMesh('back-mesh', 0.25, 0, 0.5, 1),
+        createRectMesh('side-mesh', 0.5, 0, 0.75, 1),
+        createRectMesh('side-copy-mesh', 0.75, 0, 1, 1),
+      ],
+    }));
 
-    expect(result.pieces).toHaveLength(1);
-    expect(result.pieces[0]).toMatchObject({
-      id: 'front',
+    expect(result.pieces).toHaveLength(3);
+    expect(result.pieces[2]).toMatchObject({
+      id: 'side',
       duplicateGroup: 'body-copy',
-      aliases: ['back'],
+      aliases: ['side-copy'],
     });
   });
 
@@ -335,6 +386,64 @@ describe('UV pattern pieces', () => {
 
     expect(result.pieces[0].mappedTriangles).toBe(300);
     expect(yieldControl.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(calls(harness.created, 'drawImage').filter(({ args }) => args[0] === harness.atlas))
+      .toHaveLength(2);
+  });
+
+  it('yields before parsing triangles and before allocating any canvas', async () => {
+    const harness = installCanvasHarness();
+    const front = createRectMesh('front-mesh', 0, 0, 0.5, 1);
+    const getX = vi.spyOn(front.geometry.getAttribute('uv'), 'getX');
+    let firstYield = true;
+    const yieldControl = vi.fn(() => {
+      if (firstYield) {
+        expect(getX).not.toHaveBeenCalled();
+        expect(harness.created).toHaveLength(0);
+        firstYield = false;
+      }
+      return Promise.resolve();
+    });
+
+    await createUvPatternPieces(createInput(harness, {
+      meshes: [front, createRectMesh('back-mesh', 0.5, 0, 1, 1)],
+      yieldControl,
+    }));
+    expect(firstYield).toBe(false);
+  });
+
+  it('keeps at most three temporary canvases alive while streaming many pieces', async () => {
+    const harness = installCanvasHarness();
+    const layout = createLayout();
+    const meshes = [
+      createRectMesh('front-mesh', 0, 0, 0.2, 1),
+      createRectMesh('back-mesh', 0.2, 0, 0.4, 1),
+    ];
+    for (let index = 2; index < 7; index += 1) {
+      const id = `piece-${index}`;
+      const meshName = `${id}-mesh`;
+      layout.pieceGroups.push(createGroup(id, id, index, meshName));
+      meshes.push(createRectMesh(meshName, index / 10, 0, (index + 1) / 10, 0.5));
+    }
+
+    await createUvPatternPieces(createInput(harness, { uvLayout: layout, meshes }));
+
+    expect(harness.tracker.maxActiveTemporaryCanvases).toBeLessThanOrEqual(3);
+    expectTemporaryCanvasesReleased(harness.created[0], harness.created);
+  });
+
+  it('releases the current piece canvases when yieldControl rejects', async () => {
+    const harness = installCanvasHarness();
+    let callsCount = 0;
+    const rejection = new Error('stop yielding');
+    const yieldControl = () => {
+      callsCount += 1;
+      return callsCount === 3 ? Promise.reject(rejection) : Promise.resolve();
+    };
+
+    await expect(createUvPatternPieces(createInput(harness, { yieldControl }))).rejects.toBe(rejection);
+    if (harness.created.length > 0) {
+      expectTemporaryCanvasesReleased(harness.created[0], harness.created);
+    }
   });
 
   it('keeps source atlasSize=64 separate from 4096 output coordinates', async () => {
@@ -344,6 +453,18 @@ describe('UV pattern pieces', () => {
     expect(result.pieces.every(({ sourceBounds }) => sourceBounds.x + sourceBounds.width <= 64)).toBe(true);
     expect(result.pieces.some(({ outputBounds }) => outputBounds.width > 64)).toBe(true);
     expect(result).toMatchObject({ width: 4096, height: 4096 });
+  });
+
+  it.each([
+    ['canvas尺寸不一致', { width: 2, height: 2, atlasSize: 4 }],
+    ['atlasSize非整数', { width: 4, height: 4, atlasSize: 4.5 }],
+  ])('rejects invalid source atlas dimensions: %s', async (_, dimensions) => {
+    const harness = installCanvasHarness();
+    harness.atlas.width = dimensions.width;
+    harness.atlas.height = dimensions.height;
+
+    await expect(createUvPatternPieces(createInput(harness, { atlasSize: dimensions.atlasSize })))
+      .rejects.toThrow('Atlas');
   });
 
   it('lays out more than two pieces on a deterministic grid with one uniform scale', async () => {
@@ -365,6 +486,13 @@ describe('UV pattern pieces', () => {
       outputBounds.height / sourceBounds.height,
     ]);
     expect(new Set(scales)).toEqual(new Set([28]));
+    expect(new Set(result.pieces.map(({ scale }) => scale))).toEqual(new Set([28]));
+    for (const piece of result.pieces) {
+      expect(Math.abs(piece.outputBounds.width - piece.sourceBounds.width * piece.scale))
+        .toBeLessThanOrEqual(1);
+      expect(Math.abs(piece.outputBounds.height - piece.sourceBounds.height * piece.scale))
+        .toBeLessThanOrEqual(1);
+    }
     for (const { outputBounds } of result.pieces) {
       expect(outputBounds.x).toBeGreaterThanOrEqual(192);
       expect(outputBounds.y).toBeGreaterThanOrEqual(192);
@@ -426,21 +554,42 @@ describe('UV pattern pieces', () => {
     expect(changedOutput.layoutFingerprint).not.toBe(baseline.layoutFingerprint);
 
     const twoAliasLayout = createLayout();
-    twoAliasLayout.pieceGroups.forEach((group) => { group.duplicateGroup = 'body-copy'; });
-    const twoAliases = await createScenarioResult({ layout: twoAliasLayout });
+    twoAliasLayout.pieceGroups[0].duplicateGroup = 'body-copy';
+    twoAliasLayout.pieceGroups.push({
+      ...createGroup('front-inner', 'front inner', 2, 'front-inner-mesh'),
+      duplicateGroup: 'body-copy',
+    });
+    const twoAliases = await createScenarioResult({
+      layout: twoAliasLayout,
+      meshes: [
+        createRectMesh('front-mesh', 0, 0, 0.5, 1),
+        createRectMesh('back-mesh', 0.5, 0, 1, 1),
+        createRectMesh('front-inner-mesh', 0, 0, 0.5, 1),
+      ],
+    });
     const threeAliasLayout = createLayout();
-    threeAliasLayout.pieceGroups.push(createGroup('side', '侧片', 2, 'side-mesh'));
-    threeAliasLayout.pieceGroups.forEach((group) => { group.duplicateGroup = 'body-copy'; });
+    threeAliasLayout.pieceGroups[0].duplicateGroup = 'body-copy';
+    threeAliasLayout.pieceGroups.push(
+      {
+        ...createGroup('front-inner', 'front inner', 2, 'front-inner-mesh'),
+        duplicateGroup: 'body-copy',
+      },
+      {
+        ...createGroup('front-lining', 'front lining', 3, 'front-lining-mesh'),
+        duplicateGroup: 'body-copy',
+      },
+    );
     const threeAliases = await createScenarioResult({
       layout: threeAliasLayout,
       meshes: [
         createRectMesh('front-mesh', 0, 0, 0.5, 1),
         createRectMesh('back-mesh', 0.5, 0, 1, 1),
-        createRectMesh('side-mesh', 0, 0, 0.25, 0.25),
+        createRectMesh('front-inner-mesh', 0, 0, 0.5, 1),
+        createRectMesh('front-lining-mesh', 0, 0, 0.5, 1),
       ],
     });
-    expect(twoAliases.pieces[0].aliases).toEqual(['back']);
-    expect(threeAliases.pieces[0].aliases).toEqual(['back', 'side']);
+    expect(twoAliases.pieces[0].aliases).toEqual(['front-inner']);
+    expect(threeAliases.pieces[0].aliases).toEqual(['front-inner', 'front-lining']);
     expect(threeAliases.pieces[0].sourceBounds).toEqual(twoAliases.pieces[0].sourceBounds);
     expect(threeAliases.pieces[0].outputBounds).toEqual(twoAliases.pieces[0].outputBounds);
     expect(threeAliases.layoutFingerprint).not.toBe(twoAliases.layoutFingerprint);
@@ -491,14 +640,23 @@ function installCanvasHarness({
   atlas.width = 64;
   atlas.height = 64;
   const created = [];
+  const tracker = {
+    maxActiveTemporaryCanvases: 0,
+    update() {
+      const active = created.slice(1)
+        .filter((canvas) => canvas.width > 0 && canvas.height > 0)
+        .length;
+      this.maxActiveTemporaryCanvases = Math.max(this.maxActiveTemporaryCanvases, active);
+    },
+  };
   const nativeCreateElement = document.createElement.bind(document);
   vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
     if (tagName !== 'canvas') return nativeCreateElement(tagName, options);
-    const canvas = new RecordingCanvas({ blob, coverageAlpha, role: 'generated' });
+    const canvas = new RecordingCanvas({ blob, coverageAlpha, role: 'generated', tracker });
     created.push(canvas);
     return canvas;
   });
-  return { atlas, created };
+  return { atlas, created, tracker };
 }
 
 class RecordingCanvas {
@@ -506,14 +664,21 @@ class RecordingCanvas {
     blob = new Blob(['png'], { type: 'image/png' }),
     coverageAlpha = 255,
     role,
+    tracker = null,
   } = {}) {
-    this.width = 0;
-    this.height = 0;
+    this._width = 0;
+    this._height = 0;
     this.role = role;
     this.blob = blob;
+    this.tracker = tracker;
     this.context = new RecordingContext(this, coverageAlpha);
     this.operations = [];
   }
+
+  get width() { return this._width; }
+  set width(value) { this._width = value; this.tracker?.update(); }
+  get height() { return this._height; }
+  set height(value) { this._height = value; this.tracker?.update(); }
 
   getContext(type) {
     this.operations.push({ method: 'getContext', args: [type] });
@@ -544,6 +709,7 @@ class RecordingContext {
   moveTo(...args) { this.record('moveTo', args); }
   lineTo(...args) { this.record('lineTo', args); }
   clip(...args) { this.record('clip', args); }
+  fill(...args) { this.record('fill', args); }
   drawImage(...args) { this.record('drawImage', args); }
   translate(...args) { this.record('translate', args); }
   rotate(...args) { this.record('rotate', args); }
@@ -551,6 +717,7 @@ class RecordingContext {
   transform(...args) { this.record('transform', args); }
   setTransform(...args) { this.record('setTransform', args); }
   clearRect(...args) { this.record('clearRect', args); }
+  set globalCompositeOperation(value) { this.record('globalCompositeOperation', [value]); }
 
   getImageData(...args) {
     this.record('getImageData', args);
@@ -582,14 +749,12 @@ class PixelSurface {
 class ExtractionPixelContext {
   constructor(surface) {
     this.surface = surface;
-    this.clipTriangles = [];
     this.pathTriangles = [];
     this.currentTriangle = null;
-    this.savedClips = [];
+    this.globalCompositeOperation = 'source-over';
+    this.fillStyle = '#000000';
   }
 
-  save() { this.savedClips.push(this.clipTriangles.map((triangle) => [...triangle])); }
-  restore() { this.clipTriangles = this.savedClips.pop() ?? []; }
   beginPath() { this.pathTriangles = []; this.currentTriangle = null; }
   moveTo(x, y) { this.currentTriangle = [{ x, y }]; }
   lineTo(x, y) { this.currentTriangle.push({ x, y }); }
@@ -598,7 +763,15 @@ class ExtractionPixelContext {
     this.pathTriangles.push(this.currentTriangle);
     this.currentTriangle = null;
   }
-  clip() { this.clipTriangles = this.pathTriangles.map((triangle) => [...triangle]); }
+
+  fill() {
+    forEachPixel(0, 0, this.surface.width, this.surface.height, (pixelX, pixelY) => {
+      const center = { x: pixelX + 0.5, y: pixelY + 0.5 };
+      if (this.pathTriangles.some((triangle) => pointInsideTriangle(center, triangle))) {
+        setPixel(this.surface, pixelX, pixelY, [255, 255, 255, 255]);
+      }
+    });
+  }
 
   clearRect(x, y, width, height) {
     forEachPixel(x, y, width, height, (pixelX, pixelY) => {
@@ -606,10 +779,21 @@ class ExtractionPixelContext {
     });
   }
 
-  drawImage(source, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height) {
+  drawImage(source, ...args) {
+    if (args.length === 2) {
+      const [x, y] = args;
+      forEachPixel(x, y, source.width, source.height, (pixelX, pixelY) => {
+        const sourcePixel = getPixel(source, pixelX - x, pixelY - y);
+        if (this.globalCompositeOperation === 'destination-in') {
+          if (sourcePixel[3] === 0) setPixel(this.surface, pixelX, pixelY, TRANSPARENT);
+          return;
+        }
+        setPixel(this.surface, pixelX, pixelY, sourcePixel);
+      });
+      return;
+    }
+    const [sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height] = args;
     forEachPixel(x, y, width, height, (pixelX, pixelY) => {
-      const center = { x: pixelX + 0.5, y: pixelY + 0.5 };
-      if (!this.clipTriangles.some((triangle) => pointInsideTriangle(center, triangle))) return;
       const sampledX = Math.floor(sourceX + ((pixelX - x + 0.5) / width) * sourceWidth);
       const sampledY = Math.floor(sourceY + ((pixelY - y + 0.5) / height) * sourceHeight);
       setPixel(this.surface, pixelX, pixelY, getPixel(source, sampledX, sampledY));

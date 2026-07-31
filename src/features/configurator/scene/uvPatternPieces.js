@@ -1,5 +1,8 @@
 import { validateModelUvLayout } from '../config/modelUvLayouts.js';
-import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
+import {
+  collectRenderableUvTriangles,
+  iterateRenderableUvTriangles,
+} from './renderableUvTriangles.js';
 
 const OUTPUT_SIZE = 4096;
 const TRIANGLE_BATCH_SIZE = 128;
@@ -48,11 +51,10 @@ export async function createUvPatternPieces({
   const groups = buildUniqueGroups(uvLayout.pieceGroups, meshes);
   const extractedPieces = [];
   for (const group of groups) {
-    const triangles = await collectGroupTriangles(group, atlasSize, yieldControl);
+    const { triangles, sourceBounds } = await collectGroupTriangles(group, atlasSize, yieldControl);
     if (triangles.length === 0) {
       throw new Error(`UV 裁片 "${group.id}" 没有可映射的有效三角形。`);
     }
-    const sourceBounds = calculateSourceBounds(triangles, atlasSize);
     extractedPieces.push({
       group,
       mappedTriangles: triangles.length,
@@ -221,14 +223,38 @@ function normalizeDuplicateGroup(group) {
   return group.duplicateGroup.trim();
 }
 
-async function collectGroupTriangles(group, atlasSize, yieldControl) {
+export async function collectGroupTriangles(group, atlasSize, yieldControl) {
   const triangles = [];
+  const extents = {
+    minimumX: atlasSize,
+    minimumY: atlasSize,
+    maximumX: 0,
+    maximumY: 0,
+  };
   try {
     for (const mesh of group.meshes) {
       await yieldControl();
-      triangles.push(...collectPieceAtlasTriangles(mesh, atlasSize));
+      let trianglesSinceYield = 0;
+      for (const coordinates of iterateRenderableUvTriangles(mesh)) {
+        const triangle = [
+          uvToAtlasPoint({ u: coordinates[0], v: coordinates[1] }, atlasSize),
+          uvToAtlasPoint({ u: coordinates[2], v: coordinates[3] }, atlasSize),
+          uvToAtlasPoint({ u: coordinates[4], v: coordinates[5] }, atlasSize),
+        ];
+        triangles.push(triangle);
+        includeTriangleInExtents(extents, triangle);
+        trianglesSinceYield += 1;
+        if (trianglesSinceYield === TRIANGLE_BATCH_SIZE) {
+          await yieldControl();
+          trianglesSinceYield = 0;
+        }
+      }
+      if (trianglesSinceYield > 0) await yieldControl();
     }
-    return triangles;
+    return {
+      triangles,
+      sourceBounds: triangles.length > 0 ? calculateSourceBounds(extents, atlasSize) : null,
+    };
   } catch (error) {
     throw new Error(`UV 裁片 "${group.id}" 无法提取：${error.message}`, { cause: error });
   }
@@ -248,19 +274,22 @@ export function collectPieceAtlasTriangles(mesh, atlasSize) {
   return triangles;
 }
 
-function calculateSourceBounds(triangles, atlasSize) {
-  let minimumX = atlasSize;
-  let minimumY = atlasSize;
-  let maximumX = 0;
-  let maximumY = 0;
-  for (const triangle of triangles) {
-    for (const { x, y } of triangle) {
-      minimumX = Math.min(minimumX, x);
-      minimumY = Math.min(minimumY, y);
-      maximumX = Math.max(maximumX, x);
-      maximumY = Math.max(maximumY, y);
-    }
+function includeTriangleInExtents(extents, triangle) {
+  for (const { x, y } of triangle) {
+    extents.minimumX = Math.min(extents.minimumX, x);
+    extents.minimumY = Math.min(extents.minimumY, y);
+    extents.maximumX = Math.max(extents.maximumX, x);
+    extents.maximumY = Math.max(extents.maximumY, y);
   }
+}
+
+function calculateSourceBounds(extents, atlasSize) {
+  let {
+    minimumX,
+    minimumY,
+    maximumX,
+    maximumY,
+  } = extents;
   minimumX = Math.max(0, Math.floor(minimumX));
   minimumY = Math.max(0, Math.floor(minimumY));
   maximumX = Math.min(atlasSize, Math.ceil(maximumX));
@@ -282,22 +311,30 @@ export async function drawTriangleMaskBatches({
   if (!context) throw new Error('无法创建 UV 裁片遮罩画布。');
   context.globalCompositeOperation = 'source-over';
   context.fillStyle = '#FFFFFF';
+  context.beginPath();
   for (let start = 0; start < triangles.length; start += TRIANGLE_BATCH_SIZE) {
     const batch = triangles.slice(start, start + TRIANGLE_BATCH_SIZE);
     for (const triangle of batch) {
-      const [first, second, third] = triangle.map(({ x, y }) => ({
+      let [first, second, third] = triangle.map(({ x, y }) => ({
         x: x - sourceBounds.x,
         y: y - sourceBounds.y,
       }));
-      context.beginPath();
+      if (signedTriangleArea(first, second, third) < 0) {
+        [second, third] = [third, second];
+      }
       context.moveTo(first.x, first.y);
       context.lineTo(second.x, second.y);
       context.lineTo(third.x, third.y);
       context.closePath();
-      context.fill();
     }
     await yieldControl();
   }
+  context.fill();
+}
+
+function signedTriangleArea(first, second, third) {
+  return (second.x - first.x) * (third.y - first.y)
+    - (second.y - first.y) * (third.x - first.x);
 }
 
 export function applyPieceMask({ context, atlasCanvas, maskCanvas, sourceBounds }) {

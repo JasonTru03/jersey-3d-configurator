@@ -4,41 +4,28 @@ const triangleCache = new WeakMap();
 let triangleRevision = 0;
 
 export function collectRenderableUvTriangles(mesh) {
-  const geometry = mesh?.geometry;
-  const position = geometry?.getAttribute?.('position') ?? geometry?.attributes?.position;
-  const uv = geometry?.getAttribute?.('uv') ?? geometry?.attributes?.uv;
-  if (!position || !uv || position.itemSize < 3 || uv.itemSize < 2) return null;
-
-  const index = geometry.getIndex?.() ?? geometry.index;
-  if (index && index.itemSize < 1) return null;
+  const renderableGeometry = getRenderableGeometry(mesh);
+  if (!renderableGeometry) return null;
+  const { position, uv, index } = renderableGeometry;
   const signature = getRenderableUvGeometrySignature(mesh, position, uv, index);
   const cached = triangleCache.get(mesh);
   if (cached && signaturesMatch(cached.signature, signature)) return cached.data;
 
+  const triangleCoordinates = Array.from(iterateRenderableUvTriangles(mesh));
   const coordinates = [];
-  const triangleKeys = new Set();
   let minU = Infinity;
   let minV = Infinity;
   let maxU = -Infinity;
   let maxV = -Infinity;
-  const elementCount = index?.count ?? position.count;
-
-  for (const { start, end } of getRenderableSpans(mesh, elementCount)) {
-    for (let offset = start; offset + 2 < end; offset += 3) {
-      const first = readRenderableVertex(mesh, position, uv, index, offset);
-      const second = readRenderableVertex(mesh, position, uv, index, offset + 1);
-      const third = readRenderableVertex(mesh, position, uv, index, offset + 2);
-      if (!first || !second || !third || isDegenerate(first, second, third)) continue;
-      const key = [first.vertexIndex, second.vertexIndex, third.vertexIndex]
-        .sort((left, right) => left - right)
-        .join(':');
-      if (triangleKeys.has(key)) continue;
-      triangleKeys.add(key);
-      coordinates.push(first.u, first.v, second.u, second.v, third.u, third.v);
-      minU = Math.min(minU, first.u, second.u, third.u);
-      minV = Math.min(minV, first.v, second.v, third.v);
-      maxU = Math.max(maxU, first.u, second.u, third.u);
-      maxV = Math.max(maxV, first.v, second.v, third.v);
+  for (const triangle of triangleCoordinates) {
+    for (let index = 0; index < triangle.length; index += 2) {
+      const u = triangle[index];
+      const v = triangle[index + 1];
+      coordinates.push(u, v);
+      minU = Math.min(minU, u);
+      minV = Math.min(minV, v);
+      maxU = Math.max(maxU, u);
+      maxV = Math.max(maxV, v);
     }
   }
 
@@ -52,6 +39,29 @@ export function collectRenderableUvTriangles(mesh) {
       };
   triangleCache.set(mesh, { data, signature });
   return data;
+}
+
+export function* iterateRenderableUvTriangles(mesh) {
+  const renderableGeometry = getRenderableGeometry(mesh);
+  if (!renderableGeometry) return;
+  const { position, uv, index } = renderableGeometry;
+  const triangleKeys = new Set();
+  const elementCount = index?.count ?? position.count;
+
+  for (const { start, end } of getRenderableSpans(mesh, elementCount)) {
+    for (let offset = start; offset + 2 < end; offset += 3) {
+      const first = readRenderableVertex(mesh, position, uv, index, offset);
+      const second = readRenderableVertex(mesh, position, uv, index, offset + 1);
+      const third = readRenderableVertex(mesh, position, uv, index, offset + 2);
+      if (!first || !second || !third || isDegenerate(first, second, third)) continue;
+      const key = [first.vertexIndex, second.vertexIndex, third.vertexIndex]
+        .sort((left, right) => left - right)
+        .join(':');
+      if (triangleKeys.has(key)) continue;
+      triangleKeys.add(key);
+      yield [first.u, first.v, second.u, second.v, third.u, third.v];
+    }
+  }
 }
 
 export function getRenderableUvTriangleRevision(mesh) {
@@ -101,6 +111,16 @@ export function getRenderableUvGeometrySignature(mesh, positionArg, uvArg, index
     materialIsArray: Array.isArray(mesh?.material),
     groups,
   };
+}
+
+function getRenderableGeometry(mesh) {
+  const geometry = mesh?.geometry;
+  const position = geometry?.getAttribute?.('position') ?? geometry?.attributes?.position;
+  const uv = geometry?.getAttribute?.('uv') ?? geometry?.attributes?.uv;
+  if (!position || !uv || position.itemSize < 3 || uv.itemSize < 2) return null;
+  const index = geometry.getIndex?.() ?? geometry.index;
+  if (index && index.itemSize < 1) return null;
+  return { position, uv, index };
 }
 
 function getRenderableSpans(mesh, elementCount) {

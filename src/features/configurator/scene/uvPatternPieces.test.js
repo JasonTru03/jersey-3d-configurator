@@ -28,7 +28,7 @@ describe('UV pattern pieces', () => {
     const [front, back] = result.pieces;
     expect(front.outputBounds.x + front.outputBounds.width).toBeLessThan(back.outputBounds.x);
     expect(calls(harness.created, 'clip')).toHaveLength(0);
-    expect(calls(harness.created, 'fill')).toHaveLength(4);
+    expect(calls(harness.created, 'fill')).toHaveLength(2);
     expect(calls(harness.created, 'drawImage').filter(({ args }) => args[0] === harness.atlas)).toHaveLength(2);
     expect(calls(harness.created, 'globalCompositeOperation'))
       .toContainEqual(expect.objectContaining({ args: ['destination-in'] }));
@@ -167,30 +167,35 @@ describe('UV pattern pieces', () => {
     for (let y = 0; y < atlas.height; y += 1) {
       for (let x = 0; x < atlas.width; x += 1) setPixel(atlas, x, y, RED);
     }
-    const mask = new PixelSurface(4, 4);
-    const output = new PixelSurface(4, 4);
     const triangle = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 4 }];
-    const triangles = Array.from({ length: 129 }, (_, index) => (
+    const triangles = Array.from({ length: 128 }, (_, index) => (
       index % 2 === 0 ? triangle : [...triangle].reverse()
-    ));
-    const yieldControl = vi.fn(() => Promise.resolve());
+    )).concat([[{ x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]]);
 
-    await uvPatternPieces.drawTriangleMaskBatches({
-      context: new ExtractionPixelContext(mask),
-      sourceBounds: { x: 0, y: 0, width: 4, height: 4 },
-      triangles,
-      yieldControl,
-    });
-    uvPatternPieces.applyPieceMask({
-      context: new ExtractionPixelContext(output),
-      atlasCanvas: atlas,
-      maskCanvas: mask,
-      sourceBounds: { x: 0, y: 0, width: 4, height: 4 },
-    });
+    for (const orderedTriangles of [triangles, [...triangles].reverse()]) {
+      const mask = new PixelSurface(4, 4);
+      const output = new PixelSurface(4, 4);
+      const maskContext = new ExtractionPixelContext(mask);
+      const yieldControl = vi.fn(() => Promise.resolve());
 
-    expect(yieldControl).toHaveBeenCalledTimes(2);
-    expect(getPixel(output, 0, 0)).toEqual(RED);
-    expect(getPixel(output, 3, 3)).toEqual(TRANSPARENT);
+      await uvPatternPieces.drawTriangleMaskBatches({
+        context: maskContext,
+        sourceBounds: { x: 0, y: 0, width: 4, height: 4 },
+        triangles: orderedTriangles,
+        yieldControl,
+      });
+      uvPatternPieces.applyPieceMask({
+        context: new ExtractionPixelContext(output),
+        atlasCanvas: atlas,
+        maskCanvas: mask,
+        sourceBounds: { x: 0, y: 0, width: 4, height: 4 },
+      });
+
+      expect(yieldControl).toHaveBeenCalledTimes(2);
+      expect(maskContext.fillCount).toBe(1);
+      expect(getPixel(output, 0, 0)).toEqual(RED);
+      expect(getPixel(output, 3, 3)).toEqual(RED);
+    }
   });
 
   it.each([
@@ -390,6 +395,24 @@ describe('UV pattern pieces', () => {
       .toHaveLength(2);
   });
 
+  it('streams 150000 triangles without spread overflow and yields every bounded batch', async () => {
+    expect(uvPatternPieces.collectGroupTriangles).toBeTypeOf('function');
+    const triangleCount = 150_000;
+    const yieldControl = vi.fn(() => Promise.resolve());
+    const startedAt = performance.now();
+
+    const extracted = await uvPatternPieces.collectGroupTriangles(
+      { id: 'front', meshes: [createLightweightRepeatedTriangleMesh('front-mesh', triangleCount)] },
+      64,
+      yieldControl,
+    );
+
+    expect(extracted.triangles).toHaveLength(triangleCount);
+    expect(extracted.sourceBounds).toEqual({ x: 0, y: 0, width: 32, height: 64 });
+    expect(yieldControl.mock.calls.length).toBeGreaterThanOrEqual(Math.ceil(triangleCount / 128));
+    expect(performance.now() - startedAt).toBeLessThan(20_000);
+  }, 30_000);
+
   it('yields before parsing triangles and before allocating any canvas', async () => {
     const harness = installCanvasHarness();
     const front = createRectMesh('front-mesh', 0, 0, 0.5, 1);
@@ -437,7 +460,7 @@ describe('UV pattern pieces', () => {
     const rejection = new Error('stop yielding');
     const yieldControl = () => {
       callsCount += 1;
-      return callsCount === 3 ? Promise.reject(rejection) : Promise.resolve();
+      return callsCount === 5 ? Promise.reject(rejection) : Promise.resolve();
     };
 
     await expect(createUvPatternPieces(createInput(harness, { yieldControl }))).rejects.toBe(rejection);
@@ -753,6 +776,7 @@ class ExtractionPixelContext {
     this.currentTriangle = null;
     this.globalCompositeOperation = 'source-over';
     this.fillStyle = '#000000';
+    this.fillCount = 0;
   }
 
   beginPath() { this.pathTriangles = []; this.currentTriangle = null; }
@@ -765,9 +789,13 @@ class ExtractionPixelContext {
   }
 
   fill() {
+    this.fillCount += 1;
     forEachPixel(0, 0, this.surface.width, this.surface.height, (pixelX, pixelY) => {
       const center = { x: pixelX + 0.5, y: pixelY + 0.5 };
-      if (this.pathTriangles.some((triangle) => pointInsideTriangle(center, triangle))) {
+      const winding = this.pathTriangles.reduce((sum, triangle) => (
+        pointInsideTriangle(center, triangle) ? sum + Math.sign(signedTriangleArea(triangle)) : sum
+      ), 0);
+      if (winding !== 0) {
         setPixel(this.surface, pixelX, pixelY, [255, 255, 255, 255]);
       }
     });
@@ -880,6 +908,11 @@ function pointInsideTriangle(point, [first, second, third]) {
   );
 }
 
+function signedTriangleArea([first, second, third]) {
+  return (second.x - first.x) * (third.y - first.y)
+    - (second.y - first.y) * (third.x - first.x);
+}
+
 function createAsymmetricOrientationSource() {
   const surface = new PixelSurface(2, 4);
   setPixel(surface, 0, 0, RED);
@@ -985,6 +1018,35 @@ function createTriangleMesh(name, uvs) {
 
 function createRepeatedTrianglesMesh(name, count) {
   return createMesh(name, Array.from({ length: count }, () => [[0, 0], [0.49, 0], [0, 1]]).flat());
+}
+
+function createLightweightRepeatedTriangleMesh(name, triangleCount) {
+  const count = triangleCount * 3;
+  const position = {
+    count,
+    itemSize: 3,
+    normalized: false,
+    version: 0,
+    getX: () => 0,
+    getY: () => 0,
+    getZ: () => 0,
+  };
+  const uv = {
+    count,
+    itemSize: 2,
+    normalized: false,
+    version: 0,
+    getX: (index) => [0, 0.5, 0][index % 3],
+    getY: (index) => [0, 0, 1][index % 3],
+  };
+  const geometry = {
+    attributes: { position, uv },
+    drawRange: { start: 0, count: Infinity },
+    groups: [],
+    getAttribute(attributeName) { return this.attributes[attributeName]; },
+    getIndex() { return null; },
+  };
+  return { name, geometry, material: { visible: true } };
 }
 
 function createLayout() {

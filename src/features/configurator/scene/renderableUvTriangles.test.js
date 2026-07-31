@@ -3,9 +3,25 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   collectRenderableUvTriangles,
   getRenderableUvTriangleRevision,
+  iterateRenderableUvTriangles,
 } from './renderableUvTriangles.js';
 
 describe('renderable UV triangles', () => {
+  it('iterates the same triangle coordinates collected by the compatibility API', () => {
+    const mesh = createMesh({
+      uvs: [[0, 0], [1, 0], [0, 1], [0.5, 0], [1, 1], [0.5, 1]],
+    });
+    const iterated = Array.from(iterateRenderableUvTriangles(mesh));
+    const collected = collectRenderableUvTriangles(mesh);
+
+    expect(iterated).toEqual([
+      [0, 0, 1, 0, 0, 1],
+      [0.5, 0, 1, 1, 0.5, 1],
+    ]);
+    expect(iterated.flat()).toEqual(collected.coordinates);
+    expect(iterated).toHaveLength(collected.triangleCount);
+  });
+
   it.each([
     ['indexed', [0, 1, 2, 3, 4, 5]],
     ['non-indexed', null],

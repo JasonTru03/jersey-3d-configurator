@@ -1,14 +1,24 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const CHROME_PATH = findBrowserPath();
 
 describe('UV pattern pieces Chrome smoke', () => {
-  it('runs the public extraction pipeline against native Canvas and Blob', () => {
+  it('resolves an installed browser on Windows instead of skipping the smoke', () => {
+    if (process.platform === 'win32') expect(CHROME_PATH).toBeTruthy();
+  });
+
+  const browserIt = CHROME_PATH ? it : it.skip;
+  browserIt('runs the public extraction pipeline against native Canvas and Blob', () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'uv-pattern-pieces-'));
     try {
       const htmlPath = join(temporaryDirectory, 'smoke.html');
@@ -59,6 +69,10 @@ describe('UV pattern pieces Chrome smoke', () => {
         ].join('\n'));
       }
       const smokeResult = JSON.parse(result.stdout.slice(markerStart + marker.length, markerEnd));
+      console.info('UV Chrome smoke', {
+        browserPath: CHROME_PATH,
+        sharedEdgeAlphas: smokeResult.sharedEdgeAlphas,
+      });
       expect(smokeResult.ok, smokeResult.error).toBe(true);
       expectOpaqueColor(smokeResult.frontInside, [255, 0, 0]);
       expect(smokeResult.frontOutside).toEqual([0, 0, 0, 0]);
@@ -68,6 +82,7 @@ describe('UV pattern pieces Chrome smoke', () => {
         [0, 255, 0],
         [255, 255, 0],
       ].forEach((color, index) => expectOpaqueColor(smokeResult.backCorners[index], color));
+      for (const alpha of smokeResult.sharedEdgeAlphas) expect(alpha).toBeGreaterThanOrEqual(250);
       expect(smokeResult.blobType).toBe('image/png');
       expect(smokeResult.blobHasBytes).toBe(true);
       expect(smokeResult.atlasMismatchRejected).toBe(true);
@@ -76,6 +91,34 @@ describe('UV pattern pieces Chrome smoke', () => {
     }
   }, 40_000);
 });
+
+function findBrowserPath(environment = process.env, platform = process.platform) {
+  const candidates = [environment.CHROME_PATH, environment.BROWSER_PATH];
+  if (platform === 'win32') {
+    candidates.push(
+      join(environment.ProgramFiles ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'),
+      join(environment['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Google/Chrome/Application/chrome.exe'),
+      join(environment.LOCALAPPDATA ?? '', 'Google/Chrome/Application/chrome.exe'),
+      join(environment.ProgramFiles ?? 'C:\\Program Files', 'Microsoft/Edge/Application/msedge.exe'),
+      join(environment['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft/Edge/Application/msedge.exe'),
+    );
+  } else if (platform === 'darwin') {
+    candidates.push(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    );
+  } else {
+    candidates.push(
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/microsoft-edge',
+      '/usr/bin/microsoft-edge-stable',
+    );
+  }
+  return candidates.filter(Boolean).find((candidate) => existsSync(candidate)) ?? null;
+}
 
 function quoteCommandArgument(value) {
   return /\s/.test(value) ? `"${value}"` : value;
@@ -154,9 +197,11 @@ try {
   const atlasCanvas = createAtlas();
   const frontTriangle = [0, 1, 1, 1, 0, 0];
   const reverseFrontTriangle = [0, 0, 1, 1, 0, 1];
-  const front = createMesh('front-mesh', Array.from({ length: 129 }, (_, index) => (
+  const frontUvs = Array.from({ length: 128 }, (_, index) => (
     index % 2 === 0 ? frontTriangle : reverseFrontTriangle
-  )).flat());
+  )).flat();
+  frontUvs.push(0.75, 1, 1, 1, 1, 0.75);
+  const front = createMesh('front-mesh', frontUvs);
   const back = createMesh('back-mesh', [
     0, 1, 1, 1, 0, 0,
     1, 1, 1, 0, 0, 0,
@@ -201,6 +246,9 @@ try {
       readRelativePixel(outputContext, backPiece.outputBounds, 0.35, 0.85),
       readRelativePixel(outputContext, backPiece.outputBounds, 0.75, 0.75),
     ],
+    sharedEdgeAlphas: [0.25, 0.5, 0.75].map((position) => (
+      readRelativePixel(outputContext, backPiece.outputBounds, position, 1 - position)[3]
+    )),
     blobType: extracted.blob.type,
     blobHasBytes: extracted.blob.size > 0,
     atlasMismatchRejected,

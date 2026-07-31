@@ -329,6 +329,29 @@ export class DecorationEditor {
     this.garmentMeshes = meshes;
   }
 
+  async waitForTextures() {
+    await Promise.all([...this.surfaces.values()].map((surface) => (
+      surface.material?.map?.userData?.productionReady ?? Promise.resolve()
+    )));
+  }
+
+  getProductionLayers() {
+    return this.decorations.map((decoration) => {
+      const surface = this.surfaces.get(decoration.id);
+      if (!surface) return null;
+      return {
+        garmentMesh: surface.userData.garmentMesh,
+        geometry: surface.geometry,
+        id: decoration.id,
+        kind: 'artwork',
+        label: decoration.label || decoration.id,
+        renderOrder: surface.renderOrder,
+        surface,
+        textureSource: surface.material?.map?.image,
+      };
+    }).filter(Boolean);
+  }
+
   update(decorations = [], selectedId = null, presets = []) {
     const previousSelectedId = this.selectedId;
     this.decorations = decorations;
@@ -386,6 +409,11 @@ export class DecorationEditor {
     const surface = createDecalSurface(this.createTexture(decoration), mesh, placement, decoration);
     surface.userData.decorationId = decoration.id;
     surface.userData.garmentMesh = mesh;
+    surface.userData.productionLayer = {
+      id: decoration.id,
+      kind: 'artwork',
+      label: decoration.label || decoration.id,
+    };
     this.group.add(surface);
     this.surfaces.set(decoration.id, surface);
     return surface;
@@ -402,6 +430,13 @@ export class DecorationEditor {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     const image = new Image();
+    let resolveReady;
+    let rejectReady;
+    texture.userData.productionReady = new Promise((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    texture.userData.productionReady.catch(() => {});
     image.onload = () => {
       const aspect = image.naturalWidth / image.naturalHeight || 1;
       canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
@@ -412,8 +447,11 @@ export class DecorationEditor {
         const placement = surface.userData.placement ?? decoration.placement;
         if (placement) this.applyDecoration(surface, decoration, placement);
       }
+      resolveReady();
     };
-    image.onerror = () => console.error(`Unable to load decoration artwork: ${decoration.label}`);
+    image.onerror = () => {
+      rejectReady(new Error(`图案 "${decoration.label || decoration.id}" 加载失败。`));
+    };
     image.src = this.resolveAssetUrl(decoration);
     return texture;
   }

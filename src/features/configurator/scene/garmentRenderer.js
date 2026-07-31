@@ -710,6 +710,31 @@ export class GarmentRenderer {
     return getRenderablePersonalizationItems(this.state);
   }
 
+  getProductionLayers() {
+    const personalizationLayers = [...this.printLayers.values()]
+      .filter((layer) => (
+        layer.decal?.visible
+        && layer.decal.geometry?.attributes?.position?.count > 0
+        && layer.decal.userData?.productionLayer
+      ))
+      .map((layer) => ({
+        ...layer.decal.userData.productionLayer,
+        geometry: layer.decal.geometry,
+        renderOrder: layer.decal.renderOrder,
+        surface: layer.decal,
+        textureSource: layer.texture.image,
+      }));
+    const artworkLayers = this.decorationEditor?.getProductionLayers?.() ?? [];
+    return [...personalizationLayers, ...artworkLayers]
+      .map((layer, index) => ({ index, layer }))
+      .sort((first, second) => (
+        (first.layer.renderOrder ?? 0) - (second.layer.renderOrder ?? 0)
+        || (first.layer.surface?.id ?? 0) - (second.layer.surface?.id ?? 0)
+        || first.index - second.index
+      ))
+      .map(({ layer }) => layer);
+  }
+
   getPrintRenderKey(item) {
     if (item.itemKind === 'text') {
       return JSON.stringify([
@@ -889,6 +914,19 @@ export class GarmentRenderer {
     layer.lastValidItem = {
       ...constrainedItem,
       placement: constrainedItem.placement ? structuredClone(constrainedItem.placement) : null,
+    };
+    const garmentMeshes = [...new Set(
+      (fit.surface.surfaces ?? [fit.surface])
+        .map((entry) => entry.mesh)
+        .filter(Boolean),
+    )];
+    layer.decal.userData.productionLayer = {
+      garmentMeshes,
+      id: item.key,
+      kind: item.itemKind,
+      label: item.itemKind === 'text'
+        ? (item.text || item.key)
+        : `${item.name || 'PLAYER'} #${item.number || '16'}`,
     };
     layer.plane.material.opacity = 0;
     layer.decal.visible = true;

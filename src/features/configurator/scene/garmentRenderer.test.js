@@ -1206,6 +1206,12 @@ describe('garment decoration mesh selection', () => {
     expect(layer.plane.material.opacity).toBe(0);
     expect(layer.decal.visible).toBe(true);
     expect(layer.decal.geometry.getAttribute('position').count).toBeGreaterThan(0);
+    expect(layer.decal.userData.productionLayer).toMatchObject({
+      garmentMeshes: [jersey],
+      id: 'text:text-1',
+      kind: 'text',
+      label: 'MASON',
+    });
     expect(layer.decal.material).toMatchObject({
       depthWrite: false,
       polygonOffset: true,
@@ -1214,6 +1220,63 @@ describe('garment decoration mesh selection', () => {
     });
     expect(renderer.pickPrint).toBeTypeOf('function');
     renderer.dispose();
+  });
+
+  it('exposes only visible final decals in deterministic render order', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const personalizationGeometry = new THREE.BufferGeometry();
+    personalizationGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3),
+    );
+    const firstSurface = new THREE.Mesh(
+      personalizationGeometry,
+      new THREE.MeshBasicMaterial({ map: new THREE.Texture() }),
+    );
+    firstSurface.visible = true;
+    firstSurface.renderOrder = 9;
+    firstSurface.userData.productionLayer = {
+      garmentMeshes: [{ name: 'Body' }],
+      id: 'player:first',
+      kind: 'player',
+      label: 'PLAYER #16',
+    };
+    const hiddenSurface = firstSurface.clone();
+    hiddenSurface.visible = false;
+    hiddenSurface.userData.productionLayer = {
+      garmentMeshes: [{ name: 'Body' }],
+      id: 'player:hidden',
+      kind: 'player',
+      label: 'HIDDEN #1',
+    };
+    const personalizationTextureSource = { width: 16, height: 16 };
+    renderer.printLayers = new Map([
+      ['player:first', { decal: firstSurface, texture: { image: personalizationTextureSource } }],
+      ['player:hidden', { decal: hiddenSurface, texture: { image: { width: 16, height: 16 } } }],
+    ]);
+    renderer.decorationEditor = {
+      getProductionLayers: () => [{
+        garmentMesh: { name: 'Sleeve' },
+        geometry: new THREE.BufferGeometry(),
+        id: 'crest',
+        kind: 'artwork',
+        label: 'Crest',
+        renderOrder: 8,
+        surface: { id: 1 },
+        textureSource: { width: 16, height: 16 },
+      }],
+    };
+
+    expect(renderer.getProductionLayers().map((layer) => layer.id)).toEqual([
+      'crest',
+      'player:first',
+    ]);
+    expect(renderer.getProductionLayers()[1]).toMatchObject({
+      garmentMeshes: [{ name: 'Body' }],
+      geometry: firstSurface.geometry,
+      surface: firstSurface,
+      textureSource: personalizationTextureSource,
+    });
   });
 
   it('keeps the textured proxy visible as a fallback when no garment surface resolves', () => {

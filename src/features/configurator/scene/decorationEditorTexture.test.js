@@ -96,7 +96,7 @@ describe('decoration artwork textures', () => {
 
     editor.setGarmentMeshes([mesh]);
     editor.update([decoration], decoration.id, presets);
-    await Promise.resolve();
+    await editor.waitForTextures();
 
     const surface = editor.surfaces.get(decoration.id);
     expect(decodedImage.currentSrc).toBe(expectedSource);
@@ -106,6 +106,56 @@ describe('decoration artwork textures', () => {
     expect(drawImage).toHaveBeenCalledWith(decodedImage, 0, 0, 256, 256);
     expect(surface.material.map.version).toBeGreaterThanOrEqual(2);
     expect(surface.geometry.getAttribute('position').count).toBeGreaterThan(0);
+    expect(editor.getProductionLayers()).toEqual([
+      expect.objectContaining({
+        garmentMesh: mesh,
+        geometry: surface.geometry,
+        id: decoration.id,
+        kind: 'artwork',
+        label: decoration.label,
+        renderOrder: surface.renderOrder,
+        surface,
+        textureSource: canvas,
+      }),
+    ]);
+
+    editor.dispose();
+  });
+
+  it('rejects production readiness when artwork decoding fails', async () => {
+    vi.stubGlobal('Image', class {
+      set src(_value) {
+        queueMicrotask(() => this.onerror?.());
+      }
+    });
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 2),
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    );
+    mesh.updateMatrixWorld(true);
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('div'),
+      scene: new THREE.Scene(),
+    });
+    editor.setGarmentMeshes([mesh]);
+    editor.update([{
+      id: 'broken-upload',
+      kind: 'upload',
+      label: 'Broken upload',
+      placement: {
+        normal: { x: 0, y: 0, z: 1 },
+        position: { x: 0, y: 0.42, z: 1 },
+        region: 'front',
+      },
+      region: 'front',
+      rotation: 0,
+      scale: 1,
+      source: 'data:image/png;base64,broken',
+    }], null, []);
+
+    await expect(editor.waitForTextures())
+      .rejects.toThrow('图案 "Broken upload" 加载失败。');
 
     editor.dispose();
   });

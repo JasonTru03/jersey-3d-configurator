@@ -12,6 +12,8 @@ import {
 } from '../config/personalizationItems.js';
 import { createGarmentAppearanceCanvas } from './garmentAppearanceTexture.js';
 import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
+import { bakeProductionAtlas } from './productionAtlasBaker.js';
+import { captureProductionPreviews } from './productionPreviewCapture.js';
 import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTexture.js';
 import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
@@ -27,6 +29,10 @@ import {
   resolvePersonalizationSurface,
   supportsPersonalizationDecalMesh,
 } from './personalizationDecal.js';
+import {
+  canonicalizeProductionValue,
+  normalizeProductionState,
+} from '../designs/productionFingerprint.js';
 
 const DEFAULT_PRINT_POSITION = { x: 0, y: 0.36, z: 0.5 };
 const DEFAULT_PRINT_NORMAL = { x: 0, y: 0, z: 1 };
@@ -141,6 +147,8 @@ export class GarmentRenderer {
     this.bottomPatternKey = null;
     this.bottomPatternRequest = Symbol('initial-bottom-pattern');
     this.bottomPatternPendingKey = null;
+    this.modelReadiness = createModelReadiness();
+    this.modelReadiness.reject(new Error('服装模型尚未开始加载。'));
     this.modelMeshes = [];
     this.decorationMeshes = [];
     this.patternMeshes = [];
@@ -284,6 +292,7 @@ export class GarmentRenderer {
   dispose() {
     cancelAnimationFrame(this.frame);
     this.loadToken = Symbol('disposed');
+    this.modelReadiness?.reject(new Error('3D 渲染器已关闭。'));
     this.bottomPatternRequest = Symbol('disposed-bottom-pattern');
     this.bottomPatternPendingKey = null;
     this.pendingDecorationDeselect = null;
@@ -316,11 +325,15 @@ export class GarmentRenderer {
     this.controls.enabled = true;
     const loadToken = Symbol(modelUrl);
     this.loadToken = loadToken;
+    this.modelReadiness?.reject(new Error('服装模型加载请求已被替换。'));
+    const modelReadiness = createModelReadiness();
+    this.modelReadiness = modelReadiness;
     this.bottomPatternRequest = Symbol('model-loading-bottom-pattern');
     this.bottomPatternPendingKey = null;
     try {
       const gltf = await this.loader.loadAsync(modelUrl);
       if (this.loadToken !== loadToken) {
+        modelReadiness.reject(new Error('服装模型加载请求已被替换。'));
         disposeModelResources(gltf.scene);
         return;
       }
@@ -358,8 +371,9 @@ export class GarmentRenderer {
       );
       this.applyAppearance(this.selected?.appearance);
       this.applyMaterial(this.selected?.material?.material);
-      this.updateBottomPattern();
+      await this.updateBottomPattern();
       this.updatePrintLayer();
+      modelReadiness.resolve();
       gsap.fromTo(model.scale, { x: model.scale.x * 0.94, y: model.scale.y * 0.94, z: model.scale.z * 0.94 }, {
         x: model.scale.x,
         y: model.scale.y,
@@ -368,7 +382,10 @@ export class GarmentRenderer {
         ease: 'power2.out',
       });
     } catch (error) {
-      console.error(`Unable to load garment model: ${modelUrl}`, error);
+      if (this.loadToken === loadToken) {
+        modelReadiness.reject(new Error('服装模型加载失败。', { cause: error }));
+        console.error(`Unable to load garment model: ${modelUrl}`, error);
+      }
     }
   }
 
@@ -523,6 +540,92 @@ export class GarmentRenderer {
     const blob = texture?.userData?.bottomPatternBlob;
     if (!blob || !metadata) throw new Error('The latest UV atlas is not ready.');
     return { blob, metadata };
+  }
+
+  async waitForProductionReady() {
+    await this.modelReadiness?.promise;
+    await this.decorationEditor?.waitForTextures?.();
+    await this.updateBottomPattern();
+    while (this.bottomPatternPendingKey) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    if (!this.appearanceTexture || !this.modelMeshes.length) {
+      throw new Error('服装模型尚未准备完成。');
+    }
+  }
+
+  async prepareProductionArtifacts({ model, stateSnapshot }) {
+    await this.waitForProductionReady();
+    this.assertProductionSnapshot(model, stateSnapshot);
+
+    const appearanceCanvas = createGarmentAppearanceCanvas(
+      model.uvAtlasSize,
+      this.selected.appearance,
+    );
+    const legacyPatternCanvas = this.state.overrides?.bottomPattern?.enabled
+      ? this.bottomPatternTexture?.image
+      : null;
+    if (this.state.overrides?.bottomPattern?.enabled && !legacyPatternCanvas) {
+      throw new Error('旧版连续底纹尚未准备完成。');
+    }
+    const atlas = await bakeProductionAtlas({
+      appearanceCanvas,
+      atlasSize: model.uvAtlasSize,
+      garmentMeshes: this.decorationMeshes,
+      layers: this.getProductionLayers(),
+      legacyPatternCanvas,
+    });
+    const previews = await captureProductionPreviews({
+      camera: this.camera,
+      controls: this.controls,
+      renderer: this.renderer,
+      scene: this.scene,
+      setProductionCaptureMode: (enabled) => this.setProductionCaptureMode(enabled),
+    });
+
+    this.assertProductionSnapshot(model, stateSnapshot);
+    return {
+      atlas,
+      legacyBakeMetadata: this.bottomPatternTexture
+        ?.userData?.bottomPatternBakeMetadata ?? null,
+      previews,
+    };
+  }
+
+  assertProductionSnapshot(model, stateSnapshot) {
+    const currentModel = this.product?.model;
+    const modelMatches = (
+      model?.id === currentModel?.id
+      && model?.version === currentModel?.version
+      && model?.uvExportVersion === currentModel?.uvExportVersion
+      && model?.uvAtlasSize === currentModel?.uvAtlasSize
+    );
+    const stateMatches = canonicalizeProductionValue(
+      normalizeProductionState(stateSnapshot),
+    ) === canonicalizeProductionValue(
+      normalizeProductionState(this.state),
+    );
+    if (!modelMatches || !stateMatches) {
+      throw new Error('设计已发生变化，请重新保存。');
+    }
+  }
+
+  setProductionCaptureMode(enabled) {
+    this.printLayers.forEach((layer) => {
+      const plane = layer.plane;
+      if (enabled) {
+        if (!Object.hasOwn(plane.userData, 'productionCaptureVisible')) {
+          plane.userData.productionCaptureVisible = plane.visible;
+        }
+        plane.visible = false;
+        return;
+      }
+      if (typeof plane.userData.productionCaptureVisible === 'boolean') {
+        plane.visible = plane.userData.productionCaptureVisible;
+      }
+      delete plane.userData.productionCaptureVisible;
+    });
+    this.decorationEditor?.setProductionCaptureMode?.(enabled);
   }
 
   applyBottomPatternTexture(texture) {
@@ -710,6 +813,31 @@ export class GarmentRenderer {
     return getRenderablePersonalizationItems(this.state);
   }
 
+  getProductionLayers() {
+    const personalizationLayers = [...this.printLayers.values()]
+      .filter((layer) => (
+        layer.decal?.visible
+        && layer.decal.geometry?.attributes?.position?.count > 0
+        && layer.decal.userData?.productionLayer
+      ))
+      .map((layer) => ({
+        ...layer.decal.userData.productionLayer,
+        geometry: layer.decal.geometry,
+        renderOrder: layer.decal.renderOrder,
+        surface: layer.decal,
+        textureSource: layer.texture.image,
+      }));
+    const artworkLayers = this.decorationEditor?.getProductionLayers?.() ?? [];
+    return [...personalizationLayers, ...artworkLayers]
+      .map((layer, index) => ({ index, layer }))
+      .sort((first, second) => (
+        (first.layer.renderOrder ?? 0) - (second.layer.renderOrder ?? 0)
+        || (first.layer.surface?.id ?? 0) - (second.layer.surface?.id ?? 0)
+        || first.index - second.index
+      ))
+      .map(({ layer }) => layer);
+  }
+
   getPrintRenderKey(item) {
     if (item.itemKind === 'text') {
       return JSON.stringify([
@@ -889,6 +1017,19 @@ export class GarmentRenderer {
     layer.lastValidItem = {
       ...constrainedItem,
       placement: constrainedItem.placement ? structuredClone(constrainedItem.placement) : null,
+    };
+    const garmentMeshes = [...new Set(
+      (fit.surface.surfaces ?? [fit.surface])
+        .map((entry) => entry.mesh)
+        .filter(Boolean),
+    )];
+    layer.decal.userData.productionLayer = {
+      garmentMeshes,
+      id: item.key,
+      kind: item.itemKind,
+      label: item.itemKind === 'text'
+        ? (item.text || item.key)
+        : `${item.name || 'PLAYER'} #${item.number || '16'}`,
     };
     layer.plane.material.opacity = 0;
     layer.decal.visible = true;
@@ -1429,6 +1570,17 @@ function roundPlacement(value) {
 
 function placementsEqual(first, second) {
   return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
+}
+
+function createModelReadiness() {
+  let resolve;
+  let reject;
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  promise.catch(() => {});
+  return { promise, reject, resolve };
 }
 
 function getPersonalizationProjectedPoints(layer, camera) {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DesignDocumentError, createDesignDocument, parseDesignDocument } from './designDocument.js';
+import {
+  DesignDocumentError,
+  createDesignDocument,
+  normalizeDesignState,
+  parseDesignDocument,
+} from './designDocument.js';
 
 const defaultState = {
   colorway: 'home',
@@ -9,6 +14,25 @@ const defaultState = {
 };
 
 describe('design document', () => {
+  it('exports the same normalized state used by design documents', () => {
+    const state = {
+      ...defaultState,
+      overrides: {
+        customTextItems: [],
+        printItems: [{
+          id: 'print-1',
+          name: 'MASON',
+          number: '10',
+          placement: { x: 0, y: 0.2, z: 0.5 },
+        }],
+      },
+    };
+
+    expect(normalizeDesignState(state)).toEqual(
+      createDesignDocument({ productId: 'fn8788-jersey', state }).state,
+    );
+  });
+
   it('preserves uploaded artwork when a document is exported and imported', () => {
     const document = createDesignDocument({
       productId: 'fn8788-jersey',

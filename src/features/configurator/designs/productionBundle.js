@@ -1,21 +1,41 @@
+import { createProductionFilename } from './productionFingerprint.js';
+
 const UTF8_FLAG = 0x0800;
 const STORE_METHOD = 0;
+const ZIP_NAMES = Object.freeze([
+  'design.json',
+  'uv-atlas.png',
+  'uv-reference.pdf',
+  'preview-front.png',
+  'preview-back.png',
+  'manifest.json',
+]);
 
-export async function createProductionBundle({ productId, design, atlas }) {
-  const entries = await Promise.all([
-    readEntry(design),
-    readEntry(atlas),
-  ]);
+export async function createProductionBundle({ files, fingerprint, productId }) {
+  if (
+    !Array.isArray(files)
+    || JSON.stringify(files.map((file) => file?.filename)) !== JSON.stringify(ZIP_NAMES)
+  ) {
+    throw new Error('生产 ZIP 文件列表不完整或顺序不正确。');
+  }
+  const filename = createProductionFilename(productId, fingerprint);
+  const entries = [];
+  for (const file of files) entries.push(await readEntry(file));
   const zip = createStoreOnlyZip(entries);
   return {
     blob: new Blob([zip], { type: 'application/zip' }),
-    filename: `${productId}-production.zip`,
+    filename,
   };
 }
 
 async function readEntry(file) {
-  if (!file?.blob || typeof file.filename !== 'string' || file.filename.length === 0) {
-    throw new Error('A production bundle file is missing.');
+  if (
+    !(file?.blob instanceof Blob)
+    || file.blob.size === 0
+    || typeof file.filename !== 'string'
+    || file.filename.length === 0
+  ) {
+    throw new Error('生产 ZIP 中存在缺失或空文件。');
   }
   return {
     bytes: new Uint8Array(await file.blob.arrayBuffer()),

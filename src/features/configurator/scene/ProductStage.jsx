@@ -25,7 +25,7 @@ const rendererRegistry = {
 
 export function ProductStage({
   artworkFocusId,
-  onBakeProvider,
+  onProductionProvider,
   onDeletePersonalization,
   onEditPersonalization,
   onPersonalizationSelect,
@@ -237,9 +237,11 @@ export function ProductStage({
   }, [personalizationSideFocus, product.renderer]);
 
   useEffect(() => {
-    onBakeProvider?.(() => rendererRef.current?.ensureLatestBottomPatternBake?.());
-    return () => onBakeProvider?.(null);
-  }, [onBakeProvider]);
+    onProductionProvider?.((request) => (
+      rendererRef.current?.prepareProductionArtifacts?.(request)
+    ));
+    return () => onProductionProvider?.(null);
+  }, [onProductionProvider]);
 
   return (
     <section className="stage-wrap">

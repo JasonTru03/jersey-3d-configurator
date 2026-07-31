@@ -15,7 +15,7 @@ export class DesignDocumentError extends Error {
 }
 
 export function createDesignDocument({ productId, variantId = null, state, savedAt = new Date().toISOString() }) {
-  const normalizedState = normalizePrintState(state);
+  const normalizedState = normalizeDesignState(state);
   return {
     format: DESIGN_DOCUMENT_FORMAT,
     productId,
@@ -83,7 +83,7 @@ export function parseDesignDocument(rawText, { expectedProductId, defaultState, 
   };
 }
 
-function normalizePrintState(state) {
+export function normalizeDesignState(state) {
   const overrides = state.overrides ?? {};
   const printItems = getPrintItems(overrides);
   const customTextItems = getCustomTextItems(overrides);

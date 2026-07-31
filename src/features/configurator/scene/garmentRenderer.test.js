@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+const productionArtifactMocks = vi.hoisted(() => ({
+  bakeProductionAtlas: vi.fn(),
+  captureProductionPreviews: vi.fn(),
+  createGarmentAppearanceCanvas: vi.fn(),
+}));
 vi.mock('gsap', () => ({
   default: {
     killTweensOf: vi.fn(),
@@ -21,6 +26,19 @@ vi.mock('three', async () => {
       render() {}
       dispose() {}
     },
+  };
+});
+vi.mock('./productionAtlasBaker.js', () => ({
+  bakeProductionAtlas: productionArtifactMocks.bakeProductionAtlas,
+}));
+vi.mock('./productionPreviewCapture.js', () => ({
+  captureProductionPreviews: productionArtifactMocks.captureProductionPreviews,
+}));
+vi.mock('./garmentAppearanceTexture.js', async () => {
+  const actual = await vi.importActual('./garmentAppearanceTexture.js');
+  return {
+    ...actual,
+    createGarmentAppearanceCanvas: productionArtifactMocks.createGarmentAppearanceCanvas,
   };
 });
 vi.stubGlobal('ResizeObserver', class {
@@ -182,6 +200,151 @@ describe('garment decoration mesh selection', () => {
     expect(stale.geometryDispose).toHaveBeenCalledOnce();
     expect(stale.materialDispose).toHaveBeenCalledOnce();
     expect(stale.mapDispose).toHaveBeenCalledOnce();
+  });
+
+  it('waits for the current model and artwork textures before production', async () => {
+    const modelReady = deferred();
+    const waitForTextures = vi.fn();
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.modelReadiness = { promise: modelReady.promise };
+    renderer.decorationEditor = { waitForTextures };
+    renderer.updateBottomPattern = vi.fn();
+    renderer.bottomPatternPendingKey = null;
+    renderer.appearanceTexture = {};
+    renderer.modelMeshes = [{}];
+
+    let settled = false;
+    const ready = renderer.waitForProductionReady().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    modelReady.resolve();
+    await ready;
+
+    expect(waitForTextures).toHaveBeenCalledOnce();
+    expect(renderer.updateBottomPattern).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a production request for a stale design snapshot', async () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.waitForProductionReady = vi.fn();
+    renderer.product = {
+      model: {
+        id: 'chelsea-jersey',
+        version: '1',
+        uvExportVersion: '1',
+        uvAtlasSize: 4096,
+      },
+    };
+    renderer.state = {
+      productId: 'fn8788-jersey',
+      layout: 'm',
+      overrides: { customTextItems: [], printItems: [] },
+    };
+
+    await expect(renderer.prepareProductionArtifacts({
+      model: renderer.product.model,
+      stateSnapshot: { ...renderer.state, layout: 'xl' },
+    })).rejects.toThrow('设计已发生变化，请重新保存。');
+  });
+
+  it('captures production previews only after the asynchronous atlas bake finishes', async () => {
+    let finishBake;
+    const atlasPromise = new Promise((resolve) => {
+      finishBake = resolve;
+    });
+    const atlas = { blob: new Blob(['atlas']) };
+    const previews = { front: new Blob(['front']), back: new Blob(['back']) };
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockReturnValue(atlasPromise);
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.waitForProductionReady = vi.fn();
+    renderer.assertProductionSnapshot = vi.fn();
+    renderer.selected = {
+      appearance: { template: 'solid', colors: { body: '#F7F5EF' } },
+    };
+    renderer.state = { overrides: { bottomPattern: { enabled: false } } };
+    renderer.decorationMeshes = [];
+    renderer.getProductionLayers = vi.fn(() => []);
+    renderer.camera = {};
+    renderer.controls = {};
+    renderer.renderer = {};
+    renderer.scene = {};
+    renderer.setProductionCaptureMode = vi.fn();
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: { uvAtlasSize: 64 },
+      stateSnapshot: {},
+    });
+    await Promise.resolve();
+
+    expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce();
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+
+    finishBake(atlas);
+    await expect(preparation).resolves.toMatchObject({ atlas, previews });
+    expect(productionArtifactMocks.captureProductionPreviews).toHaveBeenCalledOnce();
+    expect(renderer.assertProductionSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not treat derived bottom-pattern bake metadata as a design change', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const model = {
+      id: 'chelsea-jersey',
+      version: '1',
+      uvExportVersion: '1',
+      uvAtlasSize: 4096,
+    };
+    renderer.product = { model };
+    const stateSnapshot = {
+      productId: 'fn8788-jersey',
+      layout: 'm',
+      overrides: {
+        bottomPattern: {
+          enabled: true,
+          bakeMetadata: { atlasFilename: 'old.png', atlasSha256: 'sha256:old' },
+        },
+        customTextItems: [],
+        printItems: [],
+      },
+    };
+    renderer.state = structuredClone(stateSnapshot);
+    renderer.state.overrides.bottomPattern.bakeMetadata = {
+      atlasFilename: 'new.png',
+      atlasSha256: 'sha256:new',
+    };
+
+    expect(() => renderer.assertProductionSnapshot(model, stateSnapshot)).not.toThrow();
+  });
+
+  it('temporarily hides print proxies and restores capture state', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const visiblePlane = { userData: {}, visible: true };
+    const hiddenPlane = { userData: {}, visible: false };
+    renderer.printLayers = new Map([
+      ['visible', { plane: visiblePlane }],
+      ['hidden', { plane: hiddenPlane }],
+    ]);
+    renderer.decorationEditor = { setProductionCaptureMode: vi.fn() };
+
+    renderer.setProductionCaptureMode(true);
+
+    expect(visiblePlane.visible).toBe(false);
+    expect(hiddenPlane.visible).toBe(false);
+    expect(renderer.decorationEditor.setProductionCaptureMode).toHaveBeenCalledWith(true);
+
+    renderer.setProductionCaptureMode(false);
+
+    expect(visiblePlane.visible).toBe(true);
+    expect(hiddenPlane.visible).toBe(false);
+    expect(renderer.decorationEditor.setProductionCaptureMode).toHaveBeenLastCalledWith(false);
   });
 
   it('replaces garment appearance textures and synchronizes the name-set color', () => {
@@ -1206,6 +1369,12 @@ describe('garment decoration mesh selection', () => {
     expect(layer.plane.material.opacity).toBe(0);
     expect(layer.decal.visible).toBe(true);
     expect(layer.decal.geometry.getAttribute('position').count).toBeGreaterThan(0);
+    expect(layer.decal.userData.productionLayer).toMatchObject({
+      garmentMeshes: [jersey],
+      id: 'text:text-1',
+      kind: 'text',
+      label: 'MASON',
+    });
     expect(layer.decal.material).toMatchObject({
       depthWrite: false,
       polygonOffset: true,
@@ -1214,6 +1383,63 @@ describe('garment decoration mesh selection', () => {
     });
     expect(renderer.pickPrint).toBeTypeOf('function');
     renderer.dispose();
+  });
+
+  it('exposes only visible final decals in deterministic render order', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const personalizationGeometry = new THREE.BufferGeometry();
+    personalizationGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3),
+    );
+    const firstSurface = new THREE.Mesh(
+      personalizationGeometry,
+      new THREE.MeshBasicMaterial({ map: new THREE.Texture() }),
+    );
+    firstSurface.visible = true;
+    firstSurface.renderOrder = 9;
+    firstSurface.userData.productionLayer = {
+      garmentMeshes: [{ name: 'Body' }],
+      id: 'player:first',
+      kind: 'player',
+      label: 'PLAYER #16',
+    };
+    const hiddenSurface = firstSurface.clone();
+    hiddenSurface.visible = false;
+    hiddenSurface.userData.productionLayer = {
+      garmentMeshes: [{ name: 'Body' }],
+      id: 'player:hidden',
+      kind: 'player',
+      label: 'HIDDEN #1',
+    };
+    const personalizationTextureSource = { width: 16, height: 16 };
+    renderer.printLayers = new Map([
+      ['player:first', { decal: firstSurface, texture: { image: personalizationTextureSource } }],
+      ['player:hidden', { decal: hiddenSurface, texture: { image: { width: 16, height: 16 } } }],
+    ]);
+    renderer.decorationEditor = {
+      getProductionLayers: () => [{
+        garmentMesh: { name: 'Sleeve' },
+        geometry: new THREE.BufferGeometry(),
+        id: 'crest',
+        kind: 'artwork',
+        label: 'Crest',
+        renderOrder: 8,
+        surface: { id: 1 },
+        textureSource: { width: 16, height: 16 },
+      }],
+    };
+
+    expect(renderer.getProductionLayers().map((layer) => layer.id)).toEqual([
+      'crest',
+      'player:first',
+    ]);
+    expect(renderer.getProductionLayers()[1]).toMatchObject({
+      garmentMeshes: [{ name: 'Body' }],
+      geometry: firstSurface.geometry,
+      surface: firstSurface,
+      textureSource: personalizationTextureSource,
+    });
   });
 
   it('keeps the textured proxy visible as a fallback when no garment surface resolves', () => {

@@ -564,6 +564,34 @@ describe('decoration editor geometry', () => {
     editor.dispose();
   });
 
+  it('temporarily removes selection opacity without changing artwork selection state', () => {
+    const editor = new DecorationEditor({
+      camera: new THREE.PerspectiveCamera(),
+      domElement: document.createElement('canvas'),
+      scene: new THREE.Scene(),
+    });
+    const surface = new THREE.Mesh(
+      new THREE.PlaneGeometry(),
+      new THREE.MeshBasicMaterial({ opacity: 0.72, transparent: true }),
+    );
+    editor.surfaces.set('crest', surface);
+    editor.selectedId = 'crest';
+    editor.selectionFlashId = 'crest';
+
+    editor.setProductionCaptureMode(true);
+
+    expect(surface.material.opacity).toBe(1);
+    expect(editor.selectedId).toBe('crest');
+    expect(editor.selectionFlashId).toBe('crest');
+
+    editor.setProductionCaptureMode(false);
+
+    expect(surface.material.opacity).toBe(0.72);
+    expect(editor.selectedId).toBe('crest');
+    expect(editor.selectionFlashId).toBe('crest');
+    editor.dispose();
+  });
+
   it('briefly flashes a newly synced artwork selection without persisting a transform', () => {
     vi.useFakeTimers();
     const onDecorationsChange = vi.fn();

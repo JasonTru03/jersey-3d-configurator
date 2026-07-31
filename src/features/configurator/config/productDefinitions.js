@@ -18,6 +18,7 @@ export const jerseyProduct = {
   model: {
     id: 'chelsea-jersey',
     version: '1',
+    uvExportLayoutId: 'chelsea-jersey@1',
     uvExportVersion: '1',
     uvAtlasSize: 4096,
     glbUrl: '/models/chelsea-jersey.glb',

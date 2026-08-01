@@ -132,8 +132,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
 
   function handleMutationStart() {
     saveRequestIdRef.current += 1;
-    productionPendingRef.current = false;
-    setProductionPending(false);
     setPreparedDownload(null);
     cancelActiveCartRequest();
   }
@@ -199,10 +197,8 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       if (!isCurrentRequest()) return;
       setFileError(error instanceof Error ? error.message : 'Design file preparation failed.');
     } finally {
-      if (isCurrentRequest()) {
-        productionPendingRef.current = false;
-        setProductionPending(false);
-      }
+      productionPendingRef.current = false;
+      if (mountedRef.current) setProductionPending(false);
     }
   };
 

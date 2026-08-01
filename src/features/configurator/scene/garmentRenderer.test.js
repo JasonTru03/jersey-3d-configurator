@@ -266,6 +266,81 @@ function concatenateBytes(parts) {
   return output;
 }
 
+function createProductionPreparationHarness() {
+  const model = {
+    id: 'chelsea-jersey',
+    version: '1',
+    uvExportLayoutId: 'chelsea-jersey@1',
+    uvExportVersion: '1',
+    uvAtlasSize: 4096,
+  };
+  const state = {
+    productId: 'fn8788-jersey',
+    layout: 'm',
+    overrides: {
+      bottomPattern: { enabled: false },
+      customTextItems: [],
+      printItems: [],
+    },
+  };
+  const atlas = {
+    blob: createMinimalPngBlob(4096, 4096),
+    canvas: { width: 4096, height: 4096 },
+    height: 4096,
+    width: 4096,
+  };
+  const pieces = {
+    blob: createMinimalPngBlob(4096, 4096),
+    canvas: { width: 4096, height: 4096 },
+    height: 4096,
+    layoutFingerprint: 'uv-pieces-v3-test',
+    pieces: [{ id: 'front' }, { id: 'back' }],
+    width: 4096,
+  };
+  const previews = {
+    front: {
+      blob: createMinimalPngBlob(1600, 1600),
+      canvas: { width: 1600, height: 1600 },
+      height: 1600,
+      width: 1600,
+    },
+    back: {
+      blob: createMinimalPngBlob(1600, 1600),
+      canvas: { width: 1600, height: 1600 },
+      height: 1600,
+      width: 1600,
+    },
+  };
+  const renderer = Object.create(GarmentRenderer.prototype);
+  renderer.waitForProductionReady = vi.fn();
+  renderer.product = { model };
+  renderer.state = state;
+  renderer.selected = {
+    appearance: { template: 'solid', colors: { body: '#F7F5EF' } },
+  };
+  renderer.decorationMeshes = [];
+  renderer.patternMeshes = [{ name: 'front-mesh' }];
+  renderer.modelUvLayout = { version: 3, pieceGroups: [] };
+  renderer.modelUvLayoutKey = 'chelsea-jersey@1:v3';
+  renderer.loadToken = Symbol('production-model-generation');
+  renderer.productionGeneration = 7;
+  renderer.getProductionLayers = vi.fn(() => []);
+  renderer.camera = {};
+  renderer.controls = {};
+  renderer.renderer = {};
+  renderer.scene = {};
+  renderer.bottomPatternTexture = null;
+  renderer.setProductionCaptureMode = vi.fn();
+  return {
+    atlas,
+    model,
+    pieces,
+    previews,
+    renderer,
+    state,
+  };
+}
+
 function createConcurrentModelLoadHarness() {
   productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
   productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
@@ -1121,7 +1196,13 @@ describe('garment decoration mesh selection', () => {
     expect(pieceRequest.meshes).toBe(renderer.patternMeshes);
     expect(pieceRequest.uvLayout).toBe(validatedUvLayout);
     expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
-    expect(events).toEqual(['snapshot', 'atlas:start', 'atlas:end', 'pieces:start']);
+    expect(events).toEqual([
+      'snapshot',
+      'atlas:start',
+      'atlas:end',
+      'snapshot',
+      'pieces:start',
+    ]);
 
     piecesDeferred.resolve(pieces);
     await vi.waitFor(() => expect(productionArtifactMocks.captureProductionPreviews).toHaveBeenCalledOnce());
@@ -1129,8 +1210,10 @@ describe('garment decoration mesh selection', () => {
       'snapshot',
       'atlas:start',
       'atlas:end',
+      'snapshot',
       'pieces:start',
       'pieces:end',
+      'snapshot',
       'previews:start',
     ]);
 
@@ -1142,17 +1225,142 @@ describe('garment decoration mesh selection', () => {
       previews,
     });
     expect(productionArtifactMocks.captureProductionPreviews).toHaveBeenCalledOnce();
-    expect(renderer.assertProductionSnapshot).toHaveBeenCalledTimes(2);
+    expect(renderer.assertProductionSnapshot).toHaveBeenCalledTimes(4);
     expect(events).toEqual([
       'snapshot',
       'atlas:start',
       'atlas:end',
+      'snapshot',
       'pieces:start',
       'pieces:end',
+      'snapshot',
       'previews:start',
       'previews:end',
       'snapshot',
     ]);
+  });
+
+  it('stops after Atlas when model resources drift even if product and state values return to the snapshot', async () => {
+    const atlasDeferred = deferred();
+    const { atlas, model, previews, renderer, state } = createProductionPreparationHarness();
+    const originalPatternMeshes = renderer.patternMeshes;
+    const originalUvLayout = renderer.modelUvLayout;
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockReturnValue(atlasDeferred.promise);
+    productionArtifactMocks.createUvPatternPieces.mockResolvedValue({});
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    });
+    await vi.waitFor(() => expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce());
+
+    renderer.product = { model: structuredClone(model) };
+    renderer.state = structuredClone(state);
+    renderer.patternMeshes = [{ name: 'replacement-front' }];
+    renderer.modelUvLayout = { version: 3, pieceGroups: [] };
+    renderer.modelUvLayoutKey = 'replacement-layout';
+    renderer.loadToken = Symbol('replacement-model-generation');
+    atlasDeferred.resolve(atlas);
+
+    await expect(preparation).rejects.toThrow('设计已发生变化，请重新保存。');
+    expect(productionArtifactMocks.createUvPatternPieces).not.toHaveBeenCalled();
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+    expect(atlas.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(originalPatternMeshes).not.toBe(renderer.patternMeshes);
+    expect(originalUvLayout).not.toBe(renderer.modelUvLayout);
+  });
+
+  it('stops after pieces when the design drifts and releases both completed artifacts', async () => {
+    const piecesDeferred = deferred();
+    const {
+      atlas,
+      model,
+      pieces,
+      previews,
+      renderer,
+      state,
+    } = createProductionPreparationHarness();
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockResolvedValue(atlas);
+    productionArtifactMocks.createUvPatternPieces.mockReturnValue(piecesDeferred.promise);
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    });
+    await vi.waitFor(() => expect(productionArtifactMocks.createUvPatternPieces).toHaveBeenCalledOnce());
+
+    renderer.state = { ...state, layout: 'xl' };
+    piecesDeferred.resolve(pieces);
+
+    await expect(preparation).rejects.toThrow('设计已发生变化，请重新保存。');
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+    expect(atlas.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(pieces.canvas).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it('releases Atlas and pieces when preview capture rejects', async () => {
+    const rejection = new Error('preview capture failed');
+    const { atlas, model, pieces, renderer, state } = createProductionPreparationHarness();
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockResolvedValue(atlas);
+    productionArtifactMocks.createUvPatternPieces.mockResolvedValue(pieces);
+    productionArtifactMocks.captureProductionPreviews.mockRejectedValue(rejection);
+
+    await expect(renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    })).rejects.toBe(rejection);
+
+    expect(atlas.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(pieces.canvas).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it('releases every completed artifact when the final snapshot check rejects', async () => {
+    const {
+      atlas,
+      model,
+      pieces,
+      previews,
+      renderer,
+      state,
+    } = createProductionPreparationHarness();
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockResolvedValue(atlas);
+    productionArtifactMocks.createUvPatternPieces.mockResolvedValue(pieces);
+    productionArtifactMocks.captureProductionPreviews.mockImplementation(async () => {
+      renderer.state = { ...state, layout: 'xl' };
+      return previews;
+    });
+
+    await expect(renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    })).rejects.toThrow('设计已发生变化，请重新保存。');
+
+    expect(atlas.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(pieces.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(previews.front.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(previews.back.canvas).toMatchObject({ width: 0, height: 0 });
   });
 
   it('rejects piece extraction without exposing previews or retaining the partial Atlas', async () => {
@@ -1191,7 +1399,7 @@ describe('garment decoration mesh selection', () => {
 
     expect(exposedArtifacts).toBeUndefined();
     expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
-    expect(renderer.assertProductionSnapshot).toHaveBeenCalledOnce();
+    expect(renderer.assertProductionSnapshot).toHaveBeenCalledTimes(2);
     expect(atlas.canvas).toEqual({ width: 0, height: 0 });
   });
 

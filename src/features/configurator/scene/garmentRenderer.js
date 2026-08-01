@@ -165,6 +165,7 @@ export class GarmentRenderer {
     this.currentModelIdentity = null;
     this.pendingModelIdentity = null;
     this.pendingModelLoadToken = null;
+    this.productionGeneration = 0;
     this.textureLoader = new THREE.TextureLoader();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -219,6 +220,7 @@ export class GarmentRenderer {
 
   update(product, state, selected) {
     if (!selected) return;
+    this.productionGeneration += 1;
     this.product = product;
     this.state = state;
     this.selected = selected;
@@ -697,19 +699,24 @@ export class GarmentRenderer {
 
   async prepareProductionArtifacts({ model, stateSnapshot }) {
     await this.waitForProductionReady();
-    this.assertProductionSnapshot(model, stateSnapshot);
+    const productionIdentity = captureProductionIdentity(this);
+    this.assertProductionSnapshot(model, stateSnapshot, productionIdentity);
 
     const appearanceCanvas = createGarmentAppearanceCanvas(
       model.uvAtlasSize,
-      this.selected.appearance,
-      { modelMeshes: this.patternMeshes, uvLayout: this.modelUvLayout },
+      productionIdentity.selectedAppearance,
+      {
+        modelMeshes: productionIdentity.patternMeshes,
+        uvLayout: productionIdentity.modelUvLayout,
+      },
     );
-    const legacyPatternCanvas = this.state.overrides?.bottomPattern?.enabled
-      ? this.bottomPatternTexture?.image
+    const legacyPatternCanvas = stateSnapshot.overrides?.bottomPattern?.enabled
+      ? productionIdentity.bottomPatternTexture?.image
       : null;
-    if (this.state.overrides?.bottomPattern?.enabled && !legacyPatternCanvas) {
+    if (stateSnapshot.overrides?.bottomPattern?.enabled && !legacyPatternCanvas) {
       throw new Error('旧版连续底纹尚未准备完成。');
     }
+    const productionLayers = this.getProductionLayers();
     let atlas;
     let pieces;
     let previews;
@@ -717,28 +724,30 @@ export class GarmentRenderer {
       atlas = await bakeProductionAtlas({
         appearanceCanvas,
         atlasSize: model.uvAtlasSize,
-        garmentMeshes: this.decorationMeshes,
-        layers: this.getProductionLayers(),
+        garmentMeshes: productionIdentity.decorationMeshes,
+        layers: productionLayers,
         legacyPatternCanvas,
       });
+      this.assertProductionSnapshot(model, stateSnapshot, productionIdentity);
       pieces = await createUvPatternPieces({
         atlasCanvas: atlas.canvas,
         atlasSize: model.uvAtlasSize,
-        meshes: this.patternMeshes,
-        uvLayout: this.modelUvLayout,
+        meshes: productionIdentity.patternMeshes,
+        uvLayout: productionIdentity.modelUvLayout,
       });
+      this.assertProductionSnapshot(model, stateSnapshot, productionIdentity);
       previews = await captureProductionPreviews({
-        camera: this.camera,
-        controls: this.controls,
-        renderer: this.renderer,
-        scene: this.scene,
+        camera: productionIdentity.camera,
+        controls: productionIdentity.controls,
+        renderer: productionIdentity.renderer,
+        scene: productionIdentity.scene,
         setProductionCaptureMode: (enabled) => this.setProductionCaptureMode(enabled),
       });
 
-      this.assertProductionSnapshot(model, stateSnapshot);
+      this.assertProductionSnapshot(model, stateSnapshot, productionIdentity);
       return {
         atlas,
-        legacyBakeMetadata: this.bottomPatternTexture
+        legacyBakeMetadata: productionIdentity.bottomPatternTexture
           ?.userData?.bottomPatternBakeMetadata ?? null,
         pieces,
         previews,
@@ -749,7 +758,7 @@ export class GarmentRenderer {
     }
   }
 
-  assertProductionSnapshot(model, stateSnapshot) {
+  assertProductionSnapshot(model, stateSnapshot, productionIdentity = null) {
     const currentModel = this.product?.model;
     const modelMatches = (
       model?.id === currentModel?.id
@@ -763,7 +772,11 @@ export class GarmentRenderer {
     ) === canonicalizeProductionValue(
       normalizeProductionState(this.state),
     );
-    if (!modelMatches || !stateMatches) {
+    if (
+      !modelMatches
+      || !stateMatches
+      || (productionIdentity && !productionIdentityMatches(this, productionIdentity))
+    ) {
       throw new Error('设计已发生变化，请重新保存。');
     }
   }
@@ -2055,6 +2068,44 @@ function releaseProductionArtifactCanvases(...artifacts) {
     artifact.canvas.width = 0;
     artifact.canvas.height = 0;
   });
+}
+
+function captureProductionIdentity(renderer) {
+  return Object.freeze({
+    bottomPatternTexture: renderer.bottomPatternTexture,
+    camera: renderer.camera,
+    controls: renderer.controls,
+    decorationMeshes: renderer.decorationMeshes,
+    loadToken: renderer.loadToken,
+    modelUvLayout: renderer.modelUvLayout,
+    modelUvLayoutKey: renderer.modelUvLayoutKey,
+    patternMeshes: renderer.patternMeshes,
+    productModel: renderer.product?.model,
+    productionGeneration: renderer.productionGeneration,
+    renderer: renderer.renderer,
+    scene: renderer.scene,
+    selectedAppearance: renderer.selected?.appearance,
+    state: renderer.state,
+  });
+}
+
+function productionIdentityMatches(renderer, identity) {
+  return (
+    renderer.bottomPatternTexture === identity.bottomPatternTexture
+    && renderer.camera === identity.camera
+    && renderer.controls === identity.controls
+    && renderer.decorationMeshes === identity.decorationMeshes
+    && renderer.loadToken === identity.loadToken
+    && renderer.modelUvLayout === identity.modelUvLayout
+    && renderer.modelUvLayoutKey === identity.modelUvLayoutKey
+    && renderer.patternMeshes === identity.patternMeshes
+    && renderer.product?.model === identity.productModel
+    && renderer.productionGeneration === identity.productionGeneration
+    && renderer.renderer === identity.renderer
+    && renderer.scene === identity.scene
+    && renderer.selected?.appearance === identity.selectedAppearance
+    && renderer.state === identity.state
+  );
 }
 
 function getModelUvLayoutIdentity(model, layout) {

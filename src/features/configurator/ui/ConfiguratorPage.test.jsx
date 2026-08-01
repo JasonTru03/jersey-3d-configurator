@@ -705,17 +705,26 @@ describe('ConfiguratorPage', () => {
     render(<ConfiguratorPage />);
     await screen.findByText('Chelsea Match Jersey');
     const packageDeferred = createDeferred();
-    productionPackageHarness.result = packageDeferred.promise;
+    let packageAttempt = 0;
+    productionPackageHarness.result = () => {
+      packageAttempt += 1;
+      return packageAttempt === 1 ? packageDeferred.promise : createProductionResult();
+    };
 
-    fireEvent.click(await getReadySaveButton());
-    expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Save design' }));
+    const save = await getReadySaveButton();
+    fireEvent.click(save);
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
     expect(productionPackageHarness.requests).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Size' }));
     fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
     await waitFor(() => expect(
       document.querySelector('[data-option-group="layout"][data-option-id="xl"]'),
     ).toHaveAttribute('aria-pressed', 'true'));
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(productionPackageHarness.requests).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: 'Download production ZIP' })).not.toBeInTheDocument();
 
     await act(async () => {
       packageDeferred.resolve(createProductionResult());
@@ -725,7 +734,10 @@ describe('ConfiguratorPage', () => {
 
     expect(screen.queryByRole('link', { name: 'Download production ZIP' })).not.toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Save design' })).toBeEnabled();
+    expect(save).toBeEnabled();
+
+    fireEvent.click(save);
+    await waitFor(() => expect(productionPackageHarness.requests).toHaveLength(2));
   });
 
   it('discards a production ZIP when the page unmounts while generation is pending', async () => {

@@ -188,6 +188,58 @@ describe('production atlas baker', () => {
     expect(yieldControl.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('releases its output canvas and preserves the original yield rejection', async () => {
+    const { canvas } = installCanvasHarness();
+    const garment = createGarmentMesh([
+      [0.05, 0.1],
+      [0.45, 0.1],
+      [0.25, 0.9],
+    ]);
+    const layer = createLayer({ garmentMesh: garment, id: 'yield-failure', renderOrder: 8 });
+    const basePositions = [...layer.geometry.getAttribute('position').array];
+    const baseUvs = [...layer.geometry.getAttribute('uv').array];
+    layer.geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(
+        Array.from({ length: 97 }, () => basePositions).flat(),
+        3,
+      ),
+    );
+    layer.geometry.setAttribute(
+      'uv',
+      new THREE.Float32BufferAttribute(
+        Array.from({ length: 97 }, () => baseUvs).flat(),
+        2,
+      ),
+    );
+    const rejection = new Error('atlas yield failed');
+
+    await expect(bakeProductionAtlas({
+      appearanceCanvas: { id: 'appearance', width: 32, height: 32 },
+      atlasSize: 64,
+      garmentMeshes: [garment],
+      layers: [layer],
+      yieldControl: vi.fn().mockRejectedValue(rejection),
+    })).rejects.toBe(rejection);
+
+    expect(canvas).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it('releases its output canvas and preserves a synchronous toBlob rejection', async () => {
+    const rejection = new Error('atlas toBlob failed');
+    const { canvas } = installCanvasHarness({ toBlobError: rejection });
+    const garment = createGarmentMesh();
+
+    await expect(bakeProductionAtlas({
+      appearanceCanvas: { id: 'appearance', width: 32, height: 32 },
+      atlasSize: 64,
+      garmentMeshes: [garment],
+      layers: [],
+    })).rejects.toBe(rejection);
+
+    expect(canvas).toMatchObject({ width: 0, height: 0 });
+  });
+
   it('fails when a printable garment mesh has no UVs', async () => {
     const garment = createGarmentMesh(undefined, 'Body');
     garment.geometry.deleteAttribute('uv');
@@ -240,7 +292,7 @@ describe('production atlas baker', () => {
   });
 });
 
-function installCanvasHarness() {
+function installCanvasHarness({ toBlobError = null } = {}) {
   const context = {
     beginPath: vi.fn(),
     clearRect: vi.fn(),
@@ -258,7 +310,10 @@ function installCanvasHarness() {
     width: 0,
     height: 0,
     getContext: vi.fn(() => context),
-    toBlob: (callback) => callback(new Blob(['png'], { type: 'image/png' })),
+    toBlob: (callback) => {
+      if (toBlobError) throw toBlobError;
+      callback(new Blob(['png'], { type: 'image/png' }));
+    },
   };
   vi.spyOn(document, 'createElement').mockReturnValue(canvas);
   return { canvas, context };

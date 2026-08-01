@@ -305,6 +305,15 @@ describe('UV pattern pieces', () => {
 
     await expect(createUvPatternPieces(createInput(harness))).rejects.toThrow('PNG');
     expectTemporaryCanvasesReleased(harness.created[0], harness.created);
+    expect(harness.created[0]).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it('releases the output canvas and preserves a synchronous toBlob rejection', async () => {
+    const rejection = new Error('pieces toBlob failed');
+    const harness = installCanvasHarness({ toBlobError: rejection });
+
+    await expect(createUvPatternPieces(createInput(harness))).rejects.toBe(rejection);
+    expect(harness.created.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(true);
   });
 
   it('renders only the first duplicateGroup while preserving independent front/back pieces', async () => {
@@ -466,6 +475,7 @@ describe('UV pattern pieces', () => {
     await expect(createUvPatternPieces(createInput(harness, { yieldControl }))).rejects.toBe(rejection);
     if (harness.created.length > 0) {
       expectTemporaryCanvasesReleased(harness.created[0], harness.created);
+      expect(harness.created[0]).toMatchObject({ width: 0, height: 0 });
     }
   });
 
@@ -658,6 +668,7 @@ function createInput(harness, overrides = {}) {
 function installCanvasHarness({
   blob = new Blob(['png'], { type: 'image/png' }),
   coverageAlpha = 255,
+  toBlobError = null,
 } = {}) {
   const atlas = new RecordingCanvas({ role: 'atlas', coverageAlpha });
   atlas.width = 64;
@@ -675,7 +686,13 @@ function installCanvasHarness({
   const nativeCreateElement = document.createElement.bind(document);
   vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
     if (tagName !== 'canvas') return nativeCreateElement(tagName, options);
-    const canvas = new RecordingCanvas({ blob, coverageAlpha, role: 'generated', tracker });
+    const canvas = new RecordingCanvas({
+      blob,
+      coverageAlpha,
+      role: 'generated',
+      toBlobError,
+      tracker,
+    });
     created.push(canvas);
     return canvas;
   });
@@ -687,11 +704,13 @@ class RecordingCanvas {
     blob = new Blob(['png'], { type: 'image/png' }),
     coverageAlpha = 255,
     role,
+    toBlobError = null,
     tracker = null,
   } = {}) {
     this._width = 0;
     this._height = 0;
     this.role = role;
+    this.toBlobError = toBlobError;
     this.blob = blob;
     this.tracker = tracker;
     this.context = new RecordingContext(this, coverageAlpha);
@@ -710,6 +729,7 @@ class RecordingCanvas {
 
   toBlob(callback, type) {
     this.operations.push({ method: 'toBlob', args: [type] });
+    if (this.toBlobError) throw this.toBlobError;
     callback(this.blob);
   }
 }

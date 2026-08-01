@@ -21,34 +21,40 @@ export async function bakeProductionAtlas({
   const canvas = document.createElement('canvas');
   canvas.width = atlasSize;
   canvas.height = atlasSize;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('无法创建 UV Atlas 画布。');
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('无法创建 UV Atlas 画布。');
 
-  context.clearRect(0, 0, atlasSize, atlasSize);
-  context.drawImage(appearanceCanvas, 0, 0, atlasSize, atlasSize);
-  if (legacyPatternCanvas) {
-    context.drawImage(legacyPatternCanvas, 0, 0, atlasSize, atlasSize);
+    context.clearRect(0, 0, atlasSize, atlasSize);
+    context.drawImage(appearanceCanvas, 0, 0, atlasSize, atlasSize);
+    if (legacyPatternCanvas) {
+      context.drawImage(legacyPatternCanvas, 0, 0, atlasSize, atlasSize);
+    }
+
+    const orderedLayers = (layers ?? [])
+      .map((layer, index) => ({ layer, index }))
+      .sort((first, second) => (
+        (first.layer.renderOrder ?? 0) - (second.layer.renderOrder ?? 0)
+        || first.index - second.index
+      ))
+      .map(({ layer }) => layer);
+    for (const layer of orderedLayers) {
+      await rasterizeLayer(context, atlasSize, layer, yieldControl);
+    }
+
+    const blob = await canvasToPngBlob(canvas);
+    return {
+      blob,
+      canvas,
+      colorSpace: 'sRGB',
+      height: atlasSize,
+      width: atlasSize,
+    };
+  } catch (error) {
+    canvas.width = 0;
+    canvas.height = 0;
+    throw error;
   }
-
-  const orderedLayers = (layers ?? [])
-    .map((layer, index) => ({ layer, index }))
-    .sort((first, second) => (
-      (first.layer.renderOrder ?? 0) - (second.layer.renderOrder ?? 0)
-      || first.index - second.index
-    ))
-    .map(({ layer }) => layer);
-  for (const layer of orderedLayers) {
-    await rasterizeLayer(context, atlasSize, layer, yieldControl);
-  }
-
-  const blob = await canvasToPngBlob(canvas);
-  return {
-    blob,
-    canvas,
-    colorSpace: 'sRGB',
-    height: atlasSize,
-    width: atlasSize,
-  };
 }
 
 function validateGarmentUvs(meshes) {

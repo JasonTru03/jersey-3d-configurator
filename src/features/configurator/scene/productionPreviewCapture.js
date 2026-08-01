@@ -35,11 +35,13 @@ export async function captureProductionPreviews({
   const target = new THREE.WebGLRenderTarget(width, height, {
     depthBuffer: true,
   });
+  let front;
+  let back;
 
   try {
     setProductionCaptureMode(true);
     scene.background = new THREE.Color('#f3f1ec');
-    const front = await captureSide('front', {
+    front = await captureSide('front', {
       camera,
       controls,
       height,
@@ -48,7 +50,7 @@ export async function captureProductionPreviews({
       target,
       width,
     });
-    const back = await captureSide('back', {
+    back = await captureSide('back', {
       camera,
       controls,
       height,
@@ -58,6 +60,10 @@ export async function captureProductionPreviews({
       width,
     });
     return { front, back };
+  } catch (error) {
+    releasePreviewCanvas(front?.canvas);
+    releasePreviewCanvas(back?.canvas);
+    throw error;
   } finally {
     try {
       restoreRenderState(snapshot, {
@@ -98,28 +104,39 @@ async function captureSide(side, {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const context = canvas.getContext('2d');
-  const sideLabel = side === 'front' ? '正面' : '背面';
-  if (!context) throw new Error(`无法创建${sideLabel}预览画布。`);
-  const imageData = context.createImageData(width, height);
-  for (let row = 0; row < height; row += 1) {
-    const sourceStart = (height - row - 1) * width * 4;
-    imageData.data.set(
-      pixels.subarray(sourceStart, sourceStart + width * 4),
-      row * width * 4,
+  try {
+    const context = canvas.getContext('2d');
+    const sideLabel = side === 'front' ? '正面' : '背面';
+    if (!context) throw new Error(`无法创建${sideLabel}预览画布。`);
+    const imageData = context.createImageData(width, height);
+    for (let row = 0; row < height; row += 1) {
+      const sourceStart = (height - row - 1) * width * 4;
+      imageData.data.set(
+        pixels.subarray(sourceStart, sourceStart + width * 4),
+        row * width * 4,
+      );
+    }
+    context.putImageData(imageData, 0, 0);
+    const blob = await canvasToPng(
+      canvas,
+      `无法编码${sideLabel}预览 PNG。`,
     );
+    return {
+      blob,
+      canvas,
+      height,
+      width,
+    };
+  } catch (error) {
+    releasePreviewCanvas(canvas);
+    throw error;
   }
-  context.putImageData(imageData, 0, 0);
-  const blob = await canvasToPng(
-    canvas,
-    `无法编码${sideLabel}预览 PNG。`,
-  );
-  return {
-    blob,
-    canvas,
-    height,
-    width,
-  };
+}
+
+function releasePreviewCanvas(canvas) {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
 }
 
 function snapshotRenderState({ camera, controls, renderer, scene }) {

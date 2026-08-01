@@ -64,10 +64,30 @@ describe('production preview capture', () => {
       width: 4,
     })).rejects.toThrow('无法编码正面预览 PNG。');
     expect(harness.setProductionCaptureMode).toHaveBeenLastCalledWith(false);
+    expect(harness.canvases[0]).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it('releases front and back canvases and preserves the original back encoding rejection', async () => {
+    const rejection = new Error('back encoding failed');
+    const harness = createHarness({ encodeErrorAt: 1, encodeRejection: rejection });
+
+    await expect(captureProductionPreviews({
+      ...harness,
+      height: 2,
+      width: 4,
+    })).rejects.toBe(rejection);
+
+    expect(harness.canvases).toHaveLength(2);
+    expect(harness.canvases.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(true);
+    expect(harness.setProductionCaptureMode).toHaveBeenLastCalledWith(false);
   });
 });
 
-function createHarness({ encodedBlob = new Blob(['png'], { type: 'image/png' }) } = {}) {
+function createHarness({
+  encodeErrorAt = -1,
+  encodeRejection = null,
+  encodedBlob = new Blob(['png'], { type: 'image/png' }),
+} = {}) {
   const context = {
     createImageData: vi.fn((width, height) => ({
       data: new Uint8ClampedArray(width * height * 4),
@@ -76,13 +96,21 @@ function createHarness({ encodedBlob = new Blob(['png'], { type: 'image/png' }) 
     })),
     putImageData: vi.fn(),
   };
-  const canvas = {
-    width: 0,
-    height: 0,
-    getContext: vi.fn(() => context),
-    toBlob: vi.fn((callback) => callback(encodedBlob)),
-  };
-  vi.spyOn(document, 'createElement').mockReturnValue(canvas);
+  const canvases = [];
+  vi.spyOn(document, 'createElement').mockImplementation(() => {
+    const index = canvases.length;
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => context),
+      toBlob: vi.fn((callback) => {
+        if (index === encodeErrorAt) throw encodeRejection;
+        callback(encodedBlob);
+      }),
+    };
+    canvases.push(canvas);
+    return canvas;
+  });
 
   const camera = new THREE.PerspectiveCamera(34, 1.25, 0.1, 100);
   camera.position.set(2, 3, 4);
@@ -106,6 +134,7 @@ function createHarness({ encodedBlob = new Blob(['png'], { type: 'image/png' }) 
 
   return {
     camera,
+    canvases,
     controls,
     renderer,
     scene,

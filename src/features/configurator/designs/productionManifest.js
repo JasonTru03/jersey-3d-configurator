@@ -1,5 +1,8 @@
 import { PRODUCTION_PACKAGE_SCHEMA_VERSION } from './productionFingerprint.js';
 
+const PNG_SIGNATURE = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
+const PNG_IHDR = Object.freeze([73, 72, 68, 82]);
+
 export const PRODUCTION_ARTIFACT_NAMES = Object.freeze([
   'design.json',
   'uv-atlas.png',
@@ -28,7 +31,7 @@ export async function sha256Hex(blob) {
 
 export async function createProductionManifest(input) {
   assertExactNames(input?.files);
-  validateImageMetadata(input);
+  await validateImageMetadata(input, input.files);
   const files = [];
   for (const file of input.files) {
     files.push({
@@ -63,7 +66,7 @@ export async function verifyProductionArtifacts(files, manifest) {
   ) {
     throw new Error('生产文件校验失败：清单数量不正确。');
   }
-  validateImageMetadata(manifest);
+  await validateImageMetadata(manifest, files);
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
@@ -92,7 +95,41 @@ function assertExactNames(files) {
   }
 }
 
-function validateImageMetadata(input) {
+export async function readPngDimensions(blob, name) {
+  if (!(blob instanceof Blob)) {
+    throw new Error(`生产文件 "${name}" 不是有效 PNG。`);
+  }
+  let header;
+  try {
+    header = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
+  } catch (error) {
+    throw new Error(`生产文件 "${name}" 的 PNG 数据无法读取。`, { cause: error });
+  }
+  if (
+    header.length < PNG_SIGNATURE.length
+    || !sameBytes(header.subarray(0, PNG_SIGNATURE.length), PNG_SIGNATURE)
+  ) {
+    throw new Error(`生产文件 "${name}" 不是有效 PNG。`);
+  }
+  if (header.length < 24) {
+    throw new Error(`生产文件 "${name}" 的 PNG 数据不完整。`);
+  }
+  const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  if (
+    view.getUint32(8) !== 13
+    || !sameBytes(header.subarray(12, 16), PNG_IHDR)
+  ) {
+    throw new Error(`生产文件 "${name}" 不是有效 PNG。`);
+  }
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  if (!isPositiveInteger(width) || !isPositiveInteger(height)) {
+    throw new Error(`生产文件 "${name}" 的 PNG 尺寸无效。`);
+  }
+  return { width, height };
+}
+
+async function validateImageMetadata(input, files) {
   if (
     !isPositiveInteger(input?.atlas?.width)
     || !isPositiveInteger(input?.atlas?.height)
@@ -100,6 +137,8 @@ function validateImageMetadata(input) {
     throw new Error('生产清单中的 UV Atlas 数据无效：尺寸必须为正整数。');
   }
   validatePatternPieces(input.patternPieces, input.atlas);
+  await validatePngArtifact(files, 'uv-atlas.png', input.atlas);
+  await validatePngArtifact(files, 'uv-pattern-pieces.png', input.patternPieces);
 }
 
 function validatePatternPieces(patternPieces, atlas) {
@@ -108,30 +147,34 @@ function validatePatternPieces(patternPieces, atlas) {
     || !isPositiveInteger(patternPieces?.height)
     || patternPieces.width !== atlas.width
     || patternPieces.height !== atlas.height
-    || typeof patternPieces.layoutFingerprint !== 'string'
-    || patternPieces.layoutFingerprint.length === 0
+    || !isNonEmptyString(patternPieces.layoutFingerprint)
     || !Array.isArray(patternPieces.pieces)
     || patternPieces.pieces.length === 0
   ) {
     throwInvalidPatternPieces('尺寸、布局指纹或裁片清单缺失。');
   }
 
+  const ids = new Set();
+  const orders = new Set();
   patternPieces.pieces.forEach((piece) => {
     const sourceMeshes = piece?.sourceMeshes;
     const islandMeshes = piece?.islandRefs?.map((island) => island?.meshName);
     if (
-      typeof piece?.id !== 'string'
-      || piece.id.length === 0
-      || typeof piece.label !== 'string'
-      || piece.label.length === 0
+      !isNonEmptyString(piece?.id)
+      || !isNonEmptyString(piece.label)
+      || !isNonEmptyString(piece.zone)
+      || (piece.duplicateGroup !== null && !isNonEmptyString(piece.duplicateGroup))
+      || !Array.isArray(piece.aliases)
+      || piece.aliases.some((alias) => !isNonEmptyString(alias))
       || !Number.isInteger(piece.order)
       || piece.order < 0
       || ![0, 90, 180, 270].includes(piece.rotation)
       || typeof piece.mirrorX !== 'boolean'
       || !Array.isArray(sourceMeshes)
       || sourceMeshes.length === 0
-      || sourceMeshes.some((name) => typeof name !== 'string' || name.length === 0)
+      || sourceMeshes.some((name) => !isNonEmptyString(name))
       || !Array.isArray(islandMeshes)
+      || islandMeshes.some((name) => !isNonEmptyString(name))
       || JSON.stringify(sourceMeshes) !== JSON.stringify(islandMeshes)
       || !isPositiveInteger(piece.mappedTriangles)
       || !isPositiveBounds(piece.sourceBounds, atlas.width, atlas.height)
@@ -146,7 +189,26 @@ function validatePatternPieces(patternPieces, atlas) {
     ) {
       throwInvalidPatternPieces(`裁片 "${piece?.id ?? 'unknown'}" 的来源、变换或覆盖信息不匹配。`);
     }
+    if (ids.has(piece.id) || orders.has(piece.order)) {
+      throwInvalidPatternPieces(`裁片 "${piece.id}" 的 id 或 order 重复。`);
+    }
+    ids.add(piece.id);
+    orders.add(piece.order);
   });
+  if (!ids.has('front') || !ids.has('back')) {
+    throwInvalidPatternPieces('裁片清单必须包含独立的 front 和 back。');
+  }
+}
+
+async function validatePngArtifact(files, name, expected) {
+  const file = files.find((candidate) => candidate?.name === name);
+  const actual = await readPngDimensions(file?.blob, name);
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    throw new Error(
+      `生产文件 "${name}" 的实际尺寸 ${actual.width}×${actual.height}`
+      + ` 与声明的 ${expected.width}×${expected.height} 不一致。`,
+    );
+  }
 }
 
 function isPositiveBounds(bounds, maximumWidth, maximumHeight) {
@@ -162,6 +224,15 @@ function isPositiveBounds(bounds, maximumWidth, maximumHeight) {
 
 function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function sameBytes(left, right) {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function throwInvalidPatternPieces(detail) {

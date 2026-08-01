@@ -4,6 +4,7 @@ import {
 } from './productionFingerprint.js';
 import {
   createProductionManifest,
+  readPngDimensions,
   verifyProductionArtifacts,
 } from './productionManifest.js';
 import { createProductionBundle } from './productionBundle.js';
@@ -55,7 +56,7 @@ export async function createProductionPackage({
   });
 
   try {
-    assertImageContract(rendered, modelSnapshot.uvAtlasSize);
+    await assertImageContract(rendered, modelSnapshot.uvAtlasSize);
     const stateForDocument = withLegacyBakeMetadata(
       stateSnapshot,
       rendered.legacyBakeMetadata,
@@ -149,7 +150,7 @@ function createFile(name, blob, mediaType) {
   return { blob, mediaType, name };
 }
 
-function assertImageContract(rendered, atlasSize) {
+async function assertImageContract(rendered, atlasSize) {
   if (
     rendered?.atlas?.width !== atlasSize
     || rendered?.atlas?.height !== atlasSize
@@ -159,6 +160,7 @@ function assertImageContract(rendered, atlasSize) {
   ) {
     throw new Error(`UV Atlas 必须是 ${atlasSize}×${atlasSize} PNG。`);
   }
+  assertCanvasDimensions(rendered.atlas, 'UV Atlas');
   if (
     rendered?.pieces?.width !== atlasSize
     || rendered?.pieces?.height !== atlasSize
@@ -174,6 +176,11 @@ function assertImageContract(rendered, atlasSize) {
       `UV 裁片排版图必须是 ${atlasSize}×${atlasSize} PNG，并包含非空裁片清单。`,
     );
   }
+  assertCanvasDimensions(rendered.pieces, 'UV 裁片排版图');
+  await Promise.all([
+    assertPngDimensions('uv-atlas.png', rendered.atlas),
+    assertPngDimensions('uv-pattern-pieces.png', rendered.pieces),
+  ]);
   for (const side of ['front', 'back']) {
     const preview = rendered.previews?.[side];
     if (
@@ -186,6 +193,27 @@ function assertImageContract(rendered, atlasSize) {
     ) {
       throw new Error('正面或背面预览 PNG 无效。');
     }
+  }
+}
+
+function assertCanvasDimensions(image, label) {
+  if (
+    image.canvas.width !== image.width
+    || image.canvas.height !== image.height
+  ) {
+    throw new Error(
+      `${label} 画布尺寸必须与声明的 ${image.width}×${image.height} 一致。`,
+    );
+  }
+}
+
+async function assertPngDimensions(name, image) {
+  const actual = await readPngDimensions(image.blob, name);
+  if (actual.width !== image.width || actual.height !== image.height) {
+    throw new Error(
+      `生产文件 "${name}" 的实际尺寸 ${actual.width}×${actual.height}`
+      + ` 与声明的 ${image.width}×${image.height} 不一致。`,
+    );
   }
 }
 

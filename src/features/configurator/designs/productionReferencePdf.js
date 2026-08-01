@@ -9,9 +9,11 @@ export async function createProductionReferencePdf(
   { createCanvas = defaultCreateCanvas } = {},
 ) {
   validateInput(input);
-  const first = createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
-  const second = createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
+  let first = null;
+  let second = null;
   try {
+    first = createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
+    second = createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
     drawReferencePage(first, input);
     drawPatternPiecesPage(second, input);
     const firstJpeg = await canvasToJpegBytes(first);
@@ -23,11 +25,15 @@ export async function createProductionReferencePdf(
       pageSize: { widthMm: 297, heightMm: 210 },
     };
   } finally {
-    first.width = 0;
-    first.height = 0;
-    second.width = 0;
-    second.height = 0;
+    releaseCanvas(first);
+    releaseCanvas(second);
   }
+}
+
+function releaseCanvas(canvas) {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
 }
 
 function drawReferencePage(canvas, input) {

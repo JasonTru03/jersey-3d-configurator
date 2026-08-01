@@ -75,6 +75,20 @@ describe('production reference PDF', () => {
       .toBe(true);
   });
 
+  it('releases the first canvas when creating the second canvas throws synchronously', async () => {
+    const first = { width: 1684, height: 1191 };
+    const failure = new Error('second canvas failed');
+    const createCanvas = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+
+    await expect(createProductionReferencePdf(input, { createCanvas }))
+      .rejects.toBe(failure);
+    expect(first).toMatchObject({ width: 0, height: 0 });
+  });
+
   it('fails clearly when the factory pattern pieces image is missing', async () => {
     const harness = createCanvasHarness();
 

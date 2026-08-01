@@ -141,6 +141,66 @@ describe('production package', () => {
     expect(rendered.pieces.canvas.width).toBe(0);
   });
 
+  it.each([
+    [
+      'a non-PNG atlas payload',
+      (rendered) => {
+        rendered.atlas.blob = new Blob(['not a png'], { type: 'image/png' });
+      },
+      '生产文件 "uv-atlas.png" 不是有效 PNG。',
+    ],
+    [
+      'a truncated pattern-pieces payload',
+      (rendered) => {
+        rendered.pieces.blob = new Blob(
+          [createMinimalPngBytes(4096, 4096).slice(0, 16)],
+          { type: 'image/png' },
+        );
+      },
+      '生产文件 "uv-pattern-pieces.png" 的 PNG 数据不完整。',
+    ],
+    [
+      'an atlas payload whose actual dimensions are 1x1',
+      (rendered) => {
+        rendered.atlas.blob = pngBlob(1, 1);
+      },
+      '生产文件 "uv-atlas.png" 的实际尺寸 1×1 与声明的 4096×4096 不一致。',
+    ],
+  ])('rejects %s', async (_label, mutate, message) => {
+    const rendered = createRenderedArtifacts();
+    mutate(rendered);
+
+    await expect(createProductionPackage({
+      artifactProvider: vi.fn().mockResolvedValue(rendered),
+      product: jerseyProduct,
+      selected: selectedOptions(jerseyProduct, jerseyProduct.defaultState),
+      state: jerseyProduct.defaultState,
+    }, {
+      createReferencePdf: vi.fn().mockResolvedValue({
+        blob: new Blob(['pdf'], { type: 'application/pdf' }),
+      }),
+    })).rejects.toThrow(message);
+  });
+
+  it.each([
+    ['atlas', 'UV Atlas'],
+    ['pieces', 'UV 裁片排版图'],
+  ])('rejects a %s canvas whose dimensions differ from its declaration', async (key, label) => {
+    const rendered = createRenderedArtifacts();
+    rendered[key].canvas.width = 2048;
+
+    await expect(createProductionPackage({
+      artifactProvider: vi.fn().mockResolvedValue(rendered),
+      product: jerseyProduct,
+      selected: selectedOptions(jerseyProduct, jerseyProduct.defaultState),
+      state: jerseyProduct.defaultState,
+    }, {
+      createReferencePdf: vi.fn().mockResolvedValue({
+        blob: new Blob(['pdf'], { type: 'application/pdf' }),
+      }),
+    })).rejects.toThrow(`${label} 画布尺寸必须与声明的 4096×4096 一致。`);
+  });
+
   it('does not create a ZIP after renderer or PDF failure', async () => {
     const createBundle = vi.fn();
     await expect(createProductionPackage({
@@ -175,7 +235,7 @@ describe('production package', () => {
 function createRenderedArtifacts() {
   return {
     atlas: {
-      blob: new Blob(['atlas'], { type: 'image/png' }),
+      blob: pngBlob(4096, 4096),
       canvas: { id: 'atlas', width: 4096, height: 4096 },
       colorSpace: 'sRGB',
       height: 4096,
@@ -183,11 +243,18 @@ function createRenderedArtifacts() {
     },
     legacyBakeMetadata: null,
     pieces: {
-      blob: new Blob(['pieces'], { type: 'image/png' }),
+      blob: pngBlob(4096, 4096),
       canvas: { id: 'pieces', width: 4096, height: 4096 },
       height: 4096,
       layoutFingerprint: 'uv-pieces-v1-12ab34cd',
-      pieces: [createPieceMetadata()],
+      pieces: [createPieceMetadata(), createPieceMetadata({
+        id: 'back',
+        label: '背片',
+        meshName: 'Cloth_mesh_4',
+        order: 1,
+        outputBounds: { x: 2200, y: 192, width: 1600, height: 3600 },
+        sourceBounds: { x: 1200, y: 200, width: 1067, height: 2400 },
+      })],
       width: 4096,
     },
     previews: {
@@ -207,22 +274,43 @@ function createRenderedArtifacts() {
   };
 }
 
-function createPieceMetadata() {
+function createPieceMetadata({
+  id = 'front',
+  label = '正片',
+  meshName = 'Cloth_mesh_7',
+  order = 0,
+  outputBounds = { x: 192, y: 192, width: 1600, height: 3600 },
+  sourceBounds = { x: 100, y: 200, width: 1067, height: 2400 },
+} = {}) {
   return {
     aliases: [],
     coveragePixels: 840000,
     duplicateGroup: null,
-    id: 'front',
-    islandRefs: [{ meshName: 'Cloth_mesh_7' }],
-    label: '正片',
+    id,
+    islandRefs: [{ meshName }],
+    label,
     mappedTriangles: 128,
     mirrorX: false,
-    order: 0,
-    outputBounds: { x: 192, y: 192, width: 1600, height: 3600 },
+    order,
+    outputBounds,
     rotation: 0,
     scale: 1.5,
-    sourceBounds: { x: 100, y: 200, width: 1067, height: 2400 },
-    sourceMeshes: ['Cloth_mesh_7'],
+    sourceBounds,
+    sourceMeshes: [meshName],
     zone: 'front',
   };
+}
+
+function pngBlob(width, height) {
+  return new Blob([createMinimalPngBytes(width, height)], { type: 'image/png' });
+}
+
+function createMinimalPngBytes(width, height) {
+  const bytes = new Uint8Array(24);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  bytes.set([0, 0, 0, 13, 73, 72, 68, 82], 8);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return bytes;
 }

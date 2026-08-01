@@ -13,8 +13,8 @@ const artifact = (name, body, mediaType) => ({
 
 const createFiles = () => [
   artifact('design.json', '{}', 'application/json'),
-  artifact('uv-atlas.png', 'atlas', 'image/png'),
-  artifact('uv-pattern-pieces.png', 'pieces', 'image/png'),
+  artifact('uv-atlas.png', createMinimalPngBytes(4096, 4096), 'image/png'),
+  artifact('uv-pattern-pieces.png', createMinimalPngBytes(4096, 4096), 'image/png'),
   artifact('uv-reference.pdf', 'pdf', 'application/pdf'),
   artifact('preview-front.png', 'front', 'image/png'),
   artifact('preview-back.png', 'back', 'image/png'),
@@ -106,6 +106,60 @@ describe('production manifest', () => {
   });
 
   it.each([
+    [
+      'non-PNG bytes',
+      'uv-atlas.png',
+      new TextEncoder().encode('not a png'),
+      '生产文件 "uv-atlas.png" 不是有效 PNG。',
+    ],
+    [
+      'a truncated PNG',
+      'uv-pattern-pieces.png',
+      createMinimalPngBytes(4096, 4096).slice(0, 16),
+      '生产文件 "uv-pattern-pieces.png" 的 PNG 数据不完整。',
+    ],
+    [
+      'a PNG whose first chunk is not IHDR',
+      'uv-atlas.png',
+      createMinimalPngBytes(4096, 4096, [73, 68, 65, 84]),
+      '生产文件 "uv-atlas.png" 不是有效 PNG。',
+    ],
+    [
+      'actual dimensions that differ from the manifest',
+      'uv-atlas.png',
+      createMinimalPngBytes(1, 1),
+      '生产文件 "uv-atlas.png" 的实际尺寸 1×1 与声明的 4096×4096 不一致。',
+    ],
+  ])('rejects %s', async (_label, name, body, message) => {
+    const files = createFiles().map((file) => (
+      file.name === name ? artifact(name, body, 'image/png') : file
+    ));
+
+    await expect(createProductionManifest(manifestInput(files)))
+      .rejects.toThrow(message);
+  });
+
+  it('reads PNG dimensions again while verifying artifacts', async () => {
+    const files = createFiles();
+    const manifest = await createProductionManifest(manifestInput(files));
+    const replacement = artifact(
+      'uv-pattern-pieces.png',
+      createMinimalPngBytes(1, 1),
+      'image/png',
+    );
+    files[2] = replacement;
+    manifest.files[2] = {
+      ...manifest.files[2],
+      byteLength: replacement.blob.size,
+      sha256: await sha256Hex(replacement.blob),
+    };
+
+    await expect(verifyProductionArtifacts(files, manifest)).rejects.toThrow(
+      '生产文件 "uv-pattern-pieces.png" 的实际尺寸 1×1 与声明的 4096×4096 不一致。',
+    );
+  });
+
+  it.each([
     ['missing metadata', (input) => ({ ...input, patternPieces: null })],
     ['empty piece list', (input) => ({
       ...input,
@@ -114,6 +168,10 @@ describe('production manifest', () => {
     ['mismatched dimensions', (input) => ({
       ...input,
       patternPieces: { ...input.patternPieces, width: 2048 },
+    })],
+    ['a blank layout fingerprint', (input) => ({
+      ...input,
+      patternPieces: { ...input.patternPieces, layoutFingerprint: '   ' },
     })],
     ['zero coverage', (input) => ({
       ...input,
@@ -133,6 +191,44 @@ describe('production manifest', () => {
           ...piece,
           sourceMeshes: ['Other_mesh'],
         })),
+      },
+    })],
+    ['duplicate ids', (input) => ({
+      ...input,
+      patternPieces: {
+        ...input.patternPieces,
+        pieces: input.patternPieces.pieces.map((piece, index) => (
+          index ? { ...piece, id: input.patternPieces.pieces[0].id } : piece
+        )),
+      },
+    })],
+    ['duplicate orders', (input) => ({
+      ...input,
+      patternPieces: {
+        ...input.patternPieces,
+        pieces: input.patternPieces.pieces.map((piece, index) => (
+          index ? { ...piece, order: input.patternPieces.pieces[0].order } : piece
+        )),
+      },
+    })],
+    ['a blank id', (input) => withFirstPiece(input, { id: '   ' })],
+    ['a blank label', (input) => withFirstPiece(input, { label: '   ' })],
+    ['a blank zone', (input) => withFirstPiece(input, { zone: '   ' })],
+    ['a blank source group', (input) => withFirstPiece(input, {
+      islandRefs: [{ meshName: '   ' }],
+      sourceMeshes: ['   '],
+    })],
+    ['a blank duplicate group', (input) => withFirstPiece(input, {
+      duplicateGroup: '   ',
+    })],
+    ['a blank alias', (input) => withFirstPiece(input, {
+      aliases: ['   '],
+    })],
+    ['a missing front/back pair', (input) => ({
+      ...input,
+      patternPieces: {
+        ...input.patternPieces,
+        pieces: input.patternPieces.pieces.filter(({ id }) => id !== 'back'),
       },
     })],
   ])('rejects %s for UV pattern pieces', async (_label, mutate) => {
@@ -168,23 +264,63 @@ function createPatternPieces() {
   return {
     height: 4096,
     layoutFingerprint: 'uv-pieces-v1-12ab34cd',
-    pieces: [{
+    pieces: [createPieceMetadata(), createPieceMetadata({
+      id: 'back',
+      label: '背片',
+      meshName: 'Cloth_mesh_4',
+      order: 1,
+      outputBounds: { x: 2200, y: 192, width: 1600, height: 3600 },
+      sourceBounds: { x: 1200, y: 200, width: 1067, height: 2400 },
+    })],
+    width: 4096,
+  };
+}
+
+function createPieceMetadata({
+  id = 'front',
+  label = '正片',
+  meshName = 'Cloth_mesh_7',
+  order = 0,
+  outputBounds = { x: 192, y: 192, width: 1600, height: 3600 },
+  sourceBounds = { x: 100, y: 200, width: 1067, height: 2400 },
+} = {}) {
+  return {
       aliases: [],
       coveragePixels: 840000,
       duplicateGroup: null,
-      id: 'front',
-      islandRefs: [{ meshName: 'Cloth_mesh_7' }],
-      label: '正片',
+      id,
+      islandRefs: [{ meshName }],
+      label,
       mappedTriangles: 128,
       mirrorX: false,
-      order: 0,
-      outputBounds: { x: 192, y: 192, width: 1600, height: 3600 },
+      order,
+      outputBounds,
       rotation: 0,
       scale: 1.5,
-      sourceBounds: { x: 100, y: 200, width: 1067, height: 2400 },
-      sourceMeshes: ['Cloth_mesh_7'],
+      sourceBounds,
+      sourceMeshes: [meshName],
       zone: 'front',
-    }],
-    width: 4096,
   };
+}
+
+function withFirstPiece(input, patch) {
+  return {
+    ...input,
+    patternPieces: {
+      ...input.patternPieces,
+      pieces: input.patternPieces.pieces.map((piece, index) => (
+        index ? piece : { ...piece, ...patch }
+      )),
+    },
+  };
+}
+
+function createMinimalPngBytes(width, height, chunkType = [73, 72, 68, 82]) {
+  const bytes = new Uint8Array(24);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  bytes.set([0, 0, 0, 13, ...chunkType], 8);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return bytes;
 }

@@ -105,6 +105,39 @@ Production package verification: PASS (950cdaa3, 4096x4096, 2 PDF pages)
 
 Atlas 视觉检查确认：预设徽章、上传透明图案、正背面文字和号码均出现在对应 UV 区域；透明图案未被填充成不透明背景；PDF 第 1 页中文和正背面预览清晰，第 2 页 Atlas 未裁切，底部警示语和页码可见。
 
+## UV 裁片真实模型自动化验证（2026-08-01）
+
+Task 6 在未修改生产 renderer 或 UV 实现的前提下，使用 `GLTFLoader` 真实读取两份受支持 GLB，并在原生 Chrome Canvas 中调用真实 `createUvPatternPieces`。测试 Atlas 同时包含正面球员组、背面球员组、自定义文字、预设 artwork 和带透明孔的上传 artwork；同一批颜色/透明像素证据会同时在 raw Atlas 与工厂裁片图中核对，不使用截图快照。
+
+| 模型 ID / version | GLB | piece count / ids | front `mappedTriangles` / `coveragePixels` | back `mappedTriangles` / `coveragePixels` | 配置方向 |
+| --- | --- | --- | --- | --- | --- |
+| `chelsea-jersey@1` | `chelsea-jersey.glb` | 2 / `front`, `back` | 10,142 / 2,030 | 12,320 / 1,234 | front/back 均 `rotation: 0`, `mirrorX: false` |
+| `fn8788-jersey@1` | `fn8788-jersey.glb` | 2 / `front`, `back` | 6,282 / 3,806 | 7,316 / 2,139 | front/back 均 `rotation: 0`, `mirrorX: false` |
+
+稳定证据包括：每个 piece 非空且 `coveragePixels > 0`；正面设计色只出现在 `front`，背面设计色只出现在 `back`；输出 piece metadata 和像素落点均遵循 `modelUvLayouts` 的明确配置；两个完全重叠的可见 draw group 不会让 `mappedTriangles` 翻倍；raw Atlas 与裁片图中的上传图案中心 alpha 均为 0，裁片之间的间隔 alpha 也为 0。
+
+TDD 记录：首次真实链路 RED 为 1 passed / 2 failed，不是缺文件或语法错误；两份 GLB 均已完成加载和裁片提取，但 1024 测试 Atlas 中过小的透明上传孔在 raw/output 中分别出现非零 alpha（Chelsea 198/42，FN8788 21/26），没有满足透明内容证据。根因是代表性上传 fixture 的孔径落入 Canvas 抗锯齿边缘，不是生产 UV 代码缺陷；将测试 Atlas 提高到 2048 并把采样点放到透明孔内部及环带中段后，raw/output 中心 alpha 均为 0，环带 alpha 为 246–255，进入 GREEN。
+
+本轮自动化命令：
+
+```powershell
+npx vitest run src/features/configurator/scene/uvPatternPiecesGarmentModels.test.js `
+  src/features/configurator/scene/productionAtlasBakerGarmentModels.test.js
+
+npx vitest run src/features/configurator/scene src/features/configurator/designs
+npx vitest run --exclude scripts/verify-production-package.test.js
+npm run build
+git diff --check
+```
+
+本机结果：focused 2 files / 9 tests 通过；scene/designs 31 files / 551 tests 通过；排除 package verifier 的全量 75 files / 1,187 tests 通过；app 与 Shopify 构建通过；`git diff --check` 无输出。全量测试仍打印两条既有 jsdom `Not implemented: navigation to another Document` 提示；构建仍打印既有大 chunk 与 `inlineDynamicImports` 警告，均未造成失败。
+
+视觉验收仍待主代理在真实页面执行，不能标记为已通过：分别切换 `chelsea-jersey@1` 与 `fn8788-jersey@1`，生成生产 ZIP，对照 `uv-atlas.png` 与 `uv-pattern-pieces.png` 检查正背面文字/号码只落入对应裁片、裁片轮廓符合接缝、文字无镜像、透明间隔存在，并保存可追溯的导出或截图路径。
+
+已知接缝边界：当前布局只声明每个模型的主身 `front` / `back` mesh，不覆盖袖片、领片、侧片等未声明裁片；输出不是工厂 CAD 纸样，仍不包含缝份、放码、对位标记或裁片编号。自动化 fixture 的 `coveragePixels` 是代表性设计内容的非透明像素数，不是整块 UV 岛面积。
+
+状态：Task 6 仅完成本地测试与交接记录，未 push、未发布、未部署。任务前回滚点为 `ebf6b6b2efe79639bb6d65e901dcead1509757af`；如需撤销本轮，可回到该提交并移除本节及真实模型测试辅助文件。
+
 ## 生产边界与回滚
 
 PDF 与 Atlas 是 UV 生产参考和数据交换文件，不是工厂 1:1 裁片文件；不包含纸样裁片、放码、缝份或裁片编号。

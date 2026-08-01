@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { crc32, deflateSync, inflateSync } from 'node:zlib';
 const productionArtifactMocks = vi.hoisted(() => ({
   bakeProductionAtlas: vi.fn(),
   captureProductionPreviews: vi.fn(),
@@ -198,13 +199,71 @@ function deferred() {
 }
 
 function createMinimalPngBlob(width, height) {
-  const bytes = new Uint8Array(24);
-  bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
-  bytes.set([0, 0, 0, 13, 73, 72, 68, 82], 8);
-  const view = new DataView(bytes.buffer);
-  view.setUint32(16, width);
-  view.setUint32(20, height);
-  return new Blob([bytes], { type: 'image/png' });
+  const ihdr = new Uint8Array(13);
+  const ihdrView = new DataView(ihdr.buffer);
+  ihdrView.setUint32(0, width);
+  ihdrView.setUint32(4, height);
+  ihdr.set([1, 0, 0, 0, 0], 8);
+  const scanlines = new Uint8Array((Math.ceil(width / 8) + 1) * height);
+  return new Blob([
+    new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+    createPngChunk('IHDR', ihdr),
+    createPngChunk('IDAT', deflateSync(scanlines)),
+    createPngChunk('IEND', new Uint8Array()),
+  ], { type: 'image/png' });
+}
+
+function createPngChunk(type, data) {
+  const typeBytes = Uint8Array.from(type, (character) => character.charCodeAt(0));
+  const chunk = new Uint8Array(12 + data.length);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, data.length);
+  chunk.set(typeBytes, 4);
+  chunk.set(data, 8);
+  view.setUint32(8 + data.length, crc32(chunk.subarray(4, 8 + data.length)));
+  return chunk;
+}
+
+async function inspectPngFixture(blob) {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (bytes.length < signature.length) throw new Error('PNG signature is truncated.');
+  expect([...bytes.subarray(0, signature.length)]).toEqual(signature);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const chunks = [];
+  let offset = signature.length;
+  while (offset < bytes.length) {
+    if (offset + 12 > bytes.length) throw new Error('PNG chunk header is truncated.');
+    const length = view.getUint32(offset);
+    const typeStart = offset + 4;
+    const dataStart = typeStart + 4;
+    const dataEnd = dataStart + length;
+    const chunkEnd = dataEnd + 4;
+    const type = String.fromCharCode(...bytes.subarray(typeStart, dataStart));
+    if (chunkEnd > bytes.length) throw new Error(`PNG chunk ${type} is truncated.`);
+    const expectedCrc = crc32(bytes.subarray(typeStart, dataEnd));
+    const actualCrc = view.getUint32(dataEnd);
+    if (actualCrc !== expectedCrc) throw new Error(`PNG chunk ${type} has an invalid CRC.`);
+    chunks.push({
+      crc: actualCrc,
+      data: bytes.slice(dataStart, dataEnd),
+      type,
+    });
+    offset = chunkEnd;
+    if (type === 'IEND') break;
+  }
+  if (offset !== bytes.length) throw new Error('PNG has trailing or missing chunk data.');
+  return chunks;
+}
+
+function concatenateBytes(parts) {
+  const output = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+  let offset = 0;
+  parts.forEach((part) => {
+    output.set(part, offset);
+    offset += part.length;
+  });
+  return output;
 }
 
 function createConcurrentModelLoadHarness() {
@@ -951,6 +1010,26 @@ describe('garment decoration mesh selection', () => {
       ...renderer.product.model,
       uvExportLayoutId: 'fn8788-jersey@1',
     }, structuredClone(renderer.state))).toThrow('设计已发生变化，请重新保存。');
+  });
+
+  it.each([
+    { height: 4096, width: 4096 },
+    { height: 1600, width: 1600 },
+  ])('uses a complete decodable $width×$height PNG fixture', async ({ height, width }) => {
+    const chunks = await inspectPngFixture(createMinimalPngBlob(width, height));
+    expect(chunks.map(({ type }) => type)).toEqual(['IHDR', 'IDAT', 'IEND']);
+    expect(chunks.at(-1)).toMatchObject({ crc: 0xae426082, data: new Uint8Array() });
+    const ihdr = chunks[0].data;
+    const ihdrView = new DataView(ihdr.buffer, ihdr.byteOffset, ihdr.byteLength);
+    expect(ihdr).toHaveLength(13);
+    expect(ihdrView.getUint32(0)).toBe(width);
+    expect(ihdrView.getUint32(4)).toBe(height);
+    expect([...ihdr.subarray(8)]).toEqual([1, 0, 0, 0, 0]);
+    const scanlines = inflateSync(concatenateBytes(
+      chunks.filter(({ type }) => type === 'IDAT').map(({ data }) => data),
+    ));
+    expect(scanlines).toHaveLength((Math.ceil(width / 8) + 1) * height);
+    expect(scanlines.every((value) => value === 0)).toBe(true);
   });
 
   it('creates pattern pieces after Atlas baking and before production previews', async () => {

@@ -13,7 +13,7 @@ export async function createProductionReferencePdf(
   const second = createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
   try {
     drawReferencePage(first, input);
-    drawAtlasPage(second, input);
+    drawPatternPiecesPage(second, input);
     const firstJpeg = await canvasToJpegBytes(first);
     const secondJpeg = await canvasToJpegBytes(second);
     const pdfBytes = buildRasterPdf(firstJpeg, secondJpeg);
@@ -68,12 +68,12 @@ function drawReferencePage(canvas, input) {
   );
 }
 
-function drawAtlasPage(canvas, input) {
+function drawPatternPiecesPage(canvas, input) {
   const context = canvas.getContext('2d');
   if (!context) throw new Error('无法创建 PDF 第 2 页画布。');
   fillPage(context);
-  drawText(context, 'UV Atlas 参考', 72, 70, '700 36px "Microsoft YaHei", sans-serif');
-  drawContainedImage(context, input.atlas, {
+  drawText(context, 'UV 裁片排版参考', 72, 70, '700 36px "Microsoft YaHei", sans-serif');
+  drawContainedImage(context, input.pieces, {
     x: 72,
     y: 110,
     width: 1540,
@@ -81,7 +81,7 @@ function drawAtlasPage(canvas, input) {
   });
   drawText(
     context,
-    `${input.atlasSize} × ${input.atlasSize} 像素`,
+    `${input.piecesSize.width} × ${input.piecesSize.height} 像素`,
     72,
     1080,
     '22px "Microsoft YaHei", sans-serif',
@@ -256,12 +256,18 @@ function defaultCreateCanvas(width, height) {
 }
 
 function validateInput(input) {
+  if (!input?.pieces) {
+    throw new Error('PDF 生产参考数据不完整：缺少 UV 裁片排版图。');
+  }
   if (
-    !input?.atlas
-    || !input.previewFront
+    !input.previewFront
     || !input.previewBack
     || !Number.isInteger(input.atlasSize)
     || input.atlasSize < 1
+    || !Number.isInteger(input.piecesSize?.width)
+    || input.piecesSize.width < 1
+    || !Number.isInteger(input.piecesSize?.height)
+    || input.piecesSize.height < 1
     || typeof input.designFingerprint !== 'string'
     || !input.model
     || !Array.isArray(input.zoneColors)

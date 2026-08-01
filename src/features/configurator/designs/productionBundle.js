@@ -5,6 +5,7 @@ const STORE_METHOD = 0;
 const ZIP_NAMES = Object.freeze([
   'design.json',
   'uv-atlas.png',
+  'uv-pattern-pieces.png',
   'uv-reference.pdf',
   'preview-front.png',
   'preview-back.png',

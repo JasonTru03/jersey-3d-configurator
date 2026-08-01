@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { createProductionReferencePdf } from './productionReferencePdf.js';
 
 const input = {
-  atlas: { id: 'atlas', width: 4096, height: 4096 },
   atlasSize: 4096,
   designFingerprint: '12ab34cd',
   generatedAt: '2026-07-31T08:00:00.000Z',
@@ -11,6 +10,8 @@ const input = {
     version: '1',
     uvExportVersion: '1',
   },
+  pieces: { id: 'pieces', width: 4096, height: 4096 },
+  piecesSize: { width: 4096, height: 4096 },
   previewBack: { id: 'back', width: 1600, height: 1600 },
   previewFront: { id: 'front', width: 1600, height: 1600 },
   productName: 'Chelsea Match Jersey',
@@ -48,11 +49,11 @@ describe('production reference PDF', () => {
     const imageSources = harness.contexts.flatMap((context) => (
       context.drawImage.mock.calls.map(([source]) => source)
     ));
-    expect(imageSources).toEqual(expect.arrayContaining([
+    expect(imageSources).toEqual([
       input.previewFront,
       input.previewBack,
-      input.atlas,
-    ]));
+      input.pieces,
+    ]);
 
     const bytes = new Uint8Array(await result.blob.arrayBuffer());
     const text = new TextDecoder('latin1').decode(bytes);
@@ -70,6 +71,20 @@ describe('production reference PDF', () => {
     await expect(createProductionReferencePdf(input, {
       createCanvas: harness.createCanvas,
     })).rejects.toThrow('无法生成 PDF 页面图像。');
+    expect(harness.canvases.every(({ width, height }) => width === 0 && height === 0))
+      .toBe(true);
+  });
+
+  it('fails clearly when the factory pattern pieces image is missing', async () => {
+    const harness = createCanvasHarness();
+
+    await expect(createProductionReferencePdf({
+      ...input,
+      pieces: null,
+    }, {
+      createCanvas: harness.createCanvas,
+    })).rejects.toThrow('PDF 生产参考数据不完整：缺少 UV 裁片排版图。');
+    expect(harness.createCanvas).not.toHaveBeenCalled();
   });
 });
 

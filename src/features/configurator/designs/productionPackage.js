@@ -81,6 +81,7 @@ export async function createProductionPackage({
     const artifacts = [
       createFile('design.json', designBlob, 'application/json'),
       createFile('uv-atlas.png', rendered.atlas.blob, 'image/png'),
+      createFile('uv-pattern-pieces.png', rendered.pieces.blob, 'image/png'),
       createFile('uv-reference.pdf', pdf.blob, 'application/pdf'),
       createFile('preview-front.png', rendered.previews.front.blob, 'image/png'),
       createFile('preview-back.png', rendered.previews.back.blob, 'image/png'),
@@ -97,6 +98,12 @@ export async function createProductionPackage({
       model: {
         id: modelSnapshot.id,
         version: modelSnapshot.version,
+      },
+      patternPieces: {
+        height: rendered.pieces.height,
+        layoutFingerprint: rendered.pieces.layoutFingerprint,
+        pieces: rendered.pieces.pieces,
+        width: rendered.pieces.width,
       },
       productId: product.id,
       size,
@@ -152,6 +159,21 @@ function assertImageContract(rendered, atlasSize) {
   ) {
     throw new Error(`UV Atlas 必须是 ${atlasSize}×${atlasSize} PNG。`);
   }
+  if (
+    rendered?.pieces?.width !== atlasSize
+    || rendered?.pieces?.height !== atlasSize
+    || rendered?.pieces?.blob?.type !== 'image/png'
+    || rendered.pieces.blob.size === 0
+    || !rendered.pieces.canvas
+    || typeof rendered.pieces.layoutFingerprint !== 'string'
+    || rendered.pieces.layoutFingerprint.length === 0
+    || !Array.isArray(rendered.pieces.pieces)
+    || rendered.pieces.pieces.length === 0
+  ) {
+    throw new Error(
+      `UV 裁片排版图必须是 ${atlasSize}×${atlasSize} PNG，并包含非空裁片清单。`,
+    );
+  }
   for (const side of ['front', 'back']) {
     const preview = rendered.previews?.[side];
     if (
@@ -176,7 +198,6 @@ function toPdfInput({
   size,
 }) {
   return {
-    atlas: rendered.atlas.canvas,
     atlasSize: product.model.uvAtlasSize,
     designFingerprint: fingerprint,
     generatedAt,
@@ -184,6 +205,11 @@ function toPdfInput({
       id: product.model.id,
       version: product.model.version,
       uvExportVersion: product.model.uvExportVersion,
+    },
+    pieces: rendered.pieces.canvas,
+    piecesSize: {
+      height: rendered.pieces.height,
+      width: rendered.pieces.width,
     },
     previewBack: rendered.previews.back.canvas,
     previewFront: rendered.previews.front.canvas,
@@ -215,6 +241,7 @@ function withLegacyBakeMetadata(state, bakeMetadata) {
 function releaseRenderedCanvases(rendered) {
   const canvases = [
     rendered?.atlas?.canvas,
+    rendered?.pieces?.canvas,
     rendered?.previews?.front?.canvas,
     rendered?.previews?.back?.canvas,
   ];

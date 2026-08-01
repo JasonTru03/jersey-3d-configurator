@@ -8,6 +8,7 @@ import { createProductionPackage } from './productionPackage.js';
 const ZIP_NAMES = [
   'design.json',
   'uv-atlas.png',
+  'uv-pattern-pieces.png',
   'uv-reference.pdf',
   'preview-front.png',
   'preview-back.png',
@@ -15,7 +16,7 @@ const ZIP_NAMES = [
 ];
 
 describe('production package', () => {
-  it('creates and verifies the exact deterministic six-file package', async () => {
+  it('creates and verifies the exact deterministic seven-file package', async () => {
     const state = structuredClone(jerseyProduct.defaultState);
     const selected = selectedOptions(jerseyProduct, state);
     const rendered = createRenderedArtifacts();
@@ -45,23 +46,32 @@ describe('production package', () => {
       model: { id: 'chelsea-jersey', version: '1' },
       uvExportVersion: '1',
       atlas: { width: 4096, height: 4096, colorSpace: 'sRGB' },
+      patternPieces: {
+        width: 4096,
+        height: 4096,
+        layoutFingerprint: 'uv-pieces-v1-12ab34cd',
+        pieces: rendered.pieces.pieces,
+      },
     });
-    expect(result.manifest.files).toHaveLength(5);
+    expect(result.manifest.files).toHaveLength(6);
     const providerRequest = artifactProvider.mock.calls[0][0];
     expect(providerRequest.model).toEqual(jerseyProduct.model);
     expect(providerRequest.model).not.toBe(jerseyProduct.model);
     expect(providerRequest.stateSnapshot).toEqual(state);
     expect(providerRequest.stateSnapshot).not.toBe(state);
     expect(createReferencePdf).toHaveBeenCalledWith(expect.objectContaining({
-      atlas: rendered.atlas.canvas,
       atlasSize: 4096,
       designFingerprint: result.fingerprint,
+      pieces: rendered.pieces.canvas,
+      piecesSize: { width: 4096, height: 4096 },
       previewBack: rendered.previews.back.canvas,
       previewFront: rendered.previews.front.canvas,
       sizeLabel: 'M',
       templateLabel: '纯色',
     }));
+    expect(createReferencePdf.mock.calls[0][0]).not.toHaveProperty('atlas');
     expect(rendered.atlas.canvas.width).toBe(0);
+    expect(rendered.pieces.canvas.width).toBe(0);
     expect(rendered.previews.front.canvas.width).toBe(0);
 
     const designFile = result.files.find((file) => file.filename === 'design.json');
@@ -99,6 +109,38 @@ describe('production package', () => {
     })).rejects.toThrow('UV Atlas 必须是 4096×4096 PNG。');
   });
 
+  it('rejects missing pattern pieces and releases the renderer canvases', async () => {
+    const rendered = createRenderedArtifacts();
+    delete rendered.pieces;
+
+    await expect(createProductionPackage({
+      artifactProvider: vi.fn().mockResolvedValue(rendered),
+      product: jerseyProduct,
+      selected: selectedOptions(jerseyProduct, jerseyProduct.defaultState),
+      state: jerseyProduct.defaultState,
+    }, {
+      createReferencePdf: vi.fn(),
+    })).rejects.toThrow('UV 裁片排版图必须是 4096×4096 PNG，并包含非空裁片清单。');
+    expect(rendered.atlas.canvas.width).toBe(0);
+    expect(rendered.previews.front.canvas.width).toBe(0);
+    expect(rendered.previews.back.canvas.width).toBe(0);
+  });
+
+  it('rejects pattern pieces that do not match the configured 4096 contract', async () => {
+    const rendered = createRenderedArtifacts();
+    rendered.pieces.width = 2048;
+
+    await expect(createProductionPackage({
+      artifactProvider: vi.fn().mockResolvedValue(rendered),
+      product: jerseyProduct,
+      selected: selectedOptions(jerseyProduct, jerseyProduct.defaultState),
+      state: jerseyProduct.defaultState,
+    }, {
+      createReferencePdf: vi.fn(),
+    })).rejects.toThrow('UV 裁片排版图必须是 4096×4096 PNG，并包含非空裁片清单。');
+    expect(rendered.pieces.canvas.width).toBe(0);
+  });
+
   it('does not create a ZIP after renderer or PDF failure', async () => {
     const createBundle = vi.fn();
     await expect(createProductionPackage({
@@ -112,8 +154,9 @@ describe('production package', () => {
     })).rejects.toThrow('图层无法映射');
     expect(createBundle).not.toHaveBeenCalled();
 
+    const rendered = createRenderedArtifacts();
     await expect(createProductionPackage({
-      artifactProvider: vi.fn().mockResolvedValue(createRenderedArtifacts()),
+      artifactProvider: vi.fn().mockResolvedValue(rendered),
       product: jerseyProduct,
       selected: selectedOptions(jerseyProduct, jerseyProduct.defaultState),
       state: jerseyProduct.defaultState,
@@ -122,6 +165,10 @@ describe('production package', () => {
       createReferencePdf: vi.fn().mockRejectedValue(new Error('PDF failed')),
     })).rejects.toThrow('PDF failed');
     expect(createBundle).not.toHaveBeenCalled();
+    expect(rendered.atlas.canvas.width).toBe(0);
+    expect(rendered.pieces.canvas.width).toBe(0);
+    expect(rendered.previews.front.canvas.width).toBe(0);
+    expect(rendered.previews.back.canvas.width).toBe(0);
   });
 });
 
@@ -135,6 +182,14 @@ function createRenderedArtifacts() {
       width: 4096,
     },
     legacyBakeMetadata: null,
+    pieces: {
+      blob: new Blob(['pieces'], { type: 'image/png' }),
+      canvas: { id: 'pieces', width: 4096, height: 4096 },
+      height: 4096,
+      layoutFingerprint: 'uv-pieces-v1-12ab34cd',
+      pieces: [createPieceMetadata()],
+      width: 4096,
+    },
     previews: {
       front: {
         blob: new Blob(['front'], { type: 'image/png' }),
@@ -149,5 +204,25 @@ function createRenderedArtifacts() {
         width: 1600,
       },
     },
+  };
+}
+
+function createPieceMetadata() {
+  return {
+    aliases: [],
+    coveragePixels: 840000,
+    duplicateGroup: null,
+    id: 'front',
+    islandRefs: [{ meshName: 'Cloth_mesh_7' }],
+    label: '正片',
+    mappedTriangles: 128,
+    mirrorX: false,
+    order: 0,
+    outputBounds: { x: 192, y: 192, width: 1600, height: 3600 },
+    rotation: 0,
+    scale: 1.5,
+    sourceBounds: { x: 100, y: 200, width: 1067, height: 2400 },
+    sourceMeshes: ['Cloth_mesh_7'],
+    zone: 'front',
   };
 }

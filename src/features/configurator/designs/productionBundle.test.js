@@ -4,6 +4,7 @@ import { createProductionBundle } from './productionBundle.js';
 const ZIP_NAMES = [
   'design.json',
   'uv-atlas.png',
+  'uv-pattern-pieces.png',
   'uv-reference.pdf',
   'preview-front.png',
   'preview-back.png',
@@ -16,7 +17,7 @@ const createFiles = () => ZIP_NAMES.map((filename) => ({
 }));
 
 describe('createProductionBundle', () => {
-  it('packages exactly the ordered six-file production contract', async () => {
+  it('packages exactly the ordered seven-file production contract', async () => {
     const result = await createProductionBundle({
       files: createFiles(),
       fingerprint: '12ab34cd',

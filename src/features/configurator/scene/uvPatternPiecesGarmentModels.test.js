@@ -17,6 +17,11 @@ import {
 import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
 
 const ATLAS_SIZE = 2048;
+const DIRECTION_MARKER_COLORS = [
+  [245, 85, 35],
+  [35, 205, 95],
+  [45, 95, 235],
+];
 const CHROME_PATH = findBrowserPath();
 const loadedModels = new Map();
 
@@ -58,6 +63,7 @@ describe('UV pattern pieces on supported real garment models', () => {
         rawCenterAlpha: 0,
       });
       expect(result.uploadTransparency.ringAlphas.every((alpha) => alpha > 200)).toBe(true);
+      expectDirectionalEvidence(result.directionalEvidence);
 
       const fixture = loadedModels.get(model.id);
       for (const piece of result.pieces) {
@@ -109,7 +115,14 @@ function createBrowserFixture(meshes, uvLayout) {
   }
   return {
     designs: [
-      createDesign('front-player-set', 'player-set', 'front', [220, 30, 30], trianglesByRegion.front[0]),
+      createDesign(
+        'front-player-set',
+        'player-set',
+        'front',
+        [220, 30, 30],
+        trianglesByRegion.front[0],
+        { directionMarkerColors: DIRECTION_MARKER_COLORS },
+      ),
       createDesign('front-preset-artwork', 'preset-artwork', 'front', [30, 190, 60], trianglesByRegion.front[1]),
       createDesign('front-transparent-upload', 'transparent-upload', 'front', [210, 40, 190], trianglesByRegion.front[2]),
       createDesign('back-player-set', 'player-set', 'back', [25, 80, 220], trianglesByRegion.back[0]),
@@ -121,8 +134,8 @@ function createBrowserFixture(meshes, uvLayout) {
   };
 }
 
-function createDesign(id, kind, region, color, triangle) {
-  return { id, kind, region, color, triangle };
+function createDesign(id, kind, region, color, triangle, evidence = {}) {
+  return { id, kind, region, color, triangle, ...evidence };
 }
 
 function selectSeparatedTriangles(coordinates, count) {
@@ -231,7 +244,7 @@ function createBrowserHtml(moduleUrl, fixture) {
 <html>
 <body>UV_REAL_MODEL:{"ok":false,"error":"module did not finish"}</body>
 <script type="module">
-import { createUvPatternPieces, transformPiecePoint } from ${JSON.stringify(moduleUrl)};
+import { createUvPatternPieces } from ${JSON.stringify(moduleUrl)};
 
 const fixture = ${JSON.stringify(fixture)};
 const atlasSize = ${ATLAS_SIZE};
@@ -289,6 +302,124 @@ function traceTriangle(context, triangle) {
   context.closePath();
 }
 
+function triangleBounds(triangle) {
+  const xValues = triangle.map(({ x }) => x);
+  const yValues = triangle.map(({ y }) => y);
+  return {
+    x: Math.min(...xValues),
+    y: Math.min(...yValues),
+    width: Math.max(...xValues) - Math.min(...xValues),
+    height: Math.max(...yValues) - Math.min(...yValues),
+  };
+}
+
+function interpolate(first, second, amount) {
+  return {
+    x: first.x + (second.x - first.x) * amount,
+    y: first.y + (second.y - first.y) * amount,
+  };
+}
+
+function drawPlayerSet(context, design, outer) {
+  context.fillStyle = 'rgb(' + design.color.join(',') + ')';
+  traceTriangle(context, outer);
+  context.fill();
+  const center = average(outer);
+  const bounds = triangleBounds(outer);
+  context.save();
+  traceTriangle(context, outer);
+  context.clip();
+  context.fillStyle = 'rgba(255,255,255,0.92)';
+  context.fillRect(
+    center.x - bounds.width * 0.18,
+    center.y - bounds.height * 0.30,
+    bounds.width * 0.36,
+    Math.max(1, bounds.height * 0.08),
+  );
+  context.fillRect(
+    center.x - bounds.width * 0.08,
+    center.y + bounds.height * 0.12,
+    bounds.width * 0.16,
+    Math.max(1, bounds.height * 0.18),
+  );
+  context.restore();
+}
+
+function drawCustomText(context, design, outer) {
+  const center = average(outer);
+  context.strokeStyle = 'rgb(' + design.color.join(',') + ')';
+  context.lineCap = 'round';
+  context.lineWidth = Math.max(2, Math.min(triangleBounds(outer).width, triangleBounds(outer).height) * 0.14);
+  context.beginPath();
+  const capStart = interpolate(center, outer[0], 0.52);
+  const capEnd = interpolate(center, outer[1], 0.52);
+  const stemEnd = interpolate(center, outer[2], 0.48);
+  context.moveTo(capStart.x, capStart.y);
+  context.lineTo(capEnd.x, capEnd.y);
+  context.moveTo(center.x, center.y);
+  context.lineTo(stemEnd.x, stemEnd.y);
+  context.stroke();
+}
+
+function drawPresetArtwork(context, design, outer) {
+  const center = average(outer);
+  const bounds = triangleBounds(outer);
+  const outerRadius = Math.max(2, Math.min(bounds.width, bounds.height) * 0.28);
+  const innerRadius = outerRadius * 0.42;
+  context.fillStyle = 'rgb(' + design.color.join(',') + ')';
+  context.beginPath();
+  for (let pointIndex = 0; pointIndex < 10; pointIndex += 1) {
+    const radius = pointIndex % 2 === 0 ? outerRadius : innerRadius;
+    const angle = -Math.PI / 2 + pointIndex * Math.PI / 5;
+    const point = {
+      x: center.x + Math.cos(angle) * radius,
+      y: center.y + Math.sin(angle) * radius,
+    };
+    if (pointIndex === 0) context.moveTo(point.x, point.y);
+    else context.lineTo(point.x, point.y);
+  }
+  context.closePath();
+  context.fill();
+}
+
+function drawTransparentUpload(context, design, outer) {
+  context.fillStyle = 'rgb(' + design.color.join(',') + ')';
+  traceTriangle(context, outer);
+  context.fill();
+  context.save();
+  context.globalCompositeOperation = 'destination-out';
+  traceTriangle(context, scaleTriangle(outer, 0.55));
+  context.fill();
+  context.restore();
+}
+
+function getDirectionMarker(design) {
+  if (!design.directionMarkerColors) return null;
+  const outer = scaleTriangle(toAtlasPoints(design.triangle), 0.78);
+  const center = average(outer);
+  return {
+    colors: design.directionMarkerColors,
+    halfSize: 3,
+    points: outer.map((point) => {
+      const markerPoint = interpolate(center, point, 0.48);
+      return { x: Math.round(markerPoint.x), y: Math.round(markerPoint.y) };
+    }),
+  };
+}
+
+function drawDirectionMarker(context, marker) {
+  if (!marker) return;
+  marker.points.forEach((point, index) => {
+    context.fillStyle = 'rgb(' + marker.colors[index].join(',') + ')';
+    context.fillRect(
+      point.x - marker.halfSize,
+      point.y - marker.halfSize,
+      marker.halfSize * 2 + 1,
+      marker.halfSize * 2 + 1,
+    );
+  });
+}
+
 function createAtlas() {
   const canvas = document.createElement('canvas');
   canvas.width = atlasSize;
@@ -296,51 +427,45 @@ function createAtlas() {
   const context = canvas.getContext('2d');
   for (const design of fixture.designs) {
     const outer = scaleTriangle(toAtlasPoints(design.triangle), 0.78);
-    context.fillStyle = 'rgb(' + design.color.join(',') + ')';
-    traceTriangle(context, outer);
-    context.fill();
-    if (design.kind === 'transparent-upload') {
-      context.save();
-      context.globalCompositeOperation = 'destination-out';
-      traceTriangle(context, scaleTriangle(outer, 0.55));
-      context.fill();
-      context.restore();
+    switch (design.kind) {
+      case 'custom-text':
+        drawCustomText(context, design, outer);
+        break;
+      case 'preset-artwork':
+        drawPresetArtwork(context, design, outer);
+        break;
+      case 'transparent-upload':
+        drawTransparentUpload(context, design, outer);
+        break;
+      default:
+        drawPlayerSet(context, design, outer);
     }
+    drawDirectionMarker(context, getDirectionMarker(design));
   }
   return canvas;
 }
 
-function orientedSize(piece) {
-  const { width, height } = piece.sourceBounds;
-  const points = [
-    { x: 0, y: 0 }, { x: width, y: 0 }, { x: 0, y: height }, { x: width, y: height },
-  ].map((point) => transformPiecePoint(point, {
-    width,
-    height,
-    mirrorX: piece.mirrorX,
-    rotation: piece.rotation,
-  }));
+function outputPointForCurrentLayout(piece, atlasPoint) {
+  if (piece.rotation !== 0 || piece.mirrorX !== false) {
+    throw new Error('真实模型测试的独立坐标公式只允许当前明确配置的 rotation=0/mirrorX=false。');
+  }
+  const relativeX = (atlasPoint.x - piece.sourceBounds.x) / piece.sourceBounds.width;
+  const relativeY = (atlasPoint.y - piece.sourceBounds.y) / piece.sourceBounds.height;
   return {
-    width: Math.max(...points.map(({ x }) => x)) - Math.min(...points.map(({ x }) => x)),
-    height: Math.max(...points.map(({ y }) => y)) - Math.min(...points.map(({ y }) => y)),
+    x: piece.outputBounds.x + relativeX * piece.outputBounds.width,
+    y: piece.outputBounds.y + relativeY * piece.outputBounds.height,
   };
 }
 
-function outputPoint(piece, normalizedPoint) {
-  const sourcePoint = {
-    x: normalizedPoint.x * atlasSize - piece.sourceBounds.x,
-    y: normalizedPoint.y * atlasSize - piece.sourceBounds.y,
-  };
-  const transformed = transformPiecePoint(sourcePoint, {
-    width: piece.sourceBounds.width,
-    height: piece.sourceBounds.height,
-    mirrorX: piece.mirrorX,
-    rotation: piece.rotation,
-  });
-  const size = orientedSize(piece);
+function outputPointForCounterfactual(piece, atlasPoint, counterfactual) {
+  const relativeX = (atlasPoint.x - piece.sourceBounds.x) / piece.sourceBounds.width;
+  const relativeY = (atlasPoint.y - piece.sourceBounds.y) / piece.sourceBounds.height;
+  const outputRelative = counterfactual === 'mirrorX'
+    ? { x: 1 - relativeX, y: relativeY }
+    : { x: 1 - relativeX, y: 1 - relativeY };
   return {
-    x: piece.outputBounds.x + transformed.x * piece.outputBounds.width / size.width,
-    y: piece.outputBounds.y + transformed.y * piece.outputBounds.height / size.height,
+    x: piece.outputBounds.x + outputRelative.x * piece.outputBounds.width,
+    y: piece.outputBounds.y + outputRelative.y * piece.outputBounds.height,
   };
 }
 
@@ -361,6 +486,34 @@ function countColors(context, bounds) {
     }
   }
   return counts;
+}
+
+function countSelectedColors(context, bounds, colors) {
+  const image = context.getImageData(bounds.x, bounds.y, bounds.width, bounds.height).data;
+  const counts = colors.map(() => 0);
+  for (let offset = 0; offset < image.length; offset += 4) {
+    if (image[offset + 3] < 200) continue;
+    colors.forEach((color, colorIndex) => {
+      if (color.every((channel, channelIndex) => Math.abs(image[offset + channelIndex] - channel) <= 12)) {
+        counts[colorIndex] += 1;
+      }
+    });
+  }
+  return counts;
+}
+
+function normalizeCounts(counts) {
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  return counts.map((count) => count / total);
+}
+
+function countMatchingSamples(samples, colors) {
+  return samples.reduce((matches, sample, index) => (
+    sample[3] > 200
+    && colors[index].every((channel, channelIndex) => Math.abs(sample[channelIndex] - channel) <= 12)
+      ? matches + 1
+      : matches
+  ), 0);
 }
 
 function publish(result) {
@@ -390,7 +543,10 @@ try {
     if (design.kind === 'transparent-upload') continue;
     designSamples[design.id] = readPixel(
       outputContext,
-      outputPoint(piecesById[design.region], average(design.triangle)),
+      outputPointForCurrentLayout(piecesById[design.region], {
+        x: average(design.triangle).x * atlasSize,
+        y: average(design.triangle).y * atlasSize,
+      }),
     );
   }
   const upload = fixture.designs.find(({ kind }) => kind === 'transparent-upload');
@@ -402,11 +558,46 @@ try {
     x: (front.outputBounds.x + front.outputBounds.width + back.outputBounds.x) / 2,
     y: extracted.height / 2,
   };
+  const directionDesign = fixture.designs.find(({ directionMarkerColors }) => directionMarkerColors);
+  const directionMarker = getDirectionMarker(directionDesign);
+  const rawDirectionCounts = countSelectedColors(
+    atlasContext,
+    { x: 0, y: 0, width: atlasSize, height: atlasSize },
+    directionMarker.colors,
+  );
+  const outputDirectionCounts = countSelectedColors(
+    outputContext,
+    front.outputBounds,
+    directionMarker.colors,
+  );
+  const mirrorSamples = directionMarker.points.map((point) => readPixel(
+    outputContext,
+    outputPointForCounterfactual(front, point, 'mirrorX'),
+  ));
+  const rotationSamples = directionMarker.points.map((point) => readPixel(
+    outputContext,
+    outputPointForCounterfactual(front, point, 'rotation180'),
+  ));
 
   publish({
     ok: true,
     blob: { hasBytes: extracted.blob.size > 0, type: extracted.blob.type },
     designSamples,
+    directionalEvidence: {
+      counterfactualMatches: {
+        mirrorX: countMatchingSamples(mirrorSamples, directionMarker.colors),
+        rotation180: countMatchingSamples(rotationSamples, directionMarker.colors),
+      },
+      normalizedCoverage: {
+        output: normalizeCounts(outputDirectionCounts),
+        raw: normalizeCounts(rawDirectionCounts),
+      },
+      outputSamples: directionMarker.points.map((point) => readPixel(
+        outputContext,
+        outputPointForCurrentLayout(front, point),
+      )),
+      rawSamples: directionMarker.points.map((point) => readPixel(atlasContext, point)),
+    },
     gapAlpha: readPixel(outputContext, gapPoint)[3],
     pieceColorCounts,
     pieceIds: extracted.pieces.map(({ id }) => id),
@@ -421,12 +612,18 @@ try {
     })),
     rawColorCounts,
     uploadTransparency: {
-      outputCenterAlpha: readPixel(outputContext, outputPoint(front, uploadCenter))[3],
+      outputCenterAlpha: readPixel(outputContext, outputPointForCurrentLayout(front, {
+        x: uploadCenter.x * atlasSize,
+        y: uploadCenter.y * atlasSize,
+      }))[3],
       rawCenterAlpha: readPixel(atlasContext, {
         x: uploadCenter.x * atlasSize,
         y: uploadCenter.y * atlasSize,
       })[3],
-      ringAlphas: ringPoints.map((point) => readPixel(outputContext, outputPoint(front, point))[3]),
+      ringAlphas: ringPoints.map((point) => readPixel(outputContext, outputPointForCurrentLayout(front, {
+        x: point.x * atlasSize,
+        y: point.y * atlasSize,
+      }))[3]),
     },
   });
 } catch (error) {
@@ -458,4 +655,19 @@ function expectColor(actual, expected) {
     expect(Math.abs(actual[index] - channel)).toBeLessThanOrEqual(12);
   });
   expect(actual[3]).toBeGreaterThan(200);
+}
+
+function expectDirectionalEvidence(evidence) {
+  expect(evidence, '缺少可识别旋转/镜像错误的非对称像素证据。').toBeDefined();
+  evidence.rawSamples.forEach((sample, index) => {
+    expectColor(sample, DIRECTION_MARKER_COLORS[index]);
+  });
+  evidence.outputSamples.forEach((sample, index) => {
+    expectColor(sample, DIRECTION_MARKER_COLORS[index]);
+  });
+  evidence.normalizedCoverage.raw.forEach((coverage, index) => {
+    expect(evidence.normalizedCoverage.output[index]).toBeCloseTo(coverage, 1);
+  });
+  expect(evidence.counterfactualMatches.mirrorX).toBe(0);
+  expect(evidence.counterfactualMatches.rotation180).toBe(0);
 }

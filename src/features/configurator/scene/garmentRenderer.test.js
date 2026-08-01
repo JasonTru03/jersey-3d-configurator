@@ -324,6 +324,15 @@ function createProductionPreparationHarness() {
   renderer.modelUvLayoutKey = 'chelsea-jersey@1:v3';
   renderer.loadToken = Symbol('production-model-generation');
   renderer.productionGeneration = 7;
+  renderer.productionInteractionGeneration = 11;
+  renderer.pendingPrintDrag = null;
+  renderer.activePrintDrag = null;
+  renderer.isDraggingPrint = false;
+  renderer.rotationPreviewKey = null;
+  renderer.resizePreviewKey = null;
+  renderer.printLayers = new Map();
+  renderer.personalizationMutationDisabled = false;
+  renderer.decorationEditor = { isEditing: vi.fn(() => false) };
   renderer.getProductionLayers = vi.fn(() => []);
   renderer.camera = {};
   renderer.controls = {};
@@ -339,6 +348,16 @@ function createProductionPreparationHarness() {
     renderer,
     state,
   };
+}
+
+function installProductionPersonalizationLayer(renderer, key = 'text:production-test') {
+  const layer = {
+    decal: { visible: true },
+    plane: { material: { opacity: 0 } },
+  };
+  renderer.printLayers.set(key, layer);
+  renderer.restorePrintLayerFromState = vi.fn(() => true);
+  return { key, layer };
 }
 
 function createConcurrentModelLoadHarness() {
@@ -1274,6 +1293,291 @@ describe('garment decoration mesh selection', () => {
     expect(atlas.canvas).toMatchObject({ width: 0, height: 0 });
     expect(originalPatternMeshes).not.toBe(renderer.patternMeshes);
     expect(originalUvLayout).not.toBe(renderer.modelUvLayout);
+  });
+
+  it.each([
+    ['a pending print drag', (renderer) => { renderer.pendingPrintDrag = {}; }],
+    ['a rotation preview', (renderer) => {
+      const { key } = installProductionPersonalizationLayer(renderer);
+      renderer.beginPersonalizationRotation(key);
+    }],
+    ['a resize preview', (renderer) => {
+      const { key } = installProductionPersonalizationLayer(renderer);
+      renderer.beginPersonalizationResize(key);
+    }],
+    ['an artwork drag', (renderer) => {
+      renderer.decorationEditor.isEditing.mockReturnValue(true);
+    }],
+  ])('rejects production before creating artifacts while %s is active', async (_, activate) => {
+    const {
+      atlas,
+      model,
+      pieces,
+      previews,
+      renderer,
+      state,
+    } = createProductionPreparationHarness();
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockResolvedValue(atlas);
+    productionArtifactMocks.createUvPatternPieces.mockResolvedValue(pieces);
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+    activate(renderer);
+
+    await expect(renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    })).rejects.toThrow('正在编辑个性化内容，请结束编辑后重新保存。');
+
+    expect(productionArtifactMocks.createGarmentAppearanceCanvas).not.toHaveBeenCalled();
+    expect(productionArtifactMocks.bakeProductionAtlas).not.toHaveBeenCalled();
+    expect(productionArtifactMocks.createUvPatternPieces).not.toHaveBeenCalled();
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+  });
+
+  it('stops after Atlas when a rotation preview starts and remains active', async () => {
+    const atlasDeferred = deferred();
+    const { atlas, model, pieces, previews, renderer, state } = createProductionPreparationHarness();
+    const { key } = installProductionPersonalizationLayer(renderer);
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockReturnValue(atlasDeferred.promise);
+    productionArtifactMocks.createUvPatternPieces.mockResolvedValue(pieces);
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    });
+    await vi.waitFor(() => expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce());
+
+    renderer.beginPersonalizationRotation(key);
+    atlasDeferred.resolve(atlas);
+
+    await expect(preparation).rejects.toThrow('正在编辑个性化内容，请结束编辑后重新保存。');
+    expect(productionArtifactMocks.createUvPatternPieces).not.toHaveBeenCalled();
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+    expect(atlas.canvas).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it('stops after pieces when a rotation preview starts and ends during generation', async () => {
+    const piecesDeferred = deferred();
+    const { atlas, model, pieces, previews, renderer, state } = createProductionPreparationHarness();
+    const { key } = installProductionPersonalizationLayer(renderer);
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockResolvedValue(atlas);
+    productionArtifactMocks.createUvPatternPieces.mockReturnValue(piecesDeferred.promise);
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    });
+    await vi.waitFor(() => expect(productionArtifactMocks.createUvPatternPieces).toHaveBeenCalledOnce());
+
+    renderer.beginPersonalizationRotation(key);
+    renderer.cancelPersonalizationRotationPreview();
+    piecesDeferred.resolve(pieces);
+
+    await expect(preparation).rejects.toThrow('设计已发生变化，请重新保存。');
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+    expect(atlas.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(pieces.canvas).toMatchObject({ width: 0, height: 0 });
+  });
+
+  it('allows camera orbit during production because export uses fixed capture views', async () => {
+    const atlasDeferred = deferred();
+    const { atlas, model, pieces, previews, renderer, state } = createProductionPreparationHarness();
+    renderer.camera = { position: { x: 0 } };
+    renderer.controls = { target: { x: 0 } };
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockReturnValue(atlasDeferred.promise);
+    productionArtifactMocks.createUvPatternPieces.mockResolvedValue(pieces);
+    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: structuredClone(model),
+      stateSnapshot: structuredClone(state),
+    });
+    await vi.waitFor(() => expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce());
+
+    renderer.camera.position.x = 3;
+    renderer.controls.target.x = -2;
+    atlasDeferred.resolve(atlas);
+
+    await expect(preparation).resolves.toEqual({
+      atlas,
+      legacyBakeMetadata: null,
+      pieces,
+      previews,
+    });
+  });
+
+  it('advances the production interaction generation across rotation and resize previews', () => {
+    const { renderer } = createProductionPreparationHarness();
+    const { key } = installProductionPersonalizationLayer(renderer);
+    renderer.state.overrides.customTextItems = [{
+      id: 'production-test',
+      placement: null,
+      rotation: 0,
+      scale: 1,
+      text: 'TEST',
+    }];
+    renderer.applyStoredPrintPlacement = vi.fn();
+    renderer.syncPrintAnchor = vi.fn();
+
+    const initialGeneration = renderer.productionInteractionGeneration;
+    expect(renderer.beginPersonalizationRotation(key)).toBe(true);
+    expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 1);
+    expect(renderer.previewPersonalizationRotation(key, 20)).toBe(true);
+    expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 2);
+    expect(renderer.cancelPersonalizationRotationPreview()).toBe(true);
+    expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 3);
+
+    expect(renderer.beginPersonalizationResize(key)).toBe(true);
+    expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 4);
+    expect(renderer.previewPersonalizationScale(key, 1.2)).toBe(true);
+    expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 5);
+    expect(renderer.cancelPersonalizationResizePreview(key)).toBe(true);
+    expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 6);
+  });
+
+  it('advances the production interaction generation across a print drag and cancel', () => {
+    const key = 'text:production-drag';
+    const plane = new THREE.Object3D();
+    plane.material = { opacity: 0 };
+    plane.userData = { printId: key, rotation: 0 };
+    const layer = { decal: { visible: true }, plane };
+    const renderer = createPointerRenderer({
+      printHit: {
+        object: plane,
+        point: new THREE.Vector3(0, 0, 0),
+      },
+    });
+    renderer.printLayers.set(key, layer);
+    renderer.isPrintEditable = vi.fn(() => true);
+    renderer.restorePrintLayerFromState = vi.fn(() => true);
+    renderer.pickJersey = vi.fn(() => ({
+      face: { normal: new THREE.Vector3(0, 0, 1) },
+      object: { matrixWorld: new THREE.Matrix4() },
+      point: new THREE.Vector3(0.25, 0.3, 0.5),
+    }));
+
+    try {
+      const initialGeneration = renderer.productionInteractionGeneration;
+      renderer.handlePointerDown(pointerEvent(100, 100));
+      expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 1);
+      renderer.handlePointerMove(pointerEvent(120, 125));
+      expect(renderer.productionInteractionGeneration).toBeGreaterThan(initialGeneration + 1);
+      renderer.handlePointerCancel();
+      expect(renderer.productionInteractionGeneration).toBeGreaterThan(initialGeneration + 2);
+    } finally {
+      renderer.printLayers.clear();
+      renderer.dispose();
+    }
+  });
+
+  it('advances the production interaction generation across an artwork drag', () => {
+    let artworkEditing = false;
+    const renderer = createPointerRenderer({ decorationHit: true });
+    renderer.decorationEditor.handlePointerDown.mockImplementation(() => {
+        artworkEditing = true;
+        return true;
+      });
+    renderer.decorationEditor.handlePointerMove.mockReturnValue(true);
+    renderer.decorationEditor.handlePointerUp.mockImplementation(() => {
+        artworkEditing = false;
+        return true;
+      });
+    renderer.decorationEditor.isEditing.mockImplementation(() => artworkEditing);
+
+    try {
+      const initialGeneration = renderer.productionInteractionGeneration;
+      renderer.handlePointerDown(pointerEvent(100, 100));
+      expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 1);
+      renderer.handlePointerMove(pointerEvent(120, 125));
+      expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 2);
+      renderer.handlePointerUp();
+      expect(renderer.productionInteractionGeneration).toBe(initialGeneration + 3);
+    } finally {
+      renderer.dispose();
+    }
+  });
+
+  it('cancels every live production interaction on window blur', () => {
+    const addEventListener = vi.spyOn(window, 'addEventListener');
+    const removeEventListener = vi.spyOn(window, 'removeEventListener');
+    const renderer = createPointerRenderer();
+    const key = 'text:blur-test';
+    renderer.productionInteractionGeneration = 4;
+    renderer.pendingPrintDrag = {};
+    renderer.activePrintDrag = {};
+    renderer.isDraggingPrint = true;
+    renderer.rotationPreviewKey = key;
+    renderer.resizePreviewKey = key;
+    renderer.printLayers.set(key, {
+      decal: { visible: false },
+      plane: { material: { opacity: 1 }, userData: { personalizationKey: key } },
+    });
+    renderer.restorePrintLayerFromState = vi.fn(() => true);
+
+    try {
+      expect(addEventListener).toHaveBeenCalledWith('blur', renderer.handlePointerCancel);
+
+      renderer.handlePointerCancel();
+
+      expect(renderer.pendingPrintDrag).toBeNull();
+      expect(renderer.activePrintDrag).toBeNull();
+      expect(renderer.isDraggingPrint).toBe(false);
+      expect(renderer.rotationPreviewKey).toBeNull();
+      expect(renderer.resizePreviewKey).toBeNull();
+      expect(renderer.productionInteractionGeneration).toBeGreaterThan(4);
+    } finally {
+      renderer.printLayers.clear();
+      renderer.dispose();
+      expect(removeEventListener).toHaveBeenCalledWith('blur', renderer.handlePointerCancel);
+      addEventListener.mockRestore();
+      removeEventListener.mockRestore();
+    }
+  });
+
+  it('clears a resize preview generation when its print layer is removed', () => {
+    const renderer = Object.create(GarmentRenderer.prototype);
+    const key = 'text:removed-preview';
+    renderer.state = { overrides: { customTextItems: [], printItems: [] } };
+    renderer.printLayers = new Map([[key, {}]]);
+    renderer.activePrintId = null;
+    renderer.rotationPreviewKey = null;
+    renderer.resizePreviewKey = key;
+    renderer.productionInteractionGeneration = 6;
+    renderer.pendingPrintDrag = null;
+    renderer.activePrintDrag = null;
+    renderer.isDraggingPrint = false;
+    renderer.pendingPersonalizationConstraints = new Map();
+    renderer.controls = { enabled: false };
+    renderer.getRenderablePrintItems = vi.fn(() => []);
+    renderer.disposePrintLayerEntry = vi.fn();
+    renderer.flushPersonalizationNormalizationBatch = vi.fn();
+    renderer.syncPrintAnchor = vi.fn();
+
+    renderer.updatePrintLayer();
+
+    expect(renderer.resizePreviewKey).toBeNull();
+    expect(renderer.productionInteractionGeneration).toBe(7);
   });
 
   it('stops after pieces when the design drifts and releases both completed artifacts', async () => {

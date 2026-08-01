@@ -166,6 +166,7 @@ export class GarmentRenderer {
     this.pendingModelIdentity = null;
     this.pendingModelLoadToken = null;
     this.productionGeneration = 0;
+    this.productionInteractionGeneration = 0;
     this.textureLoader = new THREE.TextureLoader();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -176,6 +177,7 @@ export class GarmentRenderer {
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
     this.rotationPreviewKey = null;
+    this.resizePreviewKey = null;
     this.pendingPersonalizationConstraints = new Map();
     this.personalizationNormalizationBatch = null;
     this.personalizationMutationDisabled = false;
@@ -195,6 +197,7 @@ export class GarmentRenderer {
     this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove);
     window.addEventListener('pointerup', this.handlePointerUp);
     window.addEventListener('pointercancel', this.handlePointerCancel);
+    window.addEventListener('blur', this.handlePointerCancel);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.resize();
@@ -335,6 +338,7 @@ export class GarmentRenderer {
 
   dispose() {
     cancelAnimationFrame(this.frame);
+    this.handlePointerCancel();
     this.loadToken = Symbol('disposed');
     this.modelReadiness?.reject(new Error('3D 渲染器已关闭。'));
     this.bottomPatternRequest = Symbol('disposed-bottom-pattern');
@@ -349,6 +353,7 @@ export class GarmentRenderer {
     this.renderer?.domElement.removeEventListener('pointermove', this.handlePointerMove);
     window.removeEventListener('pointerup', this.handlePointerUp);
     window.removeEventListener('pointercancel', this.handlePointerCancel);
+    window.removeEventListener('blur', this.handlePointerCancel);
     this.disposeAppearanceTexture();
     this.disposeBottomPatternTexture();
     this.disposeGroup(this.root);
@@ -359,14 +364,7 @@ export class GarmentRenderer {
   }
 
   async loadModel(modelUrl) {
-    this.cancelPersonalizationRotationPreview();
-    if (this.isDraggingPrint) {
-      this.restorePrintLayerFromState(this.printLayers.get(this.activePrintId));
-    }
-    this.pendingPrintDrag = null;
-    this.activePrintDrag = null;
-    this.isDraggingPrint = false;
-    this.controls.enabled = true;
+    this.handlePointerCancel();
     const loadToken = Symbol(modelUrl);
     this.loadToken = loadToken;
     this.modelReadiness?.reject(new Error('服装模型加载请求已被替换。'));
@@ -606,14 +604,7 @@ export class GarmentRenderer {
   setPersonalizationMutationDisabled(disabled) {
     this.personalizationMutationDisabled = Boolean(disabled);
     if (!this.personalizationMutationDisabled) return;
-    this.cancelPersonalizationRotationPreview();
-    if (this.isDraggingPrint) {
-      this.restorePrintLayerFromState(this.printLayers.get(this.activePrintId));
-    }
-    this.pendingPrintDrag = null;
-    this.activePrintDrag = null;
-    this.isDraggingPrint = false;
-    this.controls.enabled = true;
+    this.handlePointerCancel();
   }
 
   async updateBottomPattern() {
@@ -699,6 +690,7 @@ export class GarmentRenderer {
 
   async prepareProductionArtifacts({ model, stateSnapshot }) {
     await this.waitForProductionReady();
+    this.assertProductionInteractionStable();
     const productionIdentity = captureProductionIdentity(this);
     this.assertProductionSnapshot(model, stateSnapshot, productionIdentity);
 
@@ -759,6 +751,7 @@ export class GarmentRenderer {
   }
 
   assertProductionSnapshot(model, stateSnapshot, productionIdentity = null) {
+    this.assertProductionInteractionStable();
     const currentModel = this.product?.model;
     const modelMatches = (
       model?.id === currentModel?.id
@@ -779,6 +772,25 @@ export class GarmentRenderer {
     ) {
       throw new Error('设计已发生变化，请重新保存。');
     }
+  }
+
+  assertProductionInteractionStable() {
+    if (!this.isProductionInteractionStable()) {
+      throw new Error('正在编辑个性化内容，请结束编辑后重新保存。');
+    }
+  }
+
+  isProductionInteractionStable() {
+    return !this.pendingPrintDrag
+      && !this.activePrintDrag
+      && !this.isDraggingPrint
+      && !this.rotationPreviewKey
+      && !this.resizePreviewKey
+      && !this.decorationEditor?.isEditing?.();
+  }
+
+  markProductionInteractionChange() {
+    this.productionInteractionGeneration = (this.productionInteractionGeneration ?? 0) + 1;
   }
 
   setProductionCaptureMode(enabled) {
@@ -887,17 +899,28 @@ export class GarmentRenderer {
     const activeLayerWillBeRestored = this.activePrintId !== null
       && keys.has(this.activePrintId)
       && !this.printLayers.has(this.activePrintId);
+    let interactionCleared = false;
     this.printLayers.forEach((layer, key) => {
       if (keys.has(key)) return;
       this.disposePrintLayerEntry(layer);
       this.printLayers.delete(key);
       this.pendingPersonalizationConstraints.delete(key);
-      if (this.rotationPreviewKey === key) this.rotationPreviewKey = null;
+      if (this.rotationPreviewKey === key) {
+        this.rotationPreviewKey = null;
+        interactionCleared = true;
+      }
+      if (this.resizePreviewKey === key) {
+        this.resizePreviewKey = null;
+        interactionCleared = true;
+      }
     });
     this.personalizationNormalizationBatch = new Map();
     printItems.forEach((item) => this.updatePrintLayerEntry(item));
     this.flushPersonalizationNormalizationBatch();
     if (activeLayerWasRemoved || !printItems.length) {
+      if (this.pendingPrintDrag || this.activePrintDrag || this.isDraggingPrint) {
+        interactionCleared = true;
+      }
       this.isDraggingPrint = false;
       this.pendingPrintDrag = null;
       this.activePrintDrag = null;
@@ -908,6 +931,7 @@ export class GarmentRenderer {
       }
     }
     if (activeLayerWillBeRestored) this.syncPrintAnchor();
+    if (interactionCleared) this.markProductionInteractionChange();
   }
 
   updatePrintLayerEntry(item) {
@@ -968,7 +992,7 @@ export class GarmentRenderer {
       layer.alphaMask = getPersonalizationAlphaMask(layer.texture.image);
     }
     this.applyStoredPrintPlacement(layer.plane, item);
-    if (this.rotationPreviewKey === item.key) {
+    if (this.rotationPreviewKey === item.key || this.resizePreviewKey === item.key) {
       layer.plane.material.opacity = 1;
       layer.decal.visible = false;
       return;
@@ -1303,6 +1327,7 @@ export class GarmentRenderer {
     this.rotationPreviewKey = key;
     layer.plane.material.opacity = 1;
     layer.decal.visible = false;
+    this.markProductionInteractionChange();
     return true;
   }
 
@@ -1317,12 +1342,14 @@ export class GarmentRenderer {
       rotation: ((previewRotation % 360) + 360) % 360,
     });
     this.syncPrintAnchor();
+    this.markProductionInteractionChange();
     return true;
   }
 
   endPersonalizationRotation(key, rotation) {
     if (this.rotationPreviewKey !== key) return false;
     this.rotationPreviewKey = null;
+    this.markProductionInteractionChange();
     const layer = this.printLayers.get(key);
     const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
     if (!layer || !item) return false;
@@ -1337,29 +1364,40 @@ export class GarmentRenderer {
     const key = this.rotationPreviewKey;
     if (!key) return false;
     this.rotationPreviewKey = null;
+    this.markProductionInteractionChange();
     return this.restorePrintLayerFromState(this.printLayers.get(key));
   }
 
   beginPersonalizationResize(key) {
     if (this.personalizationMutationDisabled) return false;
+    if (this.resizePreviewKey && this.resizePreviewKey !== key) {
+      this.cancelPersonalizationResizePreview(this.resizePreviewKey);
+    }
     const layer = this.printLayers.get(key);
     if (!layer) return false;
+    this.resizePreviewKey = key;
     layer.plane.material.opacity = 1;
     layer.decal.visible = false;
+    this.markProductionInteractionChange();
     return true;
   }
 
   previewPersonalizationScale(key, scale) {
+    if (this.resizePreviewKey !== key) return false;
     const layer = this.printLayers.get(key);
     const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
     const previewScale = Number(scale);
     if (!layer || !item || !Number.isFinite(previewScale)) return false;
     this.applyStoredPrintPlacement(layer.plane, { ...item, scale: previewScale });
     this.syncPrintAnchor();
+    this.markProductionInteractionChange();
     return true;
   }
 
   endPersonalizationResize(key, scale) {
+    if (this.resizePreviewKey !== key) return null;
+    this.resizePreviewKey = null;
+    this.markProductionInteractionChange();
     const layer = this.printLayers.get(key);
     const item = findPersonalizationItem(getSelectablePersonalizationItems(this.state), key);
     const finalScale = Number(scale);
@@ -1368,6 +1406,9 @@ export class GarmentRenderer {
   }
 
   cancelPersonalizationResizePreview(key) {
+    if (this.resizePreviewKey !== key) return false;
+    this.resizePreviewKey = null;
+    this.markProductionInteractionChange();
     return this.restorePrintLayerFromState(this.printLayers.get(key));
   }
 
@@ -1455,6 +1496,7 @@ export class GarmentRenderer {
           grabOffset: printHit.object.worldToLocal(printHit.point.clone()),
           rotation: printHit.object.userData.rotation ?? 0,
         };
+        this.markProductionInteractionChange();
       }
       event.preventDefault();
       return;
@@ -1462,6 +1504,7 @@ export class GarmentRenderer {
     if (action === 'decoration') {
       this.pendingDecorationDeselect = null;
       this.controls.enabled = false;
+      this.markProductionInteractionChange();
       event.preventDefault();
       return;
     }
@@ -1478,6 +1521,7 @@ export class GarmentRenderer {
 
   handlePointerMove = (event) => {
     if (this.decorationEditor?.handlePointerMove(event)) {
+      this.markProductionInteractionChange();
       event.preventDefault();
       return;
     }
@@ -1492,6 +1536,7 @@ export class GarmentRenderer {
       this.isDraggingPrint = true;
       this.controls.enabled = false;
       this.setPrintLayerDragging(this.printLayers.get(this.activePrintId), true);
+      this.markProductionInteractionChange();
     }
     if (!this.isDraggingPrint || !this.printPlane) return;
     const hit = this.pickJersey(event);
@@ -1502,10 +1547,12 @@ export class GarmentRenderer {
       this.activePrintDrag = { ...this.activePrintDrag, latestSurface };
     }
     this.placePrintAtIntersection(hit, false);
+    this.markProductionInteractionChange();
   };
 
   handlePointerUp = () => {
     if (this.decorationEditor?.handlePointerUp()) {
+      this.markProductionInteractionChange();
       this.pendingDecorationDeselect = null;
       this.controls.enabled = shouldEnableOrbitControls({
         isDraggingDecoration: this.decorationEditor.isEditing(),
@@ -1516,8 +1563,12 @@ export class GarmentRenderer {
     const shouldDeselectDecoration = Boolean(this.pendingDecorationDeselect);
     this.pendingDecorationDeselect = null;
     if (shouldDeselectDecoration) this.decorationEditor?.clearSelection();
+    const hadPendingPrintDrag = Boolean(this.pendingPrintDrag);
     this.pendingPrintDrag = null;
-    if (!this.isDraggingPrint) return;
+    if (!this.isDraggingPrint) {
+      if (hadPendingPrintDrag) this.markProductionInteractionChange();
+      return;
+    }
     this.isDraggingPrint = false;
     this.controls.enabled = true;
     const activeLayer = this.printLayers.get(this.activePrintId);
@@ -1539,17 +1590,27 @@ export class GarmentRenderer {
       : null;
     if (finalItem) this.emitPersonalizationItem(finalItem);
     this.activePrintDrag = null;
+    this.markProductionInteractionChange();
   };
 
   handlePointerCancel = () => {
-    this.decorationEditor?.handlePointerCancel?.();
+    const decorationCancelled = this.decorationEditor?.handlePointerCancel?.() ?? false;
+    const hadPrintInteraction = Boolean(
+      this.pendingPrintDrag || this.activePrintDrag || this.isDraggingPrint,
+    );
+    const rotationPreviewKey = this.rotationPreviewKey;
+    const resizePreviewKey = this.resizePreviewKey;
     this.pendingDecorationDeselect = null;
     this.pendingPrintDrag = null;
     this.activePrintDrag = null;
     this.isDraggingPrint = false;
+    if (rotationPreviewKey) this.cancelPersonalizationRotationPreview();
+    if (resizePreviewKey) this.cancelPersonalizationResizePreview(resizePreviewKey);
     this.restorePrintLayerFromState(this.printLayers.get(this.activePrintId));
+    if (hadPrintInteraction) this.markProductionInteractionChange();
+    if (decorationCancelled) this.markProductionInteractionChange();
     this.controls.enabled = shouldEnableOrbitControls({
-      isDraggingDecoration: this.decorationEditor?.isEditing(),
+      isDraggingDecoration: this.decorationEditor?.isEditing?.(),
       isDraggingPrint: this.isDraggingPrint,
     });
   };
@@ -2019,6 +2080,7 @@ function capturePrintState(renderer) {
     }])),
     pendingPrintDrag: renderer.pendingPrintDrag,
     rotationPreviewKey: renderer.rotationPreviewKey,
+    resizePreviewKey: renderer.resizePreviewKey,
   };
 }
 
@@ -2052,6 +2114,7 @@ function restorePrintState(renderer, snapshot) {
   renderer.pendingPrintDrag = snapshot.pendingPrintDrag;
   renderer.activePrintDrag = snapshot.activePrintDrag;
   renderer.rotationPreviewKey = snapshot.rotationPreviewKey;
+  renderer.resizePreviewKey = snapshot.resizePreviewKey;
 }
 
 function getAppearanceTextureKey(appearance, modelUvLayoutKey = null) {
@@ -2082,6 +2145,7 @@ function captureProductionIdentity(renderer) {
     patternMeshes: renderer.patternMeshes,
     productModel: renderer.product?.model,
     productionGeneration: renderer.productionGeneration,
+    productionInteractionGeneration: renderer.productionInteractionGeneration,
     renderer: renderer.renderer,
     scene: renderer.scene,
     selectedAppearance: renderer.selected?.appearance,
@@ -2101,6 +2165,7 @@ function productionIdentityMatches(renderer, identity) {
     && renderer.patternMeshes === identity.patternMeshes
     && renderer.product?.model === identity.productModel
     && renderer.productionGeneration === identity.productionGeneration
+    && renderer.productionInteractionGeneration === identity.productionInteractionGeneration
     && renderer.renderer === identity.renderer
     && renderer.scene === identity.scene
     && renderer.selected?.appearance === identity.selectedAppearance

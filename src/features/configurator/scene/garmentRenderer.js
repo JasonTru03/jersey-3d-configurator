@@ -14,6 +14,7 @@ import { createGarmentAppearanceCanvas } from './garmentAppearanceTexture.js';
 import { bakeBottomPatternAtlas } from './bottomPatternBaker.js';
 import { bakeProductionAtlas } from './productionAtlasBaker.js';
 import { captureProductionPreviews } from './productionPreviewCapture.js';
+import { createUvPatternPieces } from './uvPatternPieces.js';
 import { CUSTOM_TEXT_CANVAS_ASPECT, makeCustomTextCanvas } from './customTextTexture.js';
 import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
@@ -709,28 +710,43 @@ export class GarmentRenderer {
     if (this.state.overrides?.bottomPattern?.enabled && !legacyPatternCanvas) {
       throw new Error('旧版连续底纹尚未准备完成。');
     }
-    const atlas = await bakeProductionAtlas({
-      appearanceCanvas,
-      atlasSize: model.uvAtlasSize,
-      garmentMeshes: this.decorationMeshes,
-      layers: this.getProductionLayers(),
-      legacyPatternCanvas,
-    });
-    const previews = await captureProductionPreviews({
-      camera: this.camera,
-      controls: this.controls,
-      renderer: this.renderer,
-      scene: this.scene,
-      setProductionCaptureMode: (enabled) => this.setProductionCaptureMode(enabled),
-    });
+    let atlas;
+    let pieces;
+    let previews;
+    try {
+      atlas = await bakeProductionAtlas({
+        appearanceCanvas,
+        atlasSize: model.uvAtlasSize,
+        garmentMeshes: this.decorationMeshes,
+        layers: this.getProductionLayers(),
+        legacyPatternCanvas,
+      });
+      pieces = await createUvPatternPieces({
+        atlasCanvas: atlas.canvas,
+        atlasSize: model.uvAtlasSize,
+        meshes: this.patternMeshes,
+        uvLayout: this.modelUvLayout,
+      });
+      previews = await captureProductionPreviews({
+        camera: this.camera,
+        controls: this.controls,
+        renderer: this.renderer,
+        scene: this.scene,
+        setProductionCaptureMode: (enabled) => this.setProductionCaptureMode(enabled),
+      });
 
-    this.assertProductionSnapshot(model, stateSnapshot);
-    return {
-      atlas,
-      legacyBakeMetadata: this.bottomPatternTexture
-        ?.userData?.bottomPatternBakeMetadata ?? null,
-      previews,
-    };
+      this.assertProductionSnapshot(model, stateSnapshot);
+      return {
+        atlas,
+        legacyBakeMetadata: this.bottomPatternTexture
+          ?.userData?.bottomPatternBakeMetadata ?? null,
+        pieces,
+        previews,
+      };
+    } catch (error) {
+      releaseProductionArtifactCanvases(atlas, pieces, previews?.front, previews?.back);
+      throw error;
+    }
   }
 
   assertProductionSnapshot(model, stateSnapshot) {
@@ -2030,6 +2046,14 @@ function getAppearanceTextureKey(appearance, modelUvLayoutKey = null) {
     template: appearance.template,
     colors: Object.entries(appearance.colors ?? {}).sort(([first], [second]) => first.localeCompare(second)),
     modelUvLayout: modelUvLayoutKey ?? 'legacy',
+  });
+}
+
+function releaseProductionArtifactCanvases(...artifacts) {
+  artifacts.forEach((artifact) => {
+    if (!artifact?.canvas) return;
+    artifact.canvas.width = 0;
+    artifact.canvas.height = 0;
   });
 }
 

@@ -89,6 +89,9 @@ vi.mock('../scene/garmentRenderer.js', async (importOriginal) => {
 
       prepareProductionArtifacts(request) {
         rendererHarness.productionRequests.push(request);
+        if (typeof rendererHarness.productionResult === 'function') {
+          return rendererHarness.productionResult(request);
+        }
         return rendererHarness.productionResult;
       }
 
@@ -644,6 +647,58 @@ describe('ConfiguratorPage', () => {
 
     expect(firstProvider).toEqual(expect.any(Function));
     expect(productionPackageHarness.requests[1].artifactProvider).toBe(firstProvider);
+  });
+
+  it('keeps Save disabled until Atlas, pieces, PDF, and ZIP generation all finish', async () => {
+    const atlasDeferred = createDeferred();
+    const piecesDeferred = createDeferred();
+    const pdfDeferred = createDeferred();
+    const zipDeferred = createDeferred();
+    rendererHarness.productionResult = async () => {
+      await atlasDeferred.promise;
+      await piecesDeferred.promise;
+      return { atlas: {}, pieces: {}, previews: {} };
+    };
+    productionPackageHarness.result = async (request) => {
+      await request.artifactProvider({ model: {}, stateSnapshot: {} });
+      await pdfDeferred.promise;
+      await zipDeferred.promise;
+      return createProductionResult();
+    };
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    const save = await getReadySaveButton();
+    fireEvent.click(save);
+    expect(save).toBeDisabled();
+    expect(downloadClick).not.toHaveBeenCalled();
+
+    await act(async () => {
+      atlasDeferred.resolve();
+      await atlasDeferred.promise;
+    });
+    expect(save).toBeDisabled();
+
+    await act(async () => {
+      piecesDeferred.resolve();
+      await piecesDeferred.promise;
+    });
+    expect(save).toBeDisabled();
+
+    await act(async () => {
+      pdfDeferred.resolve();
+      await pdfDeferred.promise;
+    });
+    expect(save).toBeDisabled();
+    expect(screen.queryByRole('link', { name: 'Download production ZIP' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      zipDeferred.resolve();
+      await zipDeferred.promise;
+    });
+    expect(await screen.findByRole('link', { name: 'Download production ZIP' })).toBeInTheDocument();
+    expect(save).toBeEnabled();
+    expect(downloadClick).not.toHaveBeenCalled();
   });
 
   it('disables duplicate saves and discards a production ZIP when the design changes while generation is pending', async () => {

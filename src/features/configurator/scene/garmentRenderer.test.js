@@ -3,6 +3,7 @@ const productionArtifactMocks = vi.hoisted(() => ({
   bakeProductionAtlas: vi.fn(),
   captureProductionPreviews: vi.fn(),
   createGarmentAppearanceCanvas: vi.fn(),
+  createUvPatternPieces: vi.fn(),
 }));
 vi.mock('gsap', () => ({
   default: {
@@ -33,6 +34,9 @@ vi.mock('./productionAtlasBaker.js', () => ({
 }));
 vi.mock('./productionPreviewCapture.js', () => ({
   captureProductionPreviews: productionArtifactMocks.captureProductionPreviews,
+}));
+vi.mock('./uvPatternPieces.js', () => ({
+  createUvPatternPieces: productionArtifactMocks.createUvPatternPieces,
 }));
 vi.mock('./garmentAppearanceTexture.js', async () => {
   const actual = await vi.importActual('./garmentAppearanceTexture.js');
@@ -191,6 +195,16 @@ function deferred() {
   let resolve;
   const promise = new Promise((nextResolve) => { resolve = nextResolve; });
   return { promise, resolve };
+}
+
+function createMinimalPngBlob(width, height) {
+  const bytes = new Uint8Array(24);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  bytes.set([0, 0, 0, 13, 73, 72, 68, 82], 8);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return new Blob([bytes], { type: 'image/png' });
 }
 
 function createConcurrentModelLoadHarness() {
@@ -939,19 +953,144 @@ describe('garment decoration mesh selection', () => {
     }, structuredClone(renderer.state))).toThrow('设计已发生变化，请重新保存。');
   });
 
-  it('captures production previews only after the asynchronous atlas bake finishes', async () => {
-    let finishBake;
-    const atlasPromise = new Promise((resolve) => {
-      finishBake = resolve;
-    });
-    const atlas = { blob: new Blob(['atlas']) };
-    const previews = { front: new Blob(['front']), back: new Blob(['back']) };
+  it('creates pattern pieces after Atlas baking and before production previews', async () => {
+    const atlasDeferred = deferred();
+    const piecesDeferred = deferred();
+    const previewsDeferred = deferred();
+    const events = [];
+    const atlas = {
+      blob: createMinimalPngBlob(4096, 4096),
+      canvas: { id: 'atlas', width: 4096, height: 4096 },
+      height: 4096,
+      width: 4096,
+    };
+    const pieces = {
+      blob: createMinimalPngBlob(4096, 4096),
+      canvas: { id: 'pieces', width: 4096, height: 4096 },
+      height: 4096,
+      layoutFingerprint: 'uv-pieces-v3-test',
+      pieces: [{ id: 'front' }, { id: 'back' }],
+      width: 4096,
+    };
+    const previews = {
+      front: { blob: createMinimalPngBlob(1600, 1600), canvas: { width: 1600, height: 1600 }, width: 1600, height: 1600 },
+      back: { blob: createMinimalPngBlob(1600, 1600), canvas: { width: 1600, height: 1600 }, width: 1600, height: 1600 },
+    };
     productionArtifactMocks.bakeProductionAtlas.mockReset();
     productionArtifactMocks.captureProductionPreviews.mockReset();
     productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
     productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
-    productionArtifactMocks.bakeProductionAtlas.mockReturnValue(atlasPromise);
-    productionArtifactMocks.captureProductionPreviews.mockResolvedValue(previews);
+    productionArtifactMocks.bakeProductionAtlas.mockImplementation(async () => {
+      events.push('atlas:start');
+      const result = await atlasDeferred.promise;
+      events.push('atlas:end');
+      return result;
+    });
+    productionArtifactMocks.createUvPatternPieces.mockImplementation(async () => {
+      events.push('pieces:start');
+      const result = await piecesDeferred.promise;
+      events.push('pieces:end');
+      return result;
+    });
+    productionArtifactMocks.captureProductionPreviews.mockImplementation(async () => {
+      events.push('previews:start');
+      const result = await previewsDeferred.promise;
+      events.push('previews:end');
+      return result;
+    });
+
+    const renderer = Object.create(GarmentRenderer.prototype);
+    renderer.waitForProductionReady = vi.fn();
+    renderer.assertProductionSnapshot = vi.fn(() => events.push('snapshot'));
+    renderer.selected = {
+      appearance: { template: 'solid', colors: { body: '#F7F5EF' } },
+    };
+    renderer.state = { overrides: { bottomPattern: { enabled: false } } };
+    renderer.decorationMeshes = [];
+    renderer.patternMeshes = [{ name: 'front-mesh' }];
+    const validatedUvLayout = { version: 3, pieceGroups: [] };
+    renderer.modelUvLayout = validatedUvLayout;
+    renderer.getProductionLayers = vi.fn(() => []);
+    renderer.camera = {};
+    renderer.controls = {};
+    renderer.renderer = {};
+    renderer.scene = {};
+    renderer.setProductionCaptureMode = vi.fn();
+
+    const preparation = renderer.prepareProductionArtifacts({
+      model: { uvAtlasSize: 4096 },
+      stateSnapshot: {},
+    });
+    await Promise.resolve();
+
+    expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce();
+    expect(productionArtifactMocks.createGarmentAppearanceCanvas).toHaveBeenCalledWith(
+      4096,
+      renderer.selected.appearance,
+      { modelMeshes: renderer.patternMeshes, uvLayout: renderer.modelUvLayout },
+    );
+    expect(productionArtifactMocks.createUvPatternPieces).not.toHaveBeenCalled();
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+    expect(events).toEqual(['snapshot', 'atlas:start']);
+
+    atlasDeferred.resolve(atlas);
+    await vi.waitFor(() => expect(productionArtifactMocks.createUvPatternPieces).toHaveBeenCalledOnce());
+    const pieceRequest = productionArtifactMocks.createUvPatternPieces.mock.calls[0][0];
+    expect(pieceRequest).toEqual(expect.objectContaining({ atlasSize: 4096 }));
+    expect(pieceRequest.atlasCanvas).toBe(atlas.canvas);
+    expect(pieceRequest.meshes).toBe(renderer.patternMeshes);
+    expect(pieceRequest.uvLayout).toBe(validatedUvLayout);
+    expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
+    expect(events).toEqual(['snapshot', 'atlas:start', 'atlas:end', 'pieces:start']);
+
+    piecesDeferred.resolve(pieces);
+    await vi.waitFor(() => expect(productionArtifactMocks.captureProductionPreviews).toHaveBeenCalledOnce());
+    expect(events).toEqual([
+      'snapshot',
+      'atlas:start',
+      'atlas:end',
+      'pieces:start',
+      'pieces:end',
+      'previews:start',
+    ]);
+
+    previewsDeferred.resolve(previews);
+    await expect(preparation).resolves.toEqual({
+      atlas,
+      legacyBakeMetadata: null,
+      pieces,
+      previews,
+    });
+    expect(productionArtifactMocks.captureProductionPreviews).toHaveBeenCalledOnce();
+    expect(renderer.assertProductionSnapshot).toHaveBeenCalledTimes(2);
+    expect(events).toEqual([
+      'snapshot',
+      'atlas:start',
+      'atlas:end',
+      'pieces:start',
+      'pieces:end',
+      'previews:start',
+      'previews:end',
+      'snapshot',
+    ]);
+  });
+
+  it('rejects piece extraction without exposing previews or retaining the partial Atlas', async () => {
+    const extractionError = new Error('UV 裁片提取失败。');
+    const atlas = {
+      blob: createMinimalPngBlob(4096, 4096),
+      canvas: { width: 4096, height: 4096 },
+      height: 4096,
+      width: 4096,
+    };
+    productionArtifactMocks.bakeProductionAtlas.mockReset();
+    productionArtifactMocks.captureProductionPreviews.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReset();
+    productionArtifactMocks.createUvPatternPieces.mockReset();
+    productionArtifactMocks.createGarmentAppearanceCanvas.mockReturnValue({});
+    productionArtifactMocks.bakeProductionAtlas.mockResolvedValue(atlas);
+    productionArtifactMocks.createUvPatternPieces.mockRejectedValue(extractionError);
 
     const renderer = Object.create(GarmentRenderer.prototype);
     renderer.waitForProductionReady = vi.fn();
@@ -964,30 +1103,17 @@ describe('garment decoration mesh selection', () => {
     renderer.patternMeshes = [{ name: 'front-mesh' }];
     renderer.modelUvLayout = { version: 3, pieceGroups: [] };
     renderer.getProductionLayers = vi.fn(() => []);
-    renderer.camera = {};
-    renderer.controls = {};
-    renderer.renderer = {};
-    renderer.scene = {};
-    renderer.setProductionCaptureMode = vi.fn();
 
-    const preparation = renderer.prepareProductionArtifacts({
-      model: { uvAtlasSize: 64 },
+    let exposedArtifacts;
+    await expect(renderer.prepareProductionArtifacts({
+      model: { uvAtlasSize: 4096 },
       stateSnapshot: {},
-    });
-    await Promise.resolve();
+    }).then((result) => { exposedArtifacts = result; })).rejects.toBe(extractionError);
 
-    expect(productionArtifactMocks.bakeProductionAtlas).toHaveBeenCalledOnce();
-    expect(productionArtifactMocks.createGarmentAppearanceCanvas).toHaveBeenCalledWith(
-      64,
-      renderer.selected.appearance,
-      { modelMeshes: renderer.patternMeshes, uvLayout: renderer.modelUvLayout },
-    );
+    expect(exposedArtifacts).toBeUndefined();
     expect(productionArtifactMocks.captureProductionPreviews).not.toHaveBeenCalled();
-
-    finishBake(atlas);
-    await expect(preparation).resolves.toMatchObject({ atlas, previews });
-    expect(productionArtifactMocks.captureProductionPreviews).toHaveBeenCalledOnce();
-    expect(renderer.assertProductionSnapshot).toHaveBeenCalledTimes(2);
+    expect(renderer.assertProductionSnapshot).toHaveBeenCalledOnce();
+    expect(atlas.canvas).toEqual({ width: 0, height: 0 });
   });
 
   it('does not treat derived bottom-pattern bake metadata as a design change', () => {

@@ -51,13 +51,24 @@ export async function createProductionManifest(input) {
     model: structuredClone(input.model),
     uvExportVersion: input.uvExportVersion,
     atlas: structuredClone(input.atlas),
-    patternPieces: structuredClone(input.patternPieces),
+    patternPieces: structuredClone({
+      height: input.patternPieces.height,
+      layoutFingerprint: input.patternPieces.layoutFingerprint,
+      outputTransform: normalizeOutputTransform(input.patternPieces.outputTransform),
+      pieces: input.patternPieces.pieces,
+      width: input.patternPieces.width,
+    }),
     generatedAt: input.generatedAt,
     files,
   };
 }
 
 export async function verifyProductionArtifacts(files, manifest) {
+  if (manifest?.schemaVersion !== PRODUCTION_PACKAGE_SCHEMA_VERSION) {
+    throw new Error(
+      `生产清单 Schema 无效：schemaVersion 必须为 ${PRODUCTION_PACKAGE_SCHEMA_VERSION}。`,
+    );
+  }
   assertExactNames(files);
   if (
     !manifest
@@ -136,14 +147,14 @@ async function validateImageMetadata(input, files) {
   ) {
     throw new Error('生产清单中的 UV Atlas 数据无效：尺寸必须为正整数。');
   }
-  validatePatternPieces(input.patternPieces, input.atlas);
+  validateProductionPatternPiecesMetadata(input.patternPieces, input.atlas);
   await validatePngArtifact(files, 'uv-atlas.png', input.atlas);
   await validatePngArtifact(files, 'uv-pattern-pieces.png', input.patternPieces);
 }
 
-function validatePatternPieces(patternPieces, atlas) {
+export function validateProductionPatternPiecesMetadata(patternPieces, atlas) {
   if (
-    !isValidOutputTransform(patternPieces?.outputTransform)
+    !normalizeOutputTransform(patternPieces?.outputTransform)
     || !isPositiveInteger(patternPieces?.width)
     || !isPositiveInteger(patternPieces?.height)
     || patternPieces.width !== atlas.width
@@ -159,7 +170,9 @@ function validatePatternPieces(patternPieces, atlas) {
   const orders = new Set();
   patternPieces.pieces.forEach((piece) => {
     const sourceMeshes = piece?.sourceMeshes;
-    const islandMeshes = piece?.islandRefs?.map((island) => island?.meshName);
+    const islandMeshes = Array.isArray(piece?.islandRefs)
+      ? piece.islandRefs.map((island) => island?.meshName)
+      : null;
     if (
       !isNonEmptyString(piece?.id)
       || !isNonEmptyString(piece.label)
@@ -201,12 +214,29 @@ function validatePatternPieces(patternPieces, atlas) {
   }
 }
 
-function isValidOutputTransform(outputTransform) {
-  return outputTransform !== null
-    && typeof outputTransform === 'object'
-    && !Array.isArray(outputTransform)
-    && [0, 90, 180, 270].includes(outputTransform.rotation)
-    && typeof outputTransform.mirrorX === 'boolean';
+function normalizeOutputTransform(outputTransform) {
+  if (
+    outputTransform === null
+    || typeof outputTransform !== 'object'
+    || Array.isArray(outputTransform)
+  ) return null;
+
+  let rotation;
+  let mirrorX;
+  try {
+    rotation = Object.getOwnPropertyDescriptor(outputTransform, 'rotation');
+    mirrorX = Object.getOwnPropertyDescriptor(outputTransform, 'mirrorX');
+  } catch {
+    return null;
+  }
+  if (
+    !Object.hasOwn(rotation ?? {}, 'value')
+    || !Object.hasOwn(mirrorX ?? {}, 'value')
+    || ![0, 90, 180, 270].includes(rotation.value)
+    || typeof mirrorX.value !== 'boolean'
+  ) return null;
+
+  return { rotation: rotation.value, mirrorX: mirrorX.value };
 }
 
 async function validatePngArtifact(files, name, expected) {

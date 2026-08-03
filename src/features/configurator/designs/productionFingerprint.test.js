@@ -30,8 +30,16 @@ afterEach(() => {
 });
 
 describe('production fingerprint', () => {
-  it('uses production package schema version 2 in fingerprint semantics', () => {
+  it('includes production package schema version 2 in the canonical digest input', async () => {
+    const digest = vi.fn().mockResolvedValue(new Uint8Array(32).buffer);
+    vi.stubGlobal('crypto', { subtle: { digest } });
+
+    await createDesignFingerprint(input);
+
     expect(PRODUCTION_PACKAGE_SCHEMA_VERSION).toBe(2);
+    expect(digest).toHaveBeenCalledOnce();
+    expect(new TextDecoder().decode(digest.mock.calls[0][1]))
+      .toContain('"packageSchemaVersion":2');
   });
 
   it('sorts object keys recursively without reordering arrays', () => {

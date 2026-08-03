@@ -5,6 +5,7 @@ import {
 import {
   createProductionManifest,
   readPngDimensions,
+  validateProductionPatternPiecesMetadata,
   verifyProductionArtifacts,
 } from './productionManifest.js';
 import { createProductionBundle } from './productionBundle.js';
@@ -177,6 +178,7 @@ async function assertImageContract(rendered, atlasSize) {
       `UV 裁片排版图必须是 ${atlasSize}×${atlasSize} PNG，并包含非空裁片清单。`,
     );
   }
+  validateProductionPatternPiecesMetadata(rendered.pieces, rendered.atlas);
   assertCanvasDimensions(rendered.pieces, 'UV 裁片排版图');
   await Promise.all([
     assertPngDimensions('uv-atlas.png', rendered.atlas),

@@ -92,6 +92,26 @@ describe('production manifest', () => {
       .rejects.toThrow('生产文件校验失败');
   });
 
+  it.each([
+    ['missing', (manifest) => {
+      delete manifest.schemaVersion;
+    }],
+    ['version 1', (manifest) => {
+      manifest.schemaVersion = 1;
+    }],
+    ['string version 2', (manifest) => {
+      manifest.schemaVersion = '2';
+    }],
+  ])('rejects a %s schema before image verification', async (_label, mutate) => {
+    const files = createFiles();
+    const manifest = await createProductionManifest(manifestInput(files));
+    mutate(manifest);
+    files[1] = artifact('uv-atlas.png', new Uint8Array([0]), 'image/png');
+
+    await expect(verifyProductionArtifacts(files, manifest))
+      .rejects.toThrow('生产清单 Schema 无效：schemaVersion 必须为 2。');
+  });
+
   it('rejects a manifest that changes media type or byte length', async () => {
     const files = createFiles();
     const manifest = await createProductionManifest(manifestInput(files));
@@ -160,6 +180,32 @@ describe('production manifest', () => {
   });
 
   it.each([
+    [
+      'extra uncloneable fields',
+      { rotation: 180, mirrorX: true, extra: () => 'ignored' },
+    ],
+    [
+      'a null prototype',
+      Object.assign(Object.create(null), { rotation: 180, mirrorX: true }),
+    ],
+  ])('normalizes output transforms with %s', async (_label, outputTransform) => {
+    const files = createFiles();
+    const input = manifestInput(files);
+    input.patternPieces.outputTransform = outputTransform;
+
+    const manifest = await createProductionManifest(input);
+
+    expect(manifest.patternPieces.outputTransform).toEqual({
+      rotation: 180,
+      mirrorX: true,
+    });
+    expect(Object.getPrototypeOf(manifest.patternPieces.outputTransform))
+      .toBe(Object.prototype);
+    expect(Object.keys(manifest.patternPieces.outputTransform).sort())
+      .toEqual(['mirrorX', 'rotation']);
+  });
+
+  it.each([
     ['missing metadata', (input) => ({ ...input, patternPieces: null })],
     ['missing output transform', (input) => ({
       ...input,
@@ -177,6 +223,33 @@ describe('production manifest', () => {
       patternPieces: {
         ...input.patternPieces,
         outputTransform: { ...input.patternPieces.outputTransform, mirrorX: 'true' },
+      },
+    })],
+    ['inherited output transform fields', (input) => ({
+      ...input,
+      patternPieces: {
+        ...input.patternPieces,
+        outputTransform: Object.create({ rotation: 180, mirrorX: true }),
+      },
+    })],
+    ['accessor output transform fields', (input) => ({
+      ...input,
+      patternPieces: {
+        ...input.patternPieces,
+        outputTransform: Object.defineProperties({}, {
+          rotation: {
+            enumerable: true,
+            get() {
+              throw new Error('rotation getter must not run');
+            },
+          },
+          mirrorX: {
+            enumerable: true,
+            get() {
+              throw new Error('mirrorX getter must not run');
+            },
+          },
+        }),
       },
     })],
     ['empty piece list', (input) => ({
@@ -235,6 +308,9 @@ describe('production manifest', () => {
     ['a blank source group', (input) => withFirstPiece(input, {
       islandRefs: [{ meshName: '   ' }],
       sourceMeshes: ['   '],
+    })],
+    ['non-array island refs', (input) => withFirstPiece(input, {
+      islandRefs: {},
     })],
     ['a blank duplicate group', (input) => withFirstPiece(input, {
       duplicateGroup: '   ',

@@ -148,6 +148,46 @@ describe('production package', () => {
   });
 
   it.each([
+    ['a missing output transform', (rendered) => {
+      delete rendered.pieces.outputTransform;
+    }],
+    ['an unsupported output rotation', (rendered) => {
+      rendered.pieces.outputTransform.rotation = 45;
+    }],
+    ['a non-boolean output mirror flag', (rendered) => {
+      rendered.pieces.outputTransform.mirrorX = 'true';
+    }],
+  ])('rejects %s before creating PDF or ZIP', async (_label, mutate) => {
+    const rendered = createRenderedArtifacts();
+    const createBundle = vi.fn();
+    const createReferencePdf = vi.fn();
+    mutate(rendered);
+
+    await expect(createProductionPackage({
+      artifactProvider: vi.fn().mockResolvedValue(rendered),
+      product: jerseyProduct,
+      selected: selectedOptions(jerseyProduct, jerseyProduct.defaultState),
+      state: jerseyProduct.defaultState,
+    }, {
+      createBundle,
+      createReferencePdf,
+    })).rejects.toThrow('生产清单中的 UV 裁片数据无效');
+    expect(createReferencePdf).not.toHaveBeenCalled();
+    expect(createBundle).not.toHaveBeenCalled();
+    expect([
+      rendered.atlas,
+      rendered.pieces,
+      rendered.previews.front,
+      rendered.previews.back,
+    ].map(({ canvas }) => [canvas.width, canvas.height])).toEqual([
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ]);
+  });
+
+  it.each([
     [
       'a non-PNG atlas payload',
       (rendered) => {

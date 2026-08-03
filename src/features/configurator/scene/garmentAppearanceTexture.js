@@ -47,15 +47,18 @@ export function renderModelUvAppearance(
 
   const groups = [...(uvLayout.appearanceGroups ?? uvLayout.pieceGroups)]
     .sort((left, right) => left.order - right.order);
+  const groupLabel = uvLayout.appearanceGroups ? '外观组' : '裁片组';
   const resolvedGroups = resolveConfiguredGroupMeshes(modelMeshes, groups);
   resolvedGroups.forEach(({ group, meshes }) => {
     const meshUvData = [];
     for (const mesh of meshes) {
       const data = collectRenderableUvTriangles(mesh);
-      if (data) meshUvData.push(data);
-    }
-    if (meshUvData.length === 0) {
-      throw new Error(`模型 UV 裁片组 "${group.id}" 没有可绘制的 UV 三角形。`);
+      if (!data) {
+        throw new Error(
+          `模型 UV ${groupLabel} "${group.id}" 的网格 "${mesh.name}" 没有可绘制的 UV 三角形。`,
+        );
+      }
+      meshUvData.push(data);
     }
     const bounds = getGroupPixelBounds(meshUvData, width, height);
     const path = getCachedGroupPath(uvLayout, group, meshUvData, width, height);

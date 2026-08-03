@@ -57,10 +57,13 @@ describe('model UV seam layouts', () => {
       model: { id: 'chelsea-jersey', version: '1' },
       expectedGroups: {
         body: ['Cloth_mesh_7', 'Cloth_mesh_4'],
-        sleeves: ['Cloth_mesh', 'Cloth_mesh_13'],
+        sleeves: [
+          'Cloth_mesh', 'Cloth_mesh_1', 'Cloth_mesh_2', 'Cloth_mesh_13',
+          'Cloth_mesh_14', 'Cloth_mesh_15',
+        ],
         shoulderSide: [
-          'Cloth_mesh_1', 'Cloth_mesh_2', 'Cloth_mesh_3', 'Cloth_mesh_5', 'Cloth_mesh_6',
-          'Cloth_mesh_10', 'Cloth_mesh_11', 'Cloth_mesh_12', 'Cloth_mesh_14', 'Cloth_mesh_15',
+          'Cloth_mesh_3', 'Cloth_mesh_5', 'Cloth_mesh_6',
+          'Cloth_mesh_10', 'Cloth_mesh_11', 'Cloth_mesh_12',
         ],
         collar: [
           'Cloth_mesh_8', 'Cloth_mesh_9', 'Cloth_mesh_16', 'Cloth_mesh_17', 'Cloth_mesh_18',
@@ -71,10 +74,13 @@ describe('model UV seam layouts', () => {
       model: { id: 'fn8788-jersey', version: '1' },
       expectedGroups: {
         body: ['Cloth_mesh_1', 'Cloth_mesh_5'],
-        sleeves: ['Cloth_mesh', 'Cloth_mesh_9'],
+        sleeves: [
+          'Cloth_mesh', 'Cloth_mesh_2', 'Cloth_mesh_3', 'Cloth_mesh_9',
+          'Cloth_mesh_10', 'Cloth_mesh_11',
+        ],
         shoulderSide: [
-          'Cloth_mesh_2', 'Cloth_mesh_3', 'Cloth_mesh_4', 'Cloth_mesh_6', 'Cloth_mesh_7',
-          'Cloth_mesh_10', 'Cloth_mesh_11', 'Cloth_mesh_12', 'Cloth_mesh_13', 'Cloth_mesh_14',
+          'Cloth_mesh_4', 'Cloth_mesh_6', 'Cloth_mesh_7',
+          'Cloth_mesh_12', 'Cloth_mesh_13', 'Cloth_mesh_14',
         ],
         collar: ['Cloth_mesh_8', 'Cloth_mesh_15'],
       },

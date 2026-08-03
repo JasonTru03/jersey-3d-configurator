@@ -57,7 +57,11 @@ export const MODEL_UV_LAYOUTS = Object.freeze({
         zone: 'sleeves',
         islandRefs: [
           { meshName: 'Cloth_mesh' },
+          { meshName: 'Cloth_mesh_1' },
+          { meshName: 'Cloth_mesh_2' },
           { meshName: 'Cloth_mesh_13' },
+          { meshName: 'Cloth_mesh_14' },
+          { meshName: 'Cloth_mesh_15' },
         ],
       },
       {
@@ -65,16 +69,12 @@ export const MODEL_UV_LAYOUTS = Object.freeze({
         order: 2,
         zone: 'shoulderSide',
         islandRefs: [
-          { meshName: 'Cloth_mesh_1' },
-          { meshName: 'Cloth_mesh_2' },
           { meshName: 'Cloth_mesh_3' },
           { meshName: 'Cloth_mesh_5' },
           { meshName: 'Cloth_mesh_6' },
           { meshName: 'Cloth_mesh_10' },
           { meshName: 'Cloth_mesh_11' },
           { meshName: 'Cloth_mesh_12' },
-          { meshName: 'Cloth_mesh_14' },
-          { meshName: 'Cloth_mesh_15' },
         ],
       },
       {
@@ -129,7 +129,11 @@ export const MODEL_UV_LAYOUTS = Object.freeze({
         zone: 'sleeves',
         islandRefs: [
           { meshName: 'Cloth_mesh' },
+          { meshName: 'Cloth_mesh_2' },
+          { meshName: 'Cloth_mesh_3' },
           { meshName: 'Cloth_mesh_9' },
+          { meshName: 'Cloth_mesh_10' },
+          { meshName: 'Cloth_mesh_11' },
         ],
       },
       {
@@ -137,13 +141,9 @@ export const MODEL_UV_LAYOUTS = Object.freeze({
         order: 2,
         zone: 'shoulderSide',
         islandRefs: [
-          { meshName: 'Cloth_mesh_2' },
-          { meshName: 'Cloth_mesh_3' },
           { meshName: 'Cloth_mesh_4' },
           { meshName: 'Cloth_mesh_6' },
           { meshName: 'Cloth_mesh_7' },
-          { meshName: 'Cloth_mesh_10' },
-          { meshName: 'Cloth_mesh_11' },
           { meshName: 'Cloth_mesh_12' },
           { meshName: 'Cloth_mesh_13' },
           { meshName: 'Cloth_mesh_14' },

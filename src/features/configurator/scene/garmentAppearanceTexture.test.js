@@ -267,7 +267,30 @@ describe('garment appearance texture', () => {
     expect(() => createGarmentAppearanceCanvas(100, appearance, {
       modelMeshes: [emptyMesh, back],
       uvLayout,
-    })).toThrow('模型 UV 裁片组 "front" 没有可绘制的 UV 三角形。');
+    })).toThrow('模型 UV 裁片组 "front" 的网格 "empty-front" 没有可绘制的 UV 三角形。');
+  });
+
+  it('rejects one invalid mesh inside an otherwise drawable appearance group', () => {
+    const valid = createUvMesh('valid-mesh', [0, 0, 0.25, 0, 0, 0.25]);
+    const invalid = createUvMesh('invalid-mesh', [0.5, 0.5, 0.75, 0.75]);
+    const uvLayout = {
+      version: 1,
+      pieceGroups: [
+        createLayoutGroup('front', 'body', 0, ['valid-mesh']),
+      ],
+      appearanceGroups: [
+        createLayoutGroup('body', 'body', 0, ['valid-mesh', 'invalid-mesh']),
+      ],
+    };
+
+    expect(() => renderModelUvAppearance(
+      createRecordingContext(),
+      { width: 100, height: 100 },
+      appearance,
+      { modelMeshes: [valid, invalid], uvLayout },
+    )).toThrow(
+      '模型 UV 外观组 "body" 的网格 "invalid-mesh" 没有可绘制的 UV 三角形。',
+    );
   });
 
   it('limits non-indexed triangles to the geometry position count and drawRange', () => {
@@ -397,7 +420,7 @@ describe('garment appearance texture', () => {
     material.visible = false;
 
     expect(() => renderSingleConfiguredMesh(mesh))
-      .toThrow('模型 UV 裁片组 "front" 没有可绘制的 UV 三角形。');
+      .toThrow('模型 UV 裁片组 "front" 的网格 "front-mesh" 没有可绘制的 UV 三角形。');
   });
 
   it('draws only visible material-array groups after visibility changes', () => {
@@ -463,7 +486,7 @@ describe('garment appearance texture', () => {
     ['material array without groups', () => createUvMesh('front-mesh', [0, 0, 1, 0, 0, 1], null, { material: [new THREE.MeshBasicMaterial()] })],
   ])('rejects %s geometry when no valid configured UV triangle remains', (_label, createMesh) => {
     expect(() => renderSingleConfiguredMesh(createMesh()))
-      .toThrow('模型 UV 裁片组 "front" 没有可绘制的 UV 三角形。');
+      .toThrow('模型 UV 裁片组 "front" 的网格 "front-mesh" 没有可绘制的 UV 三角形。');
   });
 
   it('rejects a referenced mesh name that is not unique in the model', () => {

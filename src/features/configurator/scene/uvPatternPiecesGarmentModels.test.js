@@ -30,6 +30,11 @@ const DIRECTION_MARKER_COLORS = [
   [35, 205, 95],
   [45, 95, 235],
 ];
+const BACK_DIRECTION_MARKER_COLORS = [
+  [235, 165, 25],
+  [145, 55, 225],
+  [20, 170, 180],
+];
 const loadedModels = new Map();
 
 beforeAll(async () => {
@@ -101,7 +106,17 @@ describe('UV pattern pieces on supported real garment models', () => {
         rawCenterAlpha: 0,
       });
       expect(result.uploadTransparency.ringAlphas.every((alpha) => alpha > 200)).toBe(true);
-      const maximumCoverageDifference = expectDirectionalEvidence(result.directionalEvidence);
+      expect(Object.keys(result.directionalEvidence).sort()).toEqual(['back', 'front']);
+      const maximumCoverageDifference = {
+        front: expectDirectionalEvidence(
+          result.directionalEvidence.front,
+          DIRECTION_MARKER_COLORS,
+        ),
+        back: expectDirectionalEvidence(
+          result.directionalEvidence.back,
+          BACK_DIRECTION_MARKER_COLORS,
+        ),
+      };
 
       const fixture = loadedModels.get(model.id);
       for (const piece of result.pieces) {
@@ -165,7 +180,14 @@ function createBrowserFixture(modelId, meshes, uvLayout) {
       ),
       createDesign('front-preset-artwork', 'preset-artwork', 'front', [30, 190, 60], trianglesByRegion.front[1]),
       createDesign('front-transparent-upload', 'transparent-upload', 'front', [210, 40, 190], trianglesByRegion.front[2]),
-      createDesign('back-player-set', 'player-set', 'back', [25, 80, 220], trianglesByRegion.back[0]),
+      createDesign(
+        'back-player-set',
+        'player-set',
+        'back',
+        [25, 80, 220],
+        trianglesByRegion.back[0],
+        { directionMarkerColors: BACK_DIRECTION_MARKER_COLORS },
+      ),
       createDesign('back-custom-text', 'custom-text', 'back', [20, 190, 210], trianglesByRegion.back[1]),
     ],
     expectedTriangles,
@@ -584,51 +606,52 @@ try {
     x: (front.outputBounds.x + front.outputBounds.width + back.outputBounds.x) / 2,
     y: extracted.height / 2,
   };
-  const directionDesign = fixture.designs.find(({ directionMarkerColors }) => directionMarkerColors);
-  const directionMarker = getDirectionMarker(directionDesign);
-  const rawDirectionCounts = countSelectedColors(
-    atlasContext,
-    { x: 0, y: 0, width: atlasSize, height: atlasSize },
-    directionMarker.colors,
-  );
-  const outputDirectionCounts = countSelectedColors(
-    outputContext,
-    front.outputBounds,
-    directionMarker.colors,
-  );
-  const identitySamples = directionMarker.points.map((point) => readPixel(
-    outputContext,
-    outputPointForCounterfactual(front, point, 'identity'),
-  ));
-  const mirrorSamples = directionMarker.points.map((point) => readPixel(
-    outputContext,
-    outputPointForCounterfactual(front, point, 'mirrorX'),
-  ));
-  const rotationSamples = directionMarker.points.map((point) => readPixel(
-    outputContext,
-    outputPointForCounterfactual(front, point, 'rotation180'),
-  ));
-
-  publish({
-    ok: true,
-    blob: { hasBytes: extracted.blob.size > 0, type: extracted.blob.type },
-    designSamples,
-    directionalEvidence: {
-      counterfactualMatches: {
-        identity: countMatchingSamples(identitySamples, directionMarker.colors),
-        mirrorX: countMatchingSamples(mirrorSamples, directionMarker.colors),
-        rotation180: countMatchingSamples(rotationSamples, directionMarker.colors),
-      },
+  const directionalEvidence = {};
+  for (const directionDesign of fixture.designs.filter(({ directionMarkerColors }) => (
+    directionMarkerColors
+  ))) {
+    const piece = piecesById[directionDesign.region];
+    const directionMarker = getDirectionMarker(directionDesign);
+    const rawDirectionCounts = countSelectedColors(
+      atlasContext,
+      piece.sourceBounds,
+      directionMarker.colors,
+    );
+    const outputDirectionCounts = countSelectedColors(
+      outputContext,
+      piece.outputBounds,
+      directionMarker.colors,
+    );
+    const counterfactualSamples = Object.fromEntries([
+      'identity',
+      'mirrorX',
+      'rotation180',
+    ].map((counterfactual) => [counterfactual, directionMarker.points.map((point) => readPixel(
+      outputContext,
+      outputPointForCounterfactual(piece, point, counterfactual),
+    ))]));
+    directionalEvidence[directionDesign.region] = {
+      counterfactualMatches: Object.fromEntries(Object.entries(counterfactualSamples).map(([
+        counterfactual,
+        samples,
+      ]) => [counterfactual, countMatchingSamples(samples, directionMarker.colors)])),
       normalizedCoverage: {
         output: normalizeCounts(outputDirectionCounts),
         raw: normalizeCounts(rawDirectionCounts),
       },
       outputSamples: directionMarker.points.map((point) => readPixel(
         outputContext,
-        outputPointForCurrentLayout(front, point),
+        outputPointForCurrentLayout(piece, point),
       )),
       rawSamples: directionMarker.points.map((point) => readPixel(atlasContext, point)),
-    },
+    };
+  }
+
+  publish({
+    ok: true,
+    blob: { hasBytes: extracted.blob.size > 0, type: extracted.blob.type },
+    designSamples,
+    directionalEvidence,
     gapAlpha: readPixel(outputContext, gapPoint)[3],
     pieceColorCounts,
     pieceIds: extracted.pieces.map(({ id }) => id),
@@ -685,12 +708,12 @@ function createDirectionalEvidence(overrides = {}) {
   };
 }
 
-function expectDirectionalEvidence(evidence) {
+function expectDirectionalEvidence(evidence, expectedColors = DIRECTION_MARKER_COLORS) {
   expect(evidence, '缺少可识别旋转/镜像错误的非对称像素证据。').toBeDefined();
   evidence.rawSamples.forEach((rawSample, index) => {
     const outputSample = evidence.outputSamples[index];
-    expectColor(rawSample, DIRECTION_MARKER_COLORS[index]);
-    expectColor(outputSample, DIRECTION_MARKER_COLORS[index]);
+    expectColor(rawSample, expectedColors[index]);
+    expectColor(outputSample, expectedColors[index]);
     expect(outputSample.slice(0, 3)).toEqual(rawSample.slice(0, 3));
   });
   const coverageDifferences = evidence.normalizedCoverage.raw.map((rawCoverage, index) => (

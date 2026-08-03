@@ -17,7 +17,7 @@
 - 清理 UV 裁片设计规格第 3 行尾随空格。
 - 新增本变更日志和对应聊天收口日志。
 - 修改 `garmentRenderer.js` 与对应测试，更新交接和项目日志。
-- 不修改依赖、Shopify、Cloudflare 或任何线上环境。
+- 代码与文档修复阶段不修改依赖、Shopify 或 Cloudflare 配置；用户明确批准后，发布收口更新 Cloudflare 生产 Worker 版本。
 
 ## 新增内容
 
@@ -42,7 +42,7 @@
 
 - 代码只影响基础外观 CanvasTexture 的运行时 V 轴方向；生产 Atlas、factory pieces、七文件契约和 Shopify/Cloudflare 链路不变。
 - 文档更新发布交接、规格格式、变更记录、聊天收口和真实 ZIP 证据。
-- 未 push、未 merge、未发布、未部署。
+- 发布前未 push、merge 或部署；用户批准后已按后文“生产发布”完成。
 
 ## 自检
 
@@ -55,7 +55,7 @@
 
 - 页面没有 FN8788 模型切换入口，因此 FN8788 仍无同等浏览器 ZIP；保留真实 GLB native Canvas 自动化证据。
 - 页面标题/模型为 Chelsea，但产品 ID 与 ZIP 前缀仍为 `fn8788-jersey`；本阶段不改命名。
-- push、merge、release、deploy 均需用户明确确认。
+- 用户已明确确认发布；实际远端、Worker 版本和回滚点见后文。
 
 ## 运行时贴图方向与真实生产包补充
 
@@ -80,4 +80,18 @@
 - 页面标题/模型为 Chelsea，但 `productId` 和 ZIP 前缀仍为既有 `fn8788-jersey`。本阶段未改产品命名。
 - 浏览器资源释放并停止本轮 Vite 后，新鲜验证结果为：package verifier tests 42/42；默认全量 76 files / 1,096 tests；app/Shopify build、showcase build、Wrangler dry-run 和新 ZIP CLI verifier 均 exit 0。
 - 全量仍有两条既有 jsdom navigation 提示；构建仍有大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler 仅有代理环境提示，均不阻塞。
-- 仍未 push、merge、release 或 deploy。
+- 此条为发布前验证边界；后续已获得用户明确批准并完成发布。
+
+## 生产发布
+
+- 发布提交：`0d4ac9c8b2e22507d007f3c32eee75c034d81f85`。
+- `showcase` 已 fast-forward 推送至 `origin` 与 `backup`；未强推、未改写历史。
+- Cloudflare Worker：`jersey-3d-configurator`。
+- 生产地址：`https://jersey-3d-configurator.jason1064969838.workers.dev/`。
+- 新版本：`211c1c5d-b6f8-4860-b77e-a41c30823678`，100% 流量。
+- 该 ID 是代码发布版本；后续仅文档的收口提交可能触发内容等价的新部署，最终流量版本以 Wrangler 状态为准。
+- 发布前版本/回滚点：`a5a075aa-438a-46d7-8e7d-f6b950836768`。
+- 发布前复核：合并后 76 files / 1,096 tests passed；clean release worktree 的 showcase build 与 Wrangler dry-run 均 exit 0，dry-run 读取 7 个静态资源。
+- 公网复核：首页、JS、CSS、Chelsea GLB 均 HTTP 200；三个静态产物哈希与本次 `dist` 完全一致；in-app Browser 中 Chelsea 模型和 594×610 WebGL canvas 正常渲染，错误/警告日志为空。
+- 本次未发布 Shopify 主题，未修改商品、订单、价格、支付、binding、KV 数据或 secret。
+- 回滚命令：`npx wrangler rollback a5a075aa-438a-46d7-8e7d-f6b950836768`，随后执行 `npx wrangler deployments status --name jersey-3d-configurator`。

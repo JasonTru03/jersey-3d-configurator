@@ -2,7 +2,7 @@
 
 ## 结论
 
-UV 裁片发布候选必须使用本地 `codex/uv-pattern-pieces-clean`，不能继续使用夹带 Shopify form ownership / 结账链路的原 `codex/uv-pattern-pieces`。clean 分支已从 `0a0bd1c` 重建并排除全部 Shopify 提交；当前没有 push、merge、release 或 deploy。
+UV 裁片发布候选必须使用本地 `codex/uv-pattern-pieces-clean`，不能继续使用夹带 Shopify form ownership / 结账链路的原 `codex/uv-pattern-pieces`。clean 分支已从 `0a0bd1c` 重建并排除全部 Shopify 提交；本段描述的是生产发布前状态，最终发布结果见文末。
 
 ## 关键决策
 
@@ -22,12 +22,12 @@ UV 裁片发布候选必须使用本地 `codex/uv-pattern-pieces-clean`，不能
 
 ## 当前分支与回滚点
 
-- 当前本地分支：`codex/uv-pattern-pieces-clean`
+- 发布候选分支：`codex/uv-pattern-pieces-clean`（合并验证后已清理）
 - clean 重建基线 / 全量 UV 回退点：`0a0bd1c`
 - release-fix 前检查点：`1bc781a`
 - 文档收口前代码 HEAD：`acbe882`
 - 原分支：`codex/uv-pattern-pieces`，不作为发布候选
-- 远端/发布状态：未 push、未 merge、未发布、未部署
+- 发布前远端/发布状态：未 push、未 merge、未发布、未部署
 
 ## 验收前验证边界（历史状态）
 
@@ -45,9 +45,9 @@ UV 裁片发布候选必须使用本地 `codex/uv-pattern-pieces-clean`，不能
 4. 目视检查新裁片图/PDF：文字不垂直翻转，下摆/侧面无黑块，袖底/袖口/肩侧/领口外观完整，正背面内容隔离且透明间隔正确。
 5. 把新 ZIP 路径、截图/解包证据、测试计数、构建结果和风险补回 handoff；如果任何一项失败，不进入发布确认。
 
-## 发布需用户确认
+## 发布需用户确认（已确认）
 
-完成上述最终验证后，仍需用户明确批准才能 push、merge、release 或 deploy。不得因本地 focused 测试、文档提交或旧 ZIP verifier PASS 自动视为获得发布授权。
+完成上述最终验证后，仍需用户明确批准才能 push、merge、release 或 deploy。不得因本地 focused 测试、文档提交或旧 ZIP verifier PASS 自动视为获得发布授权。用户已在后续对话中明确选择本地合并，并进一步明确要求“发布”。
 
 ## 后续真实验收结论
 
@@ -59,4 +59,15 @@ UV 裁片发布候选必须使用本地 `codex/uv-pattern-pieces-clean`，不能
 - in-app Browser 因局域网非安全上下文无法执行 SHA-256，完整生成改由 Chrome localhost 验收。这不改变代码发布边界。
 - FN8788 仍无页面切换入口；不把 Chelsea ZIP 外推成 FN8788 浏览器证据。
 - 释放 Chrome 标签页并停止本轮 Vite 后，最终门槛通过：42/42 package verifier tests、76 files / 1,096 全量 tests、app/Shopify build、showcase build、Wrangler dry-run、新 ZIP verifier 均 exit 0。
-- 当前仍未 push、merge、release 或 deploy，最终动作必须由用户明确选择。
+- 此条记录发布前边界；后续已由用户明确选择合并并批准发布。
+
+## 最终发布结果
+
+- 发布提交：`0d4ac9c8b2e22507d007f3c32eee75c034d81f85`，已 fast-forward 合入 `showcase` 并推送 `origin`、`backup`。
+- Cloudflare Worker `jersey-3d-configurator` 新版本 `211c1c5d-b6f8-4860-b77e-a41c30823678` 已接管 100% 流量；旧版本/回滚点为 `a5a075aa-438a-46d7-8e7d-f6b950836768`。
+- 该 ID 是代码发布版本；后续仅文档的收口提交可能触发内容等价的新部署，最终流量版本以 Wrangler 状态为准。
+- 生产地址：`https://jersey-3d-configurator.jason1064969838.workers.dev/`。
+- 合并后隔离测试 76 files / 1,096 tests passed；clean release worktree 的 showcase build、Wrangler dry-run 通过，dry-run 读取 7 个静态资源。
+- 公网 JS、CSS、Chelsea GLB 的 SHA-256 与本次 `dist` 完全一致；in-app Browser 中 Chelsea 球衣模型、594×610 WebGL canvas 正常渲染，浏览器错误/警告日志为空。
+- 本次未触及 Shopify live theme、商品、订单、支付、Cloudflare binding、KV 数据或 secret。
+- Worker 回滚命令：`npx wrangler rollback a5a075aa-438a-46d7-8e7d-f6b950836768`。

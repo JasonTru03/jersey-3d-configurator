@@ -179,7 +179,7 @@ ZIP 中七个文件齐全：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.
 
 已知接缝边界：`pieceGroups` 仍只生成 `front` / `back` 两个 factory pieces；输出不是工厂 CAD 纸样，仍不包含缝份、放码、对位标记或裁片编号。基础外观不再受这两个 factory pieces 限制：独立 `appearanceGroups` 已覆盖 Chelsea 19 个、FN8788 16 个可渲染服装 mesh，并将袖底、袖口归入 `sleeves`。每个被配置 mesh 若没有有效 UV 会 fail closed，不会以黑块或默认填充伪装成功。自动化 fixture 的 `coveragePixels` 是代表性设计内容的非透明像素数，不是整块 UV 岛面积。
 
-状态：两份真实 GLB 的 native Canvas 方向与覆盖 focused 证据已更新；本节两份 Chelsea ZIP 只保留为 pre-fix 复现材料。FN8788 仍没有同等 in-app WebGL 页面导出，Chelsea 也必须在四个 release-fix 提交后重新导出。当前 clean 分支仍未 push、未 merge、未发布、未部署。
+发布前状态（历史）：两份真实 GLB 的 native Canvas 方向与覆盖 focused 证据已更新；本节两份 Chelsea ZIP 只保留为 pre-fix 复现材料。FN8788 仍没有同等 in-app WebGL 页面导出，Chelsea 也必须在四个 release-fix 提交后重新导出。当时 clean 分支尚未 push、merge、发布或部署。
 
 ### 七文件生产包回归与发布检查点（2026-08-03，结构证据）
 
@@ -212,11 +212,11 @@ node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn87
 
 全量测试仍打印两条既有 jsdom navigation 提示。优化前，纯 parser/package 负向用例与 manifest 负向用例会反复触发 Atlas+pieces 4K RGBA inflate，与 native Canvas Chrome 并发造成资源争抢；两次默认全量分别出现 2 项和 1 项 `ETIMEDOUT`，失败文件隔离重跑为 7/7 通过，串行全量仅作为根因诊断证据。资源压力优化后，尾随压缩数据修复的首次默认全量仍在本轮 Vite PID 28048 及 in-app WebGL 验收标签页保持运行时出现 2 项 Chrome `spawnSync ... ETIMEDOUT`；关闭仅属于本轮任务的 in-app WebGL 标签页和 Vite PID 28048 精确进程树后，用户已有 Chrome/Edge 保持运行，新鲜原始 `npm test` 于 2026-08-03 11:51:25 在默认并行模式完成 1,240/1,240，Duration 56.01s，exit 0。该结果说明最终门槛在清理本轮验收资源后通过，并不表示 verifier 代码本身可以消除所有外部浏览器资源争抢；最终门槛也未使用串行参数。Vite 仍打印大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler dry-run 还打印代理环境提示，并由 `npx` 临时取得 Wrangler 4.118.0。两个真实 ZIP 使用 payload verifier 的单包耗时分别约 599ms 与 449ms，未发现不可接受的内存或性能问题。最终要求的命令均为 exit 0，没有新增依赖、secret 或 binding。
 
-上述旧 ZIP 的 verifier PASS 只证明七文件结构、哈希、PNG/PDF payload 和 manifest 契约在当时成立，不证明修复后的工厂裁片方向或全 mesh 外观覆盖。七文件格式目前只是本地生产产物契约变更；已发布 showcase 保持不变，必须取得用户明确发布批准后才能部署。代码侧回退方式是对未来 feature merge 执行普通 `git revert`；若以后已部署到 Cloudflare，则使用 Cloudflare deployment rollback 回到上一已知正常版本。本任务未 push、未 merge、未发布、未部署。
+上述旧 ZIP 的 verifier PASS 只证明七文件结构、哈希、PNG/PDF payload 和 manifest 契约在当时成立，不证明修复后的工厂裁片方向或全 mesh 外观覆盖。以下为发布前边界记录：七文件格式当时只是本地生产产物契约变更，必须取得用户明确发布批准后才能部署。代码侧回退方式是对 feature merge 执行普通 `git revert`；Cloudflare 则使用 deployment rollback 回到上一已知正常版本。实际发布结果见后文“生产发布结果”。
 
 ### UV release-fix 收口（2026-08-03）
 
-发布候选不再使用原 `codex/uv-pattern-pieces` 分支。该分支夹带 Shopify form ownership / 结账链路，已在本地以 `0a0bd1c` 为基线重建 `codex/uv-pattern-pieces-clean`，只保留 UV 裁片范围的提交；当前没有 push、merge、release 或 deploy。
+发布候选不再使用原 `codex/uv-pattern-pieces` 分支。该分支夹带 Shopify form ownership / 结账链路，已在本地以 `0a0bd1c` 为基线重建 `codex/uv-pattern-pieces-clean`，只保留 UV 裁片范围的提交；此句记录的是生产发布前状态。
 
 本轮 release-fix 包含：
 
@@ -257,7 +257,20 @@ node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn87
 - `manifest.json` 中 front/back 均为 `rotation: 180`、`mirrorX: true`，mapped triangles 分别为 `10,142` / `12,320`，coveragePixels 分别为 `4,194,130` / `3,659,805`。
 - `uv-reference.pdf` 由 Poppler 实际渲染为两页 A4 横向页面。第 1 页正背预览、产品/颜色/指纹信息清晰；第 2 页裁片方向和文字清晰，无裁切、重叠、乱码或黑块。
 
-当前页面仍没有切换到 `fn8788-jersey.glb` 的入口，因此 FN8788 的发布证据仍限于真实 GLB native Canvas 自动化，不伪造同等浏览器 ZIP 证据。浏览器验收结束后已释放 Chrome 标签页并停止本轮 Vite 服务，再在相同代码 HEAD 上执行发布门槛：package verifier tests 1 file / 42 passed；默认 `npm test` 76 files / 1,096 passed；`npm run build`、`npm run build:showcase`、`npx wrangler deploy --dry-run` 与新 ZIP CLI verifier 均 exit 0。全量仍打印两条既有 jsdom navigation 提示；构建仍打印既有大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler 仅打印代理环境提示。push、merge、release、deploy 继续等待用户明确确认。
+当前页面仍没有切换到 `fn8788-jersey.glb` 的入口，因此 FN8788 的发布证据仍限于真实 GLB native Canvas 自动化，不伪造同等浏览器 ZIP 证据。浏览器验收结束后已释放 Chrome 标签页并停止本轮 Vite 服务，再在相同代码 HEAD 上执行发布门槛：package verifier tests 1 file / 42 passed；默认 `npm test` 76 files / 1,096 passed；`npm run build`、`npm run build:showcase`、`npx wrangler deploy --dry-run` 与新 ZIP CLI verifier 均 exit 0。全量仍打印两条既有 jsdom navigation 提示；构建仍打印既有大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler 仅打印代理环境提示。当时 push、merge、release、deploy 仍等待用户明确确认。
+
+#### 生产发布结果（2026-08-03）
+
+- 用户明确批准发布后，`codex/uv-pattern-pieces-clean` 已快进合入 `showcase`；发布提交为 `0d4ac9c8b2e22507d007f3c32eee75c034d81f85`。
+- `showcase` 已以 fast-forward 推送到 `origin` 与 `backup`，未强推、未改写历史；clean 功能分支与 worktree 已在合并验证后清理。
+- Cloudflare Worker `jersey-3d-configurator` 新版本 `211c1c5d-b6f8-4860-b77e-a41c30823678` 已接管 100% 流量。发布前版本/即时回滚点为 `a5a075aa-438a-46d7-8e7d-f6b950836768`。
+- `211c1c5d-b6f8-4860-b77e-a41c30823678` 是代码发布版本；后续仅文档的发布记录提交可能触发内容等价的新部署，最终流量版本以 `wrangler deployments status` 为准。
+- 公开地址：`https://jersey-3d-configurator.jason1064969838.workers.dev/`。
+- 合并后的隔离全量测试为 76 files / 1,096 tests passed；clean release worktree 的 `npm run build:showcase` 与 `npx wrangler deploy --dry-run` 均 exit 0，dry-run 读取 7 个静态资源。
+- 公网首页、JS、CSS 与 Chelsea GLB 均返回 HTTP 200；JS、CSS、GLB 的 SHA-256 分别与本次 release worktree 的 `dist` 产物完全一致。
+- in-app Browser 真实打开公网地址后，标题为 `3D Product Configurator`，页面显示 `Chelsea Match Jersey`，594×610 WebGL canvas 与 Chelsea 球衣模型正常渲染，浏览器错误/警告日志为空。
+- 本次未修改 Shopify live theme、商品、订单、价格、支付、Cloudflare binding、KV 数据或 secret；无计划停机。
+- 如需回滚 Worker：`npx wrangler rollback a5a075aa-438a-46d7-8e7d-f6b950836768`，随后用 `npx wrangler deployments status --name jersey-3d-configurator` 确认旧版本恢复 100% 流量。
 
 ## 生产边界与回滚
 

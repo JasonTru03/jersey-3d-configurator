@@ -44,10 +44,10 @@ export function transformPatternOutputBounds(bounds, transform) {
   const maximumY = Math.max(...corners.map(({ y }) => y));
 
   return {
-    x: Math.floor(minimumX),
-    y: Math.floor(minimumY),
-    width: Math.ceil(maximumX) - Math.floor(minimumX),
-    height: Math.ceil(maximumY) - Math.floor(minimumY),
+    x: minimumX,
+    y: minimumY,
+    width: maximumX - minimumX,
+    height: maximumY - minimumY,
   };
 }
 

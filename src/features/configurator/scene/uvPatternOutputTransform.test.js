@@ -51,6 +51,18 @@ describe('UV pattern output transform', () => {
     expect(bounds).toEqual({ x: 2, y: 1, width: 3, height: 4 });
   });
 
+  it('preserves fractional identity bounds without mutating the input', () => {
+    const bounds = { x: 2.25, y: 1.5, width: 3.25, height: 4.125 };
+
+    expect(transformPatternOutputBounds(bounds, {
+      width: 10,
+      height: 8,
+      rotation: 0,
+      mirrorX: false,
+    })).toEqual(bounds);
+    expect(bounds).toEqual({ x: 2.25, y: 1.5, width: 3.25, height: 4.125 });
+  });
+
   it('applies horizontal mirroring after a clockwise 180 degree rotation', () => {
     const calls = [];
     const context = Object.fromEntries(['translate', 'scale', 'rotate'].map((method) => [method, (...args) => {

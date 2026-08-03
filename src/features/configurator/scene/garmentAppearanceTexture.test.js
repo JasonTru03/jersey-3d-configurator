@@ -24,11 +24,13 @@ const appearance = {
     number: '#20242A',
   },
 };
-let chelseaMeshes;
+const garmentMeshesByModel = new Map();
 
 beforeAll(async () => {
   vi.stubGlobal('createImageBitmap', async () => ({ close() {}, height: 1, width: 1 }));
-  chelseaMeshes = await loadModelMeshes('chelsea-jersey');
+  await Promise.all(['chelsea-jersey', 'fn8788-jersey'].map(async (modelId) => {
+    garmentMeshesByModel.set(modelId, await loadModelMeshes(modelId));
+  }));
 }, 20_000);
 
 afterAll(() => {
@@ -197,6 +199,39 @@ describe('garment appearance texture', () => {
     expect(context.calls).toContainEqual(['moveTo', 62.5, 87.5]);
     expect(context.calls).not.toContainEqual(['moveTo', 0, 100]);
     expect(context.calls).not.toContainEqual(['fillRect', 0, 0, 100, 100]);
+  });
+
+  it('renders every appearance group instead of limiting the texture to factory piece groups', () => {
+    const context = createRecordingContext();
+    const front = createUvMesh('front-mesh', [0, 0, 0.2, 0, 0, 0.2]);
+    const back = createUvMesh('back-mesh', [0.3, 0, 0.5, 0, 0.3, 0.2]);
+    const sleeve = createUvMesh('sleeve-mesh', [0.6, 0, 0.8, 0, 0.6, 0.2]);
+    const uvLayout = {
+      version: 1,
+      pieceGroups: [
+        createLayoutGroup('front', 'body', 0, ['front-mesh'], {
+          label: '正片', mirrorX: false, rotation: 0,
+        }),
+        createLayoutGroup('back', 'body', 1, ['back-mesh'], {
+          label: '背片', mirrorX: false, rotation: 0,
+        }),
+      ],
+      appearanceGroups: [
+        createLayoutGroup('body', 'body', 0, ['front-mesh', 'back-mesh']),
+        createLayoutGroup('sleeves', 'sleeves', 1, ['sleeve-mesh']),
+      ],
+    };
+
+    renderModelUvAppearance(context, { width: 100, height: 100 }, appearance, {
+      modelMeshes: [front, back, sleeve],
+      uvLayout,
+    });
+
+    expect(readRecordedTriangles(context.calls)).toHaveLength(3);
+    const sleeveMove = context.calls.find(([method, x]) => method === 'moveTo' && x > 50);
+    expect(sleeveMove[1]).toBeCloseTo(60);
+    expect(sleeveMove[2]).toBeCloseTo(100);
+    expect(context.calls).toContainEqual(['fillStyle', appearance.colors.sleeves]);
   });
 
   it('consumes the same fake-mesh triangle coordinates in appearance and pattern pieces', () => {
@@ -671,11 +706,12 @@ describe('garment appearance texture', () => {
     }
   });
 
-  it('does not reparse real Chelsea front and back BufferAttributes on a second render', () => {
+  it('does not reparse real Chelsea appearance BufferAttributes on a second render', () => {
     const uvLayout = getModelUvLayout({ id: 'chelsea-jersey', version: '1' });
-    const configuredNames = new Set(uvLayout.pieceGroups
-      .flatMap(({ islandRefs }) => islandRefs.map(({ meshName }) => meshName)));
-    const configuredMeshes = chelseaMeshes.filter(({ name }) => configuredNames.has(name));
+    const configuredMeshes = getConfiguredMeshes(
+      garmentMeshesByModel.get('chelsea-jersey'),
+      uvLayout.appearanceGroups,
+    );
     const getUvX = configuredMeshes.map((mesh) => vi.spyOn(mesh.geometry.getAttribute('uv'), 'getX'));
     const render = () => renderModelUvAppearance(
       createNoopContext(),
@@ -692,26 +728,34 @@ describe('garment appearance texture', () => {
     expect(getUvX.map((spy) => spy.mock.calls.length)).toEqual(firstParseCalls);
   });
 
-  it('consumes the same real Chelsea triangle coordinates in appearance and pattern pieces', () => {
+  it.each([
+    { model: { id: 'chelsea-jersey', version: '1' } },
+    { model: { id: 'fn8788-jersey', version: '1' } },
+  ])('renders every real $model.id appearance triangle while factory pieces remain front/back', ({ model }) => {
     const size = 64;
-    const uvLayout = getModelUvLayout({ id: 'chelsea-jersey', version: '1' });
-    const meshesByName = new Map(chelseaMeshes.map((mesh) => [mesh.name, mesh]));
-    const configuredMeshes = uvLayout.pieceGroups.flatMap(({ islandRefs }) => (
-      islandRefs.map(({ meshName }) => meshesByName.get(meshName))
-    ));
+    const uvLayout = getModelUvLayout(model);
+    const modelMeshes = garmentMeshesByModel.get(model.id);
+    const appearanceMeshes = getConfiguredMeshes(modelMeshes, uvLayout.appearanceGroups);
+    const pieceMeshes = getConfiguredMeshes(modelMeshes, uvLayout.pieceGroups);
     const context = createRecordingContext();
 
     renderModelUvAppearance(context, { width: size, height: size }, appearance, {
-      modelMeshes: configuredMeshes,
+      modelMeshes,
       uvLayout,
     });
-    const pieceTriangles = configuredMeshes.flatMap((mesh) => collectPieceAtlasTriangles(mesh, size));
-    const sharedTriangleCount = configuredMeshes.reduce((count, mesh) => (
+    const appearanceTriangles = appearanceMeshes
+      .flatMap((mesh) => collectPieceAtlasTriangles(mesh, size));
+    const appearanceTriangleCount = appearanceMeshes.reduce((count, mesh) => (
+      count + collectRenderableUvTriangles(mesh).triangleCount
+    ), 0);
+    const pieceTriangleCount = pieceMeshes.reduce((count, mesh) => (
       count + collectRenderableUvTriangles(mesh).triangleCount
     ), 0);
 
-    expect(readRecordedTriangles(context.calls)).toEqual(pieceTriangles);
-    expect(pieceTriangles).toHaveLength(sharedTriangleCount);
+    expect(readRecordedTriangles(context.calls)).toEqual(appearanceTriangles);
+    expect(appearanceTriangles).toHaveLength(appearanceTriangleCount);
+    expect(appearanceTriangleCount).toBeGreaterThan(pieceTriangleCount);
+    expect(uvLayout.pieceGroups.map(({ id }) => id)).toEqual(['front', 'back']);
   });
 });
 
@@ -727,6 +771,23 @@ function readRecordedTriangles(calls) {
     }
   }
   return triangles;
+}
+
+function createLayoutGroup(id, zone, order, meshNames, properties = {}) {
+  return {
+    id,
+    zone,
+    order,
+    islandRefs: meshNames.map((meshName) => ({ meshName })),
+    ...properties,
+  };
+}
+
+function getConfiguredMeshes(modelMeshes, groups) {
+  const meshesByName = new Map(modelMeshes.map((mesh) => [mesh.name, mesh]));
+  return groups.flatMap(({ islandRefs }) => (
+    islandRefs.map(({ meshName }) => meshesByName.get(meshName))
+  ));
 }
 
 async function loadModelMeshes(modelId) {

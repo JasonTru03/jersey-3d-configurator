@@ -158,14 +158,12 @@ describe('UV pattern pieces on supported real garment models', () => {
 
 function createBrowserFixture(modelId, meshes, uvLayout) {
   const expectedTriangles = {};
-  const serializedMeshes = [];
   const trianglesByRegion = {};
   for (const group of uvLayout.pieceGroups) {
     const mesh = meshes.find(({ name }) => name === group.islandRefs[0].meshName);
     const triangleData = collectRawRenderableUvTriangles(mesh);
     expectedTriangles[group.id] = triangleData.triangleCount;
     trianglesByRegion[group.id] = selectSeparatedTriangles(triangleData.coordinates, 3);
-    serializedMeshes.push(serializeMeshWithDuplicateDrawGroups(mesh));
   }
   assertPinnedTriangleCounts(modelId, expectedTriangles);
   return {
@@ -191,7 +189,7 @@ function createBrowserFixture(modelId, meshes, uvLayout) {
       createDesign('back-custom-text', 'custom-text', 'back', [20, 190, 210], trianglesByRegion.back[1]),
     ],
     expectedTriangles,
-    meshes: serializedMeshes,
+    meshes: meshes.map(serializeMeshWithDuplicateDrawGroups),
     uvLayout,
   };
 }

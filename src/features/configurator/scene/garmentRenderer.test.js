@@ -120,7 +120,16 @@ function makeModel(map) {
   return model;
 }
 
-function makeConfiguredUvModel(map = null, meshNames = ['Cloth_mesh_7', 'Cloth_mesh_4']) {
+const CHELSEA_PATTERN_MESH_NAMES = [
+  'Cloth_mesh',
+  ...Array.from({ length: 18 }, (_, index) => `Cloth_mesh_${index + 1}`),
+];
+const FN8788_PATTERN_MESH_NAMES = [
+  'Cloth_mesh',
+  ...Array.from({ length: 15 }, (_, index) => `Cloth_mesh_${index + 1}`),
+];
+
+function makeConfiguredUvModel(map = null, meshNames = CHELSEA_PATTERN_MESH_NAMES) {
   const model = new THREE.Group();
   meshNames.forEach((name) => {
     const mesh = new THREE.Mesh(
@@ -405,7 +414,7 @@ function createConcurrentModelLoadHarness() {
   const aScene = makeConfiguredUvModel(new THREE.Texture());
   const bScene = makeConfiguredUvModel(
     new THREE.Texture(),
-    ['Cloth_mesh_1', 'Cloth_mesh_5'],
+    FN8788_PATTERN_MESH_NAMES,
   );
   const aLoader = deferred();
   const bLoader = deferred();

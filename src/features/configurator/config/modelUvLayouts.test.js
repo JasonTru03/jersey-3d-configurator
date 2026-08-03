@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { APPEARANCE_ZONES } from './appearance.js';
 import { jerseyProduct } from './productDefinitions.js';
+import { selectGarmentPatternMeshes } from '../scene/modelProjection.js';
 import {
   MODEL_UV_LAYOUTS,
   getModelUvLayout,
@@ -54,6 +55,59 @@ describe('model UV seam layouts', () => {
   it.each([
     {
       model: { id: 'chelsea-jersey', version: '1' },
+      expectedGroups: {
+        body: ['Cloth_mesh_7', 'Cloth_mesh_4'],
+        sleeves: ['Cloth_mesh', 'Cloth_mesh_13'],
+        shoulderSide: [
+          'Cloth_mesh_1', 'Cloth_mesh_2', 'Cloth_mesh_3', 'Cloth_mesh_5', 'Cloth_mesh_6',
+          'Cloth_mesh_10', 'Cloth_mesh_11', 'Cloth_mesh_12', 'Cloth_mesh_14', 'Cloth_mesh_15',
+        ],
+        collar: [
+          'Cloth_mesh_8', 'Cloth_mesh_9', 'Cloth_mesh_16', 'Cloth_mesh_17', 'Cloth_mesh_18',
+        ],
+      },
+    },
+    {
+      model: { id: 'fn8788-jersey', version: '1' },
+      expectedGroups: {
+        body: ['Cloth_mesh_1', 'Cloth_mesh_5'],
+        sleeves: ['Cloth_mesh', 'Cloth_mesh_9'],
+        shoulderSide: [
+          'Cloth_mesh_2', 'Cloth_mesh_3', 'Cloth_mesh_4', 'Cloth_mesh_6', 'Cloth_mesh_7',
+          'Cloth_mesh_10', 'Cloth_mesh_11', 'Cloth_mesh_12', 'Cloth_mesh_13', 'Cloth_mesh_14',
+        ],
+        collar: ['Cloth_mesh_8', 'Cloth_mesh_15'],
+      },
+    },
+  ])('covers every real garment mesh exactly once for $model.id appearance rendering', ({
+    expectedGroups,
+    model,
+  }) => {
+    const layout = getModelUvLayout(model);
+    const meshes = selectGarmentPatternMeshes(garmentMeshesByModel.get(model.id));
+    const configuredNames = layout.appearanceGroups.flatMap(({ islandRefs }) => (
+      islandRefs.map(({ meshName }) => meshName)
+    ));
+
+    expect(layout.appearanceGroups.map(({ id, zone }) => ({ id, zone }))).toEqual([
+      { id: 'body', zone: 'body' },
+      { id: 'sleeves', zone: 'sleeves' },
+      { id: 'shoulderSide', zone: 'shoulderSide' },
+      { id: 'collar', zone: 'collar' },
+    ]);
+    expect(Object.fromEntries(layout.appearanceGroups.map(({ id, islandRefs }) => [
+      id,
+      islandRefs.map(({ meshName }) => meshName),
+    ]))).toEqual(expectedGroups);
+    expect(configuredNames).toHaveLength(new Set(configuredNames).size);
+    expect(configuredNames.toSorted()).toEqual(meshes.map(({ name }) => name).toSorted());
+    expect(validateModelUvLayout(layout, meshes)).toBe(true);
+    expect(layout.pieceGroups.map(({ id }) => id)).toEqual(['front', 'back']);
+  });
+
+  it.each([
+    {
+      model: { id: 'chelsea-jersey', version: '1' },
       evidence: [
         { id: 'front', material: /^zheng mian_/, normalZ: 1 },
         { id: 'back', material: /^hou mian_/, normalZ: -1 },
@@ -95,6 +149,12 @@ describe('model UV seam layouts', () => {
         expect(Object.isFrozen(group.islandRefs)).toBe(true);
         expect(group.islandRefs.every(Object.isFrozen)).toBe(true);
       }
+      expect(Object.isFrozen(layout.appearanceGroups)).toBe(true);
+      for (const group of layout.appearanceGroups) {
+        expect(Object.isFrozen(group)).toBe(true);
+        expect(Object.isFrozen(group.islandRefs)).toBe(true);
+        expect(group.islandRefs.every(Object.isFrozen)).toBe(true);
+      }
     }
   });
 
@@ -111,6 +171,41 @@ describe('model UV seam layouts', () => {
 
     expect(() => validateModelUvLayout(layout, VALID_MESHES))
       .toThrow('找不到网格 "missing-mesh"');
+  });
+
+  it.each([
+    ['omitted mesh', (layout) => layout.appearanceGroups.pop(), '未覆盖'],
+    ['duplicate mesh', (layout) => {
+      layout.appearanceGroups[1].islandRefs[0].meshName = 'front-mesh';
+    }, '重复引用'],
+    ['duplicate mesh in one group', (layout) => {
+      layout.appearanceGroups[0].islandRefs.push({ meshName: 'front-mesh' });
+    }, '重复引用'],
+    ['unknown mesh', (layout) => {
+      layout.appearanceGroups[1].islandRefs[0].meshName = 'missing-mesh';
+    }, '找不到网格 "missing-mesh"'],
+  ])('fails closed for appearance group mesh mapping: %s', (_label, mutate, message) => {
+    const layout = createAppearanceLayout();
+    mutate(layout);
+
+    expect(() => validateModelUvLayout(layout, VALID_MESHES)).toThrow(message);
+  });
+
+  it.each([
+    ['appearanceGroups 为空', (layout) => { layout.appearanceGroups = []; }, '外观组'],
+    ['id 为空', (layout) => { layout.appearanceGroups[0].id = ' '; }, 'id'],
+    ['id 重复', (layout) => { layout.appearanceGroups[1].id = 'body'; }, 'id'],
+    ['zone 未知', (layout) => { layout.appearanceGroups[0].zone = 'unknown'; }, 'zone'],
+    ['order 重复', (layout) => { layout.appearanceGroups[1].order = 0; }, 'order'],
+    ['islandRefs 为空', (layout) => { layout.appearanceGroups[0].islandRefs = []; }, 'islandRefs'],
+    ['meshName 为空', (layout) => {
+      layout.appearanceGroups[0].islandRefs[0].meshName = ' ';
+    }, 'meshName'],
+  ])('拒绝无效外观组配置：%s', (_label, mutate, message) => {
+    const layout = createAppearanceLayout();
+    mutate(layout);
+
+    expect(() => validateModelUvLayout(layout, VALID_MESHES)).toThrow(message);
   });
 
   it('rejects a piece group without usable island references', () => {
@@ -206,6 +301,25 @@ function createGroup({ id, label, order, meshName }) {
     rotation: 0,
     mirrorX: false,
     islandRefs: [{ meshName }],
+  };
+}
+
+function createAppearanceGroup({ id, order, meshNames }) {
+  return {
+    id,
+    order,
+    zone: id,
+    islandRefs: meshNames.map((meshName) => ({ meshName })),
+  };
+}
+
+function createAppearanceLayout() {
+  return {
+    ...createValidLayout(),
+    appearanceGroups: [
+      createAppearanceGroup({ id: 'body', order: 0, meshNames: ['front-mesh'] }),
+      createAppearanceGroup({ id: 'sleeves', order: 1, meshNames: ['back-mesh'] }),
+    ],
   };
 }
 

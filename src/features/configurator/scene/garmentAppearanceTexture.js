@@ -1,4 +1,5 @@
 import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
+import { validateModelUvLayout } from '../config/modelUvLayouts.js';
 
 const UV_REGIONS = {
   bodyFront: [[0.03, 0.05], [0.31, 0.05], [0.34, 0.82], [0.24, 0.95], [0.1, 0.95], [0, 0.82]],
@@ -42,8 +43,10 @@ export function renderModelUvAppearance(
   { modelMeshes, uvLayout },
 ) {
   assertPositiveDimensions(width, height);
+  validateModelUvLayout(uvLayout, modelMeshes, { appearanceOnly: true });
 
-  const groups = [...uvLayout.pieceGroups].sort((left, right) => left.order - right.order);
+  const groups = [...(uvLayout.appearanceGroups ?? uvLayout.pieceGroups)]
+    .sort((left, right) => left.order - right.order);
   const resolvedGroups = resolveConfiguredGroupMeshes(modelMeshes, groups);
   resolvedGroups.forEach(({ group, meshes }) => {
     const meshUvData = [];

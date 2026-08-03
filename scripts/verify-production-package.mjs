@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 const ZIP_ENTRY_NAMES = Object.freeze([
   'design.json',
   'uv-atlas.png',
+  'uv-pattern-pieces.png',
   'uv-reference.pdf',
   'preview-front.png',
   'preview-back.png',
@@ -32,6 +33,14 @@ export function verifyProductionPackageBytes(bytes) {
   ) {
     throw new Error('uv-atlas.png dimensions do not match manifest.json');
   }
+
+  const patternPieces = readPngSize(entries.get('uv-pattern-pieces.png'));
+  if (patternPieces.width !== 4096 || patternPieces.height !== 4096) {
+    throw new Error(
+      `uv-pattern-pieces.png must be 4096x4096; received ${patternPieces.width}x${patternPieces.height}`,
+    );
+  }
+  verifyPatternPieces(manifest.patternPieces, patternPieces);
 
   const pdfPages = countPdfPages(entries.get('uv-reference.pdf'));
   if (pdfPages !== 2) {
@@ -126,6 +135,62 @@ function verifyManifest(entries, manifest) {
   if (typeof manifest.designFingerprint !== 'string' || manifest.designFingerprint.length === 0) {
     throw new Error('manifest.json designFingerprint is missing');
   }
+}
+
+function verifyPatternPieces(declared, png) {
+  if (
+    !isPositiveInteger(declared?.width)
+    || !isPositiveInteger(declared?.height)
+    || !isNonEmptyString(declared.layoutFingerprint)
+    || !Array.isArray(declared.pieces)
+    || declared.pieces.length === 0
+  ) {
+    throw new Error('manifest.json patternPieces is invalid');
+  }
+  if (declared.width !== png.width || declared.height !== png.height) {
+    throw new Error('uv-pattern-pieces.png dimensions do not match manifest.json');
+  }
+
+  const ids = new Set();
+  for (const piece of declared.pieces) {
+    if (
+      !isNonEmptyString(piece?.id)
+      || ids.has(piece.id)
+      || !isPositiveInteger(piece.mappedTriangles)
+      || !Array.isArray(piece.sourceMeshes)
+      || piece.sourceMeshes.length === 0
+      || piece.sourceMeshes.some((name) => !isNonEmptyString(name))
+      || !isPositiveBounds(piece.sourceBounds, 4096, 4096)
+      || !isPositiveBounds(piece.outputBounds, png.width, png.height)
+      || ![0, 90, 180, 270].includes(piece.rotation)
+      || typeof piece.mirrorX !== 'boolean'
+    ) {
+      throw new Error('manifest.json patternPieces is invalid');
+    }
+    ids.add(piece.id);
+  }
+  if (!ids.has('front') || !ids.has('back')) {
+    throw new Error('manifest.json patternPieces is invalid');
+  }
+}
+
+function isPositiveBounds(bounds, maximumWidth, maximumHeight) {
+  return Number.isInteger(bounds?.x)
+    && bounds.x >= 0
+    && Number.isInteger(bounds?.y)
+    && bounds.y >= 0
+    && isPositiveInteger(bounds?.width)
+    && isPositiveInteger(bounds?.height)
+    && bounds.x + bounds.width <= maximumWidth
+    && bounds.y + bounds.height <= maximumHeight;
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function readJson(bytes, filename) {

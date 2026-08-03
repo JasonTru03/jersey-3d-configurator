@@ -9,10 +9,11 @@
 
 1. `design.json`
 2. `uv-atlas.png`
-3. `uv-reference.pdf`
-4. `preview-front.png`
-5. `preview-back.png`
-6. `manifest.json`
+3. `uv-pattern-pieces.png`
+4. `uv-reference.pdf`
+5. `preview-front.png`
+6. `preview-back.png`
+7. `manifest.json`
 
 Atlas 使用模型声明的 `4096 × 4096` UV 尺寸。生产层会先使用快速射线投影；曲面裁剪边界的漏点只在整层低于 98.5% 覆盖率时使用近表面三角形 UV 回退。回退有严格距离上限，远离服装的坏图层仍然失败，不会静默跳过。重复顶点投影使用缓存，降低多图层导出的同步计算峰值。
 
@@ -172,6 +173,39 @@ ZIP 中七个文件齐全：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.
 已知接缝边界：当前布局只声明每个模型的主身 `front` / `back` mesh，不覆盖袖片、领片、侧片等未声明裁片；输出不是工厂 CAD 纸样，仍不包含缝份、放码、对位标记或裁片编号。自动化 fixture 的 `coveragePixels` 是代表性设计内容的非透明像素数，不是整块 UV 岛面积。
 
 状态：Task 6 已完成两份真实 GLB 的 native Canvas 自动化、Chelsea 真实 in-app WebGL 双轮 ZIP 验收与交接记录；FN8788 的 in-app WebGL 页面验收受产品切换入口限制，仍以真实 GLB 集成测试为证据。真实 ZIP 路径为 `C:\Users\Administrator\Downloads\fn8788-jersey-design-001e2b3e.zip` 与 `C:\Users\Administrator\Downloads\fn8788-jersey-design-693aeaa8.zip`。仍未 push、未 merge、未发布、未部署。Task 6 任务前回滚点为 `ebf6b6b2efe79639bb6d65e901dcead1509757af`；本次浏览器证据记录前检查点为 `5841f50e19f1d280a4a62938571753df980baace`。
+
+### 七文件生产包回归与发布检查点（2026-08-03）
+
+Task 7 将离线 CLI verifier 从旧六文件契约升级为严格七文件契约，顺序固定为：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.png`、`uv-reference.pdf`、`preview-front.png`、`preview-back.png`、`manifest.json`。`manifest.json` 必须为六个非 manifest 文件声明精确 byte length 与 SHA-256；`uv-atlas.png` 和 `uv-pattern-pieces.png` 都必须是 4096×4096 PNG。裁片声明必须包含非空布局指纹、尺寸匹配的非空 pieces，并以不同 id 包含 `front` / `back`；每个裁片必须声明正数 `mappedTriangles`、非空来源 mesh、合法旋转/镜像和位于图像范围内的 source/output bounds。缺失文件、空或非法 PNG、长度/哈希不匹配、尺寸不匹配及缺失、空、重复或不完整裁片声明都会 fail closed。
+
+TDD 证据：只修改测试后的 focused RED 为 1 file / 16 tests failed，合法七文件包被旧六文件列表拒绝，其余断言也因旧契约未进入目标校验；最小实现后的 focused GREEN 为 1 file / 16 tests passed。2026-08-03 的完整验证结果：
+
+```powershell
+npx vitest run scripts/verify-production-package.test.js
+# 1 file / 16 tests passed，exit 0
+
+npm test
+# 78 files / 1,214 tests passed，exit 0
+
+npm run build
+# app 与 Shopify production build 均完成，exit 0
+
+npm run build:showcase
+# showcase build 完成，exit 0
+
+npx wrangler deploy --dry-run
+# 读取 dist 中 7 个静态资产，并列出既有 DESIGN_QUOTES KV、两项 rate-limit binding 与环境变量，exit 0
+
+node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn8788-jersey-design-001e2b3e.zip
+# PASS (001e2b3e, 4096x4096, 2 PDF pages)，精确七文件
+
+node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn8788-jersey-design-693aeaa8.zip
+# PASS (693aeaa8, 4096x4096, 2 PDF pages)，精确七文件
+```
+
+全量测试仍打印两条既有 jsdom navigation 提示；Vite 仍打印大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler dry-run 还打印代理环境提示，并由 `npx` 临时取得 Wrangler 4.118.0。以上命令均为 exit 0，没有新增依赖、secret 或 binding。
+
+七文件格式目前只是本地生产产物契约变更；已发布 showcase 保持不变，必须取得用户明确发布批准后才能部署。代码侧回退方式是对未来 feature merge 执行普通 `git revert`；若以后已部署到 Cloudflare，则使用 Cloudflare deployment rollback 回到上一已知正常版本。本任务未 push、未 merge、未发布、未部署。
 
 ## 生产边界与回滚
 

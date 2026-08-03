@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { crc32, inflateSync } from 'node:zlib';
 
 const ZIP_ENTRY_NAMES = Object.freeze([
   'design.json',
@@ -15,6 +16,7 @@ const ZIP_ENTRY_NAMES = Object.freeze([
 const ARTIFACT_NAMES = Object.freeze(ZIP_ENTRY_NAMES.slice(0, -1));
 const LOCAL_FILE_HEADER = 0x04034b50;
 const CENTRAL_DIRECTORY_HEADER = 0x02014b50;
+const MAX_PNG_INFLATED_BYTES = (4096 * 4 + 1) * 4096;
 
 export function verifyProductionPackageBytes(bytes) {
   const entries = readStoreOnlyZip(bytes);
@@ -109,29 +111,49 @@ export function readPngSize(bytes) {
   let height;
   let hasImageData = false;
   let hasEnd = false;
+  let imageDataEnded = false;
+  const imageDataChunks = [];
 
   while (offset < source.length) {
     if (offset + 12 > source.length) throw new Error('Invalid PNG structure');
     const length = view.getUint32(offset);
     const dataStart = offset + 8;
-    const chunkEnd = dataStart + length + 4;
+    const dataEnd = dataStart + length;
+    const chunkEnd = dataEnd + 4;
     if (chunkEnd > source.length) throw new Error('Invalid PNG structure');
 
     const type = source.subarray(offset + 4, offset + 8);
+    if (view.getUint32(dataEnd) !== crc32(source.subarray(offset + 4, dataEnd))) {
+      throw new Error('Invalid PNG structure');
+    }
     if (offset === 8) {
       if (length !== 13 || !sameBytes(type, [73, 72, 68, 82])) {
         throw new Error('Invalid PNG structure');
       }
       width = view.getUint32(dataStart);
       height = view.getUint32(dataStart + 4);
-      if (!isPositiveInteger(width) || !isPositiveInteger(height)) {
+      if (
+        !isPositiveInteger(width)
+        || !isPositiveInteger(height)
+        || source[dataStart + 8] !== 8
+        || source[dataStart + 9] !== 6
+        || source[dataStart + 10] !== 0
+        || source[dataStart + 11] !== 0
+        || source[dataStart + 12] !== 0
+      ) {
         throw new Error('Invalid PNG structure');
       }
     } else if (sameBytes(type, [73, 72, 68, 82])) {
       throw new Error('Invalid PNG structure');
     }
 
-    if (sameBytes(type, [73, 68, 65, 84]) && length > 0) hasImageData = true;
+    if (sameBytes(type, [73, 68, 65, 84])) {
+      if (imageDataEnded) throw new Error('Invalid PNG structure');
+      imageDataChunks.push(source.slice(dataStart, dataEnd));
+      if (length > 0) hasImageData = true;
+    } else if (imageDataChunks.length > 0) {
+      imageDataEnded = true;
+    }
     if (sameBytes(type, [73, 69, 78, 68])) {
       if (length !== 0 || chunkEnd !== source.length) {
         throw new Error('Invalid PNG structure');
@@ -145,6 +167,30 @@ export function readPngSize(bytes) {
 
   if (!hasImageData || !hasEnd || offset !== source.length) {
     throw new Error('Invalid PNG structure');
+  }
+  const rowLength = width * 4 + 1;
+  const expectedLength = rowLength * height;
+  if (
+    !Number.isSafeInteger(expectedLength)
+    || expectedLength <= 0
+    || expectedLength > MAX_PNG_INFLATED_BYTES
+  ) {
+    throw new Error('Invalid PNG structure');
+  }
+
+  let scanlines;
+  try {
+    scanlines = inflateSync(concatenateBytes(imageDataChunks), {
+      maxOutputLength: expectedLength,
+    });
+  } catch {
+    throw new Error('Invalid PNG structure');
+  }
+  if (scanlines.byteLength !== expectedLength) {
+    throw new Error('Invalid PNG structure');
+  }
+  for (let row = 0; row < height; row += 1) {
+    if (scanlines[row * rowLength] > 4) throw new Error('Invalid PNG structure');
   }
   return { width, height };
 }
@@ -273,6 +319,17 @@ function asUint8Array(bytes) {
 
 function sameBytes(actual, expected) {
   return expected.every((value, index) => actual[index] === value);
+}
+
+function concatenateBytes(parts) {
+  const byteLength = parts.reduce((total, part) => total + part.byteLength, 0);
+  const output = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.byteLength;
+  }
+  return output;
 }
 
 async function runCli() {

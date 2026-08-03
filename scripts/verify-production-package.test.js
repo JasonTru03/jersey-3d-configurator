@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { crc32, deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { createProductionBundle } from '../src/features/configurator/designs/productionBundle.js';
 import {
@@ -14,6 +15,7 @@ const ARTIFACT_NAMES = [
   'preview-front.png',
   'preview-back.png',
 ];
+const COMPRESSED_SCANLINE_CACHE = new Map();
 
 describe('verifyProductionPackageBytes', () => {
   it('accepts the exact seven-file package with matching hashes and dimensions', async () => {
@@ -76,6 +78,32 @@ describe('verifyProductionPackageBytes', () => {
     })],
     ['a truncated later chunk', () => createPngWithTruncatedIdat(4096, 4096)],
     ['bytes after IEND', () => concatenateBytes(createMinimalPng(4096, 4096), [1])],
+  ])('rejects uv-pattern-pieces.png with %s', async (_label, createPng) => {
+    const packageBytes = await createPackageBytes({ patternPiecesPng: createPng() });
+
+    expect(() => verifyProductionPackageBytes(packageBytes)).toThrow('Invalid PNG structure');
+  });
+
+  it.each([
+    ['an invalid IHDR CRC', () => createMinimalPng(4096, 4096, {
+      corruptIhdrCrc: true,
+    })],
+    ['an invalid IEND CRC', () => createMinimalPng(4096, 4096, {
+      corruptIendCrc: true,
+    })],
+    ['bit depth zero', () => createMinimalPng(4096, 4096, { bitDepth: 0 })],
+    ['a nonstandard compression method', () => createMinimalPng(4096, 4096, {
+      compression: 1,
+    })],
+    ['non-zlib IDAT data', () => createMinimalPng(4096, 4096, {
+      idatData: new Uint8Array([1, 2, 3]),
+    })],
+    ['a decompressed scanline length mismatch', () => createMinimalPng(4096, 4096, {
+      rawScanlines: new Uint8Array([0]),
+    })],
+    ['an invalid scanline filter byte', () => createMinimalPng(4096, 4096, {
+      scanlineFilter: 5,
+    })],
   ])('rejects uv-pattern-pieces.png with %s', async (_label, createPng) => {
     const packageBytes = await createPackageBytes({ patternPiecesPng: createPng() });
 
@@ -328,19 +356,37 @@ function file(filename, contents, type) {
 }
 
 function createMinimalPng(width, height, {
-  idatData = new Uint8Array([0]),
+  bitDepth = 8,
+  colorType = 6,
+  compression = 0,
+  corruptIendCrc = false,
+  corruptIhdrCrc = false,
+  filter = 0,
+  idatData,
   ihdrLength = 13,
   includeIdat = true,
   includeIend = true,
+  interlace = 0,
+  rawScanlines,
+  scanlineFilter = 0,
 } = {}) {
   const ihdr = new Uint8Array(13);
   const view = new DataView(ihdr.buffer);
   view.setUint32(0, width);
   view.setUint32(4, height);
-  ihdr.set([8, 6, 0, 0, 0], 8);
-  const chunks = [createPngChunk('IHDR', ihdr, ihdrLength)];
-  if (includeIdat) chunks.push(createPngChunk('IDAT', idatData));
-  if (includeIend) chunks.push(createPngChunk('IEND', new Uint8Array()));
+  ihdr.set([bitDepth, colorType, compression, filter, interlace], 8);
+  const chunks = [createPngChunk('IHDR', ihdr, ihdrLength, true, corruptIhdrCrc)];
+  if (includeIdat) {
+    const compressed = idatData === undefined
+      ? rawScanlines === undefined
+        ? createCompressedRgbaScanlines(width, height, scanlineFilter)
+        : deflateSync(rawScanlines)
+      : idatData;
+    chunks.push(createPngChunk('IDAT', compressed));
+  }
+  if (includeIend) {
+    chunks.push(createPngChunk('IEND', new Uint8Array(), 0, true, corruptIendCrc));
+  }
   return concatenateBytes([137, 80, 78, 71, 13, 10, 26, 10], ...chunks);
 }
 
@@ -362,7 +408,13 @@ function createPngWithTruncatedIdat(width, height) {
   return concatenateBytes(validPrefix, createPngChunk('IDAT', [1], 5, false));
 }
 
-function createPngChunk(type, data, declaredLength = data.length, includeCrc = true) {
+function createPngChunk(
+  type,
+  data,
+  declaredLength = data.length,
+  includeCrc = true,
+  corruptCrc = false,
+) {
   const bytes = new Uint8Array(8 + data.length + (includeCrc ? 4 : 0));
   const view = new DataView(bytes.buffer);
   const typeBytes = new TextEncoder().encode(type);
@@ -370,20 +422,30 @@ function createPngChunk(type, data, declaredLength = data.length, includeCrc = t
   bytes.set(typeBytes, 4);
   bytes.set(data, 8);
   if (includeCrc) {
-    view.setUint32(8 + data.length, crc32(concatenateBytes(typeBytes, data)));
+    const checksum = crc32(concatenateBytes(typeBytes, data));
+    view.setUint32(8 + data.length, corruptCrc ? checksum ^ 1 : checksum);
   }
   return bytes;
 }
 
-function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-    }
+function createRgbaScanlines(width, height, filterByte) {
+  const rowLength = width * 4 + 1;
+  const bytes = new Uint8Array(rowLength * height);
+  for (let row = 0; row < height; row += 1) {
+    bytes[row * rowLength] = filterByte;
   }
-  return (crc ^ 0xffffffff) >>> 0;
+  return bytes;
+}
+
+function createCompressedRgbaScanlines(width, height, filterByte) {
+  const key = `${width}x${height}:${filterByte}`;
+  if (!COMPRESSED_SCANLINE_CACHE.has(key)) {
+    COMPRESSED_SCANLINE_CACHE.set(
+      key,
+      deflateSync(createRgbaScanlines(width, height, filterByte)),
+    );
+  }
+  return COMPRESSED_SCANLINE_CACHE.get(key);
 }
 
 function concatenateBytes(...parts) {

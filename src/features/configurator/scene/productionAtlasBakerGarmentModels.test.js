@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DecorationEditor } from './decorationEditor.js';
+import { selectDecorationMeshes } from './garmentRenderer.js';
 import { bakeProductionAtlas } from './productionAtlasBaker.js';
 import { loadRealGarmentMeshes } from './realGarmentModelTestHelpers.js';
 
@@ -12,7 +13,10 @@ beforeAll(async () => {
     'chelsea-jersey.glb',
     'fn8788-jersey.glb',
   ].map(async (modelName) => {
-    garmentMeshesByModel.set(modelName, await loadRealGarmentMeshes(modelName));
+    garmentMeshesByModel.set(
+      modelName,
+      selectDecorationMeshes(await loadRealGarmentMeshes(modelName)),
+    );
   }));
 });
 

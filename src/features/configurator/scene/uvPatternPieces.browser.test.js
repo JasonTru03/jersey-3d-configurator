@@ -1,6 +1,4 @@
-import { spawnSync } from 'node:child_process';
 import {
-  existsSync,
   mkdtempSync,
   rmSync,
   writeFileSync,
@@ -9,16 +7,17 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-
-const CHROME_PATH = findBrowserPath();
+import {
+  requireNativeCanvasBrowserPath,
+  runNativeCanvasBrowser,
+} from './nativeCanvasBrowserTestHelpers.js';
 
 describe('UV pattern pieces Chrome smoke', () => {
-  it('resolves an installed browser on Windows instead of skipping the smoke', () => {
-    if (process.platform === 'win32') expect(CHROME_PATH).toBeTruthy();
+  it('requires an installed browser instead of skipping native Canvas verification', () => {
+    expect(requireNativeCanvasBrowserPath()).toBeTruthy();
   });
 
-  const browserIt = CHROME_PATH ? it : it.skip;
-  browserIt('runs the public extraction pipeline against native Canvas and Blob', () => {
+  it('runs the public extraction pipeline against native Canvas and Blob', () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'uv-pattern-pieces-'));
     try {
       const htmlPath = join(temporaryDirectory, 'smoke.html');
@@ -39,23 +38,11 @@ describe('UV pattern pieces Chrome smoke', () => {
         '--dump-dom',
         pathToFileURL(htmlPath).href,
       ];
-      const result = spawnSync(CHROME_PATH, argumentsList, {
-        encoding: 'utf8',
-        maxBuffer: 10 * 1024 * 1024,
+      const { browserPath, command, result } = runNativeCanvasBrowser({
+        argumentsList,
+        label: 'Chrome smoke',
         timeout: 30_000,
       });
-      const command = [CHROME_PATH, ...argumentsList].map(quoteCommandArgument).join(' ');
-      if (result.error) {
-        throw new Error(`Chrome smoke 无法启动。\n命令：${command}\n错误：${result.error.message}`);
-      }
-      if (result.status !== 0) {
-        throw new Error([
-          `Chrome smoke 退出码为 ${result.status}。`,
-          `命令：${command}`,
-          `stdout：${result.stdout}`,
-          `stderr：${result.stderr}`,
-        ].join('\n'));
-      }
 
       const marker = 'UV_SMOKE:';
       const markerStart = result.stdout.indexOf(marker);
@@ -70,7 +57,7 @@ describe('UV pattern pieces Chrome smoke', () => {
       }
       const smokeResult = JSON.parse(result.stdout.slice(markerStart + marker.length, markerEnd));
       console.info('UV Chrome smoke', {
-        browserPath: CHROME_PATH,
+        browserPath,
         sharedEdgeAlphas: smokeResult.sharedEdgeAlphas,
       });
       expect(smokeResult.ok, smokeResult.error).toBe(true);
@@ -91,38 +78,6 @@ describe('UV pattern pieces Chrome smoke', () => {
     }
   }, 40_000);
 });
-
-function findBrowserPath(environment = process.env, platform = process.platform) {
-  const candidates = [environment.CHROME_PATH, environment.BROWSER_PATH];
-  if (platform === 'win32') {
-    candidates.push(
-      join(environment.ProgramFiles ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'),
-      join(environment['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Google/Chrome/Application/chrome.exe'),
-      join(environment.LOCALAPPDATA ?? '', 'Google/Chrome/Application/chrome.exe'),
-      join(environment.ProgramFiles ?? 'C:\\Program Files', 'Microsoft/Edge/Application/msedge.exe'),
-      join(environment['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft/Edge/Application/msedge.exe'),
-    );
-  } else if (platform === 'darwin') {
-    candidates.push(
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-    );
-  } else {
-    candidates.push(
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/microsoft-edge',
-      '/usr/bin/microsoft-edge-stable',
-    );
-  }
-  return candidates.filter(Boolean).find((candidate) => existsSync(candidate)) ?? null;
-}
-
-function quoteCommandArgument(value) {
-  return /\s/.test(value) ? `"${value}"` : value;
-}
 
 function expectOpaqueColor(actual, expectedRgb) {
   expectedRgb.forEach((channel, index) => {

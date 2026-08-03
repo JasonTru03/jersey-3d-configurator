@@ -111,10 +111,10 @@ Task 6 在未修改生产 renderer 或 UV 实现的前提下，使用 `GLTFLoade
 
 | 模型 ID / version | GLB | piece count / ids | front `mappedTriangles` / `coveragePixels` | back `mappedTriangles` / `coveragePixels` | 配置方向 |
 | --- | --- | --- | --- | --- | --- |
-| `chelsea-jersey@1` | `chelsea-jersey.glb` | 2 / `front`, `back` | 10,142 / 1,592 | 12,320 / 910 | front/back 均 `rotation: 0`, `mirrorX: false` |
-| `fn8788-jersey@1` | `fn8788-jersey.glb` | 2 / `front`, `back` | 6,282 / 2,849 | 7,316 / 1,533 | front/back 均 `rotation: 0`, `mirrorX: false` |
+| `chelsea-jersey@1` | `chelsea-jersey.glb` | 2 / `front`, `back` | 10,142 / 1,887 | 12,320 / 910 | front/back 均 `rotation: 0`, `mirrorX: false` |
+| `fn8788-jersey@1` | `fn8788-jersey.glb` | 2 / `front`, `back` | 6,282 / 3,323 | 7,316 / 1,533 | front/back 均 `rotation: 0`, `mirrorX: false` |
 
-稳定证据包括：每个 piece 非空且 `coveragePixels > 0`；正面设计色只出现在 `front`，背面设计色只出现在 `back`；player set、custom text、preset artwork、transparent upload 使用不同 raster 形状；front player set 另带三个非对称、有序的红/绿/蓝方形锚点。测试不再复用生产 `transformPiecePoint`，而是依据当前布局明确声明的 `rotation: 0` / `mirrorX: false` 使用独立 identity 坐标公式。三个锚点对应的 raw/output 中心 RGB 使用数组直接相等断言，不依赖目标色容差；三色 normalized coverage 使用显式绝对差并严格断言 `< 0.025`。实测最大差分别为 Chelsea `0.006340579710144956`、FN8788 `0.024492587312074765`，本轮全局最大值为 `0.024492587312074765`。按 mirrorX 或 180° rotation 反事实坐标采样时均为 0/3 匹配，因此能识别方向错误。两个完全重叠的可见 draw group 不会让 `mappedTriangles` 翻倍；raw Atlas 与裁片图中的上传图案中心 alpha 均为 0，裁片之间的间隔 alpha 也为 0。
+稳定证据包括：每个 piece 非空且 `coveragePixels > 0`；正面设计色只出现在 `front`，背面设计色只出现在 `back`；player set、custom text、preset artwork、transparent upload 使用不同 raster 形状；front player set 另带三个非对称、有序的红/绿/蓝方形锚点。测试不再复用生产 `transformPiecePoint`，而是依据当前布局明确声明的 `rotation: 0` / `mirrorX: false` 使用独立 identity 坐标公式。三个锚点对应的 raw/output 中心 RGB 使用数组直接相等断言，不依赖目标色容差；三色 normalized coverage 使用显式绝对差并严格断言 `< 0.025`。方向方块扩大为 9×9，并从中心向顶点方向外移到 65%，避免覆盖小三角形的设计中心；实测最大差分别为 Chelsea `0.012345679012345678`、FN8788 `0.014846565585481863`，本轮全局最大值为 `0.014846565585481863`。按 mirrorX 或 180° rotation 反事实坐标采样时均为 0/3 匹配，因此能识别方向错误。两个完全重叠的可见 draw group 不会让 `mappedTriangles` 翻倍；raw Atlas 与裁片图中的上传图案中心 alpha 均为 0，裁片之间的间隔 alpha 也为 0。
 
 TDD 记录：首次真实链路 RED 为 1 passed / 2 failed，不是缺文件或语法错误；两份 GLB 均已完成加载和裁片提取，但 1024 测试 Atlas 中过小的透明上传孔在 raw/output 中分别出现非零 alpha（Chelsea 198/42，FN8788 21/26），没有满足透明内容证据。根因是代表性上传 fixture 的孔径落入 Canvas 抗锯齿边缘，不是生产 UV 代码缺陷；将测试 Atlas 提高到 2048 并把采样点放到透明孔内部及环带中段后，raw/output 中心 alpha 均为 0，环带 alpha 为 246–255，进入 GREEN。
 
@@ -122,11 +122,18 @@ TDD 记录：首次真实链路 RED 为 1 passed / 2 failed，不是缺文件或
 
 二次规格复审继续按 TDD：新增两个负向断言后的 RED 为 3 passed / 2 failed，证明旧 helper 会接受 raw/output 每通道 RGB 漂移 1，也会接受 normalized coverage 漂移 0.03。GREEN 后对应 RGB 改为直接相等，coverage 改为显式绝对差 `< 0.025`；没有使用 `toBeCloseTo`，也没有修改生产代码。
 
+2026-08-03 质量复审加固仍只修改测试与交接文档。Native Canvas 用例已抽到共享浏览器 helper：Windows、macOS、Linux 均会查找 Chrome/Chromium/Edge，Linux 额外覆盖 `/usr/bin/google-chrome-stable` 与 `/usr/bin/chromium-browser`；找不到浏览器时会明确抛出 `Native Canvas` 错误，核心用例不再通过 `it.skip` 静默放行。该项首次 RED 为 2 passed / 1 failed，证明旧查找结果仍返回 `null`；GREEN 后共享 helper 与两条原生 Canvas 链路统一使用 fail-closed runner。
+
+真实模型三角形期望值不再调用生产 `collectRenderableUvTriangles`。新增测试专用独立 iterator，直接读取 position/UV/index、drawRange、可见 material group，独立执行重复顶点集合去重、非有限顶点过滤、UV 越界失败和局部 `1e-12` 退化面积过滤；源码约束同时禁止 fixture 与 oracle 引入生产收集器。固定计数为 Chelsea front `10,142` / back `12,320`、FN8788 front `6,282` / back `7,316`，任一收缩或漂移都会在启动浏览器前失败。独立性 RED 为 1 failed，oracle 行为 RED 为 1 passed / 3 failed；GREEN 后 oracle 4/4 通过。共享 GLB loader 现在返回完整 mesh 列表，Atlas 测试自行调用 `selectDecorationMeshes`，UV 裁片测试自行调用 `selectGarmentPatternMeshes`；职责拆分 RED 为 4 passed / 1 failed，随后进入 GREEN。
+
 本轮自动化命令：
 
 ```powershell
 npx vitest run src/features/configurator/scene/uvPatternPiecesGarmentModels.test.js `
-  src/features/configurator/scene/productionAtlasBakerGarmentModels.test.js
+  src/features/configurator/scene/productionAtlasBakerGarmentModels.test.js `
+  src/features/configurator/scene/nativeCanvasBrowserTestHelpers.test.js `
+  src/features/configurator/scene/realGarmentPatternTestOracle.test.js `
+  src/features/configurator/scene/uvPatternPieces.browser.test.js
 
 npx vitest run src/features/configurator/scene src/features/configurator/designs
 npx vitest run --exclude scripts/verify-production-package.test.js
@@ -134,9 +141,9 @@ npm run build
 git diff --check
 ```
 
-本机结果：focused 2 files / 11 tests 通过；scene/designs 31 files / 553 tests 通过；排除 package verifier 的全量 75 files / 1,189 tests 通过；app 与 Shopify 构建通过；`git diff --check` 无输出。全量测试仍打印两条既有 jsdom `Not implemented: navigation to another Document` 提示；构建仍打印既有大 chunk 与 `inlineDynamicImports` 警告，均未造成失败。
+本机结果：2026-08-03 focused 5 files / 22 tests 通过；scene/designs 33 files / 562 tests 通过；排除 package verifier 的全量 77 files / 1,198 tests 通过；app 与 Shopify 构建通过；`git diff --check` 无空白错误。全量测试打印两条既有 jsdom `Not implemented: navigation to another Document` 提示；构建打印既有大 chunk 与 `inlineDynamicImports` 警告，均未造成失败。
 
-平台限制：像素级集成测试会优先使用本机已安装的 Chrome/Edge，并在 Windows 上明确要求能找到浏览器；非 Windows 环境若没有可识别浏览器路径则跳过 native Canvas 用例。本轮没有为 CI 新增浏览器或 Canvas 依赖。
+平台限制：像素级集成测试要求能找到 Chrome、Chromium 或 Edge；可用 `CHROME_PATH` / `BROWSER_PATH` 显式指定。所有平台缺少可识别浏览器时都会失败，不再跳过 native Canvas 用例。本轮没有为 CI 新增浏览器或 Canvas 依赖。
 
 视觉验收仍待主代理在真实页面执行，不能标记为已通过：分别切换 `chelsea-jersey@1` 与 `fn8788-jersey@1`，生成生产 ZIP，对照 `uv-atlas.png` 与 `uv-pattern-pieces.png` 检查正背面文字/号码只落入对应裁片、裁片轮廓符合接缝、文字无镜像、透明间隔存在，并保存可追溯的导出或截图路径。
 

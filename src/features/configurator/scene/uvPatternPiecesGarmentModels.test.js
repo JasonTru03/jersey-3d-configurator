@@ -1,6 +1,4 @@
-import { spawnSync } from 'node:child_process';
 import {
-  existsSync,
   mkdtempSync,
   rmSync,
   writeFileSync,
@@ -14,7 +12,15 @@ import {
   loadRealGarmentMeshes,
   REAL_GARMENT_MODELS,
 } from './realGarmentModelTestHelpers.js';
-import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
+import {
+  requireNativeCanvasBrowserPath,
+  runNativeCanvasBrowser,
+} from './nativeCanvasBrowserTestHelpers.js';
+import { selectGarmentPatternMeshes } from './modelProjection.js';
+import {
+  assertPinnedTriangleCounts,
+  collectRawRenderableUvTriangles,
+} from './realGarmentPatternTestOracle.js';
 
 const ATLAS_SIZE = 2048;
 const MAX_NORMALIZED_COVERAGE_DIFF = 0.025;
@@ -23,15 +29,14 @@ const DIRECTION_MARKER_COLORS = [
   [35, 205, 95],
   [45, 95, 235],
 ];
-const CHROME_PATH = findBrowserPath();
 const loadedModels = new Map();
 
 beforeAll(async () => {
   vi.stubGlobal('createImageBitmap', async () => ({ close() {}, height: 1, width: 1 }));
   await Promise.all(REAL_GARMENT_MODELS.map(async ({ assetName, model }) => {
-    const meshes = await loadRealGarmentMeshes(assetName);
+    const meshes = selectGarmentPatternMeshes(await loadRealGarmentMeshes(assetName));
     const uvLayout = getModelUvLayout(model);
-    loadedModels.set(model.id, createBrowserFixture(meshes, uvLayout));
+    loadedModels.set(model.id, createBrowserFixture(model.id, meshes, uvLayout));
   }));
 });
 
@@ -40,8 +45,8 @@ afterAll(() => {
 });
 
 describe('UV pattern pieces on supported real garment models', () => {
-  it('resolves an installed browser on Windows for native pixel verification', () => {
-    if (process.platform === 'win32') expect(CHROME_PATH).toBeTruthy();
+  it('requires an installed browser instead of skipping native real-model verification', () => {
+    expect(requireNativeCanvasBrowserPath()).toBeTruthy();
   });
 
   it('rejects output RGB drift even when both samples remain inside the target-color tolerance', () => {
@@ -68,8 +73,7 @@ describe('UV pattern pieces on supported real garment models', () => {
     expect(() => expectDirectionalEvidence(evidence)).toThrow();
   });
 
-  const browserIt = CHROME_PATH ? it : it.skip;
-  browserIt.each(REAL_GARMENT_MODELS)(
+  it.each(REAL_GARMENT_MODELS)(
     'extracts isolated front/back design content from $model.id@$model.version',
     ({ assetName, model }) => {
       const result = runBrowserExtraction({
@@ -109,7 +113,7 @@ describe('UV pattern pieces on supported real garment models', () => {
         const oppositeRegion = design.region === 'front' ? 'back' : 'front';
         expect(result.pieceColorCounts[oppositeRegion][design.id]).toBe(0);
         if (design.kind !== 'transparent-upload') {
-          expectColor(result.designSamples[design.id], design.color);
+          expectColor(result.designSamples[design.id], design.color, design.id);
         }
       }
 
@@ -128,17 +132,18 @@ describe('UV pattern pieces on supported real garment models', () => {
   );
 });
 
-function createBrowserFixture(meshes, uvLayout) {
+function createBrowserFixture(modelId, meshes, uvLayout) {
   const expectedTriangles = {};
   const serializedMeshes = [];
   const trianglesByRegion = {};
   for (const group of uvLayout.pieceGroups) {
     const mesh = meshes.find(({ name }) => name === group.islandRefs[0].meshName);
-    const triangleData = collectRenderableUvTriangles(mesh);
+    const triangleData = collectRawRenderableUvTriangles(mesh);
     expectedTriangles[group.id] = triangleData.triangleCount;
     trianglesByRegion[group.id] = selectSeparatedTriangles(triangleData.coordinates, 3);
     serializedMeshes.push(serializeMeshWithDuplicateDrawGroups(mesh));
   }
+  assertPinnedTriangleCounts(modelId, expectedTriangles);
   return {
     designs: [
       createDesign(
@@ -239,20 +244,12 @@ function runBrowserExtraction({ assetName, fixture, model }) {
       '--dump-dom',
       pathToFileURL(htmlPath).href,
     ];
-    const processResult = spawnSync(CHROME_PATH, argumentsList, {
-      encoding: 'utf8',
+    const { result: processResult } = runNativeCanvasBrowser({
+      argumentsList,
+      label: `真实模型 ${assetName} 的 Chrome UV 裁片测试`,
       maxBuffer: 20 * 1024 * 1024,
       timeout: 50_000,
     });
-    if (processResult.error || processResult.status !== 0) {
-      throw new Error([
-        `真实模型 ${assetName} 的 Chrome UV 裁片测试失败。`,
-        `模型：${model.id}@${model.version}`,
-        `错误：${processResult.error?.message ?? `exit ${processResult.status}`}`,
-        `stdout：${processResult.stdout}`,
-        `stderr：${processResult.stderr}`,
-      ].join('\n'));
-    }
     const marker = 'UV_REAL_MODEL:';
     const markerStart = processResult.stdout.indexOf(marker);
     const markerEnd = processResult.stdout.indexOf('</body>', markerStart);
@@ -425,9 +422,9 @@ function getDirectionMarker(design) {
   const center = average(outer);
   return {
     colors: design.directionMarkerColors,
-    halfSize: 3,
+    halfSize: 4,
     points: outer.map((point) => {
-      const markerPoint = interpolate(center, point, 0.48);
+      const markerPoint = interpolate(center, point, 0.65);
       return { x: Math.round(markerPoint.x), y: Math.round(markerPoint.y) };
     }),
   };
@@ -659,28 +656,11 @@ try {
 </html>`;
 }
 
-function findBrowserPath(environment = process.env, platform = process.platform) {
-  const candidates = [environment.CHROME_PATH, environment.BROWSER_PATH];
-  if (platform === 'win32') {
-    candidates.push(
-      join(environment.ProgramFiles ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'),
-      join(environment['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Google/Chrome/Application/chrome.exe'),
-      join(environment.LOCALAPPDATA ?? '', 'Google/Chrome/Application/chrome.exe'),
-      join(environment.ProgramFiles ?? 'C:\\Program Files', 'Microsoft/Edge/Application/msedge.exe'),
-    );
-  } else if (platform === 'darwin') {
-    candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
-  } else {
-    candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/microsoft-edge');
-  }
-  return candidates.filter(Boolean).find((candidate) => existsSync(candidate)) ?? null;
-}
-
-function expectColor(actual, expected) {
+function expectColor(actual, expected, label = 'direction marker') {
   expected.forEach((channel, index) => {
-    expect(Math.abs(actual[index] - channel)).toBeLessThanOrEqual(12);
+    expect(Math.abs(actual[index] - channel), `${label} RGB channel ${index}`).toBeLessThanOrEqual(12);
   });
-  expect(actual[3]).toBeGreaterThan(200);
+  expect(actual[3], `${label} alpha`).toBeGreaterThan(200);
 }
 
 function createDirectionalEvidence(overrides = {}) {

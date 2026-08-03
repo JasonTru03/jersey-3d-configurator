@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { selectDecorationMeshes } from './garmentRenderer.js';
 
 export const REAL_GARMENT_MODELS = Object.freeze([
   Object.freeze({
@@ -41,5 +40,5 @@ export async function loadRealGarmentMeshes(modelName) {
     }
     modelMeshes.push(object);
   });
-  return selectDecorationMeshes(modelMeshes);
+  return modelMeshes;
 }

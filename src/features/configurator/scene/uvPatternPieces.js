@@ -3,6 +3,11 @@ import {
   collectRenderableUvTriangles,
   iterateRenderableUvTriangles,
 } from './renderableUvTriangles.js';
+import {
+  applyPatternOutputTransform,
+  resolvePatternOutputTransform,
+  transformPatternOutputBounds,
+} from './uvPatternOutputTransform.js';
 
 const OUTPUT_SIZE = 4096;
 const TRIANGLE_BATCH_SIZE = 128;
@@ -47,6 +52,12 @@ export async function createUvPatternPieces({
   yieldControl = yieldToBrowser,
 }) {
   validateModelUvLayout(uvLayout, meshes);
+  const outputTransform = resolvePatternOutputTransform(uvLayout);
+  const canvasTransform = {
+    width: OUTPUT_SIZE,
+    height: OUTPUT_SIZE,
+    ...outputTransform,
+  };
   validateSourceAtlas(atlasCanvas, atlasSize);
   const groups = buildUniqueGroups(uvLayout.pieceGroups, meshes);
   const extractedPieces = [];
@@ -71,75 +82,85 @@ export async function createUvPatternPieces({
     if (!context) throw new Error('无法创建 UV 裁片画布。');
     context.clearRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
     const pieces = [];
+    context.save();
+    try {
+      applyPatternOutputTransform(context, canvasTransform);
+      for (let index = 0; index < extractedPieces.length; index += 1) {
+        const extracted = extractedPieces[index];
+        const { outputBounds: layoutBounds, scale } = layout[index];
+        const temporaryCanvases = [];
+        try {
+          const maskCanvas = createCanvas(extracted.sourceBounds.width, extracted.sourceBounds.height);
+          temporaryCanvases.push(maskCanvas);
+          const sourceCanvas = createCanvas(extracted.sourceBounds.width, extracted.sourceBounds.height);
+          temporaryCanvases.push(sourceCanvas);
+          const orientedCanvas = createCanvas(extracted.orientedSize.width, extracted.orientedSize.height);
+          temporaryCanvases.push(orientedCanvas);
 
-    for (let index = 0; index < extractedPieces.length; index += 1) {
-      const extracted = extractedPieces[index];
-      const { outputBounds, scale } = layout[index];
-      const temporaryCanvases = [];
-      try {
-        const maskCanvas = createCanvas(extracted.sourceBounds.width, extracted.sourceBounds.height);
-        temporaryCanvases.push(maskCanvas);
-        const sourceCanvas = createCanvas(extracted.sourceBounds.width, extracted.sourceBounds.height);
-        temporaryCanvases.push(sourceCanvas);
-        const orientedCanvas = createCanvas(extracted.orientedSize.width, extracted.orientedSize.height);
-        temporaryCanvases.push(orientedCanvas);
-
-        await drawTriangleMaskBatches({
-          context: maskCanvas.getContext('2d'),
-          sourceBounds: extracted.sourceBounds,
-          triangles: extracted.triangles,
-          yieldControl,
-        });
-        applyPieceMask({
-          context: sourceCanvas.getContext('2d'),
-          atlasCanvas,
-          maskCanvas,
-          sourceBounds: extracted.sourceBounds,
-        });
-        drawOrientedPiece(
-          orientedCanvas.getContext('2d'),
-          sourceCanvas,
-          extracted.sourceBounds,
-          extracted.group,
-        );
-        context.drawImage(
-          orientedCanvas,
-          outputBounds.x,
-          outputBounds.y,
-          outputBounds.width,
-          outputBounds.height,
-        );
-        const piece = createPieceMetadata(
-          extracted.group,
-          extracted.mappedTriangles,
-          extracted.sourceBounds,
-          outputBounds,
-          scale,
-        );
-        piece.coveragePixels = await scanCoveragePixels(
-          context,
-          piece.outputBounds,
-          yieldControl,
-        );
-        if (piece.coveragePixels === 0) {
-          throw new Error(`UV 裁片 "${piece.id}" 提取结果为空。`);
+          await drawTriangleMaskBatches({
+            context: maskCanvas.getContext('2d'),
+            sourceBounds: extracted.sourceBounds,
+            triangles: extracted.triangles,
+            yieldControl,
+          });
+          applyPieceMask({
+            context: sourceCanvas.getContext('2d'),
+            atlasCanvas,
+            maskCanvas,
+            sourceBounds: extracted.sourceBounds,
+          });
+          drawOrientedPiece(
+            orientedCanvas.getContext('2d'),
+            sourceCanvas,
+            extracted.sourceBounds,
+            extracted.group,
+          );
+          context.drawImage(
+            orientedCanvas,
+            layoutBounds.x,
+            layoutBounds.y,
+            layoutBounds.width,
+            layoutBounds.height,
+          );
+          const piece = createPieceMetadata(
+            extracted.group,
+            extracted.mappedTriangles,
+            extracted.sourceBounds,
+            transformPatternOutputBounds(layoutBounds, canvasTransform),
+            scale,
+          );
+          piece.coveragePixels = await scanCoveragePixels(
+            context,
+            piece.outputBounds,
+            yieldControl,
+          );
+          if (piece.coveragePixels === 0) {
+            throw new Error(`UV 裁片 "${piece.id}" 提取结果为空。`);
+          }
+          pieces.push(piece);
+        } finally {
+          releaseCanvases(temporaryCanvases);
         }
-        pieces.push(piece);
-      } finally {
-        releaseCanvases(temporaryCanvases);
       }
-    }
 
-    const layoutFingerprint = createLayoutFingerprint(uvLayout.version, pieces);
-    const blob = await canvasToPngBlob(canvas);
-    return {
-      blob,
-      canvas,
-      width: OUTPUT_SIZE,
-      height: OUTPUT_SIZE,
-      pieces,
-      layoutFingerprint,
-    };
+      const layoutFingerprint = createLayoutFingerprint(
+        uvLayout.version,
+        outputTransform,
+        pieces,
+      );
+      const blob = await canvasToPngBlob(canvas);
+      return {
+        blob,
+        canvas,
+        width: OUTPUT_SIZE,
+        height: OUTPUT_SIZE,
+        pieces,
+        outputTransform: { ...outputTransform },
+        layoutFingerprint,
+      };
+    } finally {
+      context.restore();
+    }
   } catch (error) {
     releaseCanvases([canvas]);
     throw error;
@@ -483,10 +504,11 @@ export async function scanCoveragePixels(context, { x, y, width, height }, yield
   return coveragePixels;
 }
 
-function createLayoutFingerprint(layoutVersion, pieces) {
+function createLayoutFingerprint(layoutVersion, outputTransform, pieces) {
   const serialized = JSON.stringify({
     output: { width: OUTPUT_SIZE, height: OUTPUT_SIZE },
     layoutVersion,
+    outputTransform,
     pieces: pieces.map((piece) => ({
       id: piece.id,
       order: piece.order,

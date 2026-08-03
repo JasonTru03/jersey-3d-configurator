@@ -19,6 +19,7 @@ describe('UV pattern pieces', () => {
     expect(result).toMatchObject({
       width: 4096,
       height: 4096,
+      outputTransform: { rotation: 0, mirrorX: false },
       layoutFingerprint: expect.any(String),
     });
     expect(result.pieces.map(({ id }) => id)).toEqual(['front', 'back']);
@@ -34,6 +35,38 @@ describe('UV pattern pieces', () => {
       .toContainEqual(expect.objectContaining({ args: ['destination-in'] }));
     expectCoverageReadsStayInsidePieces(result, harness.created);
     expectTemporaryCanvasesReleased(result.canvas, harness.created);
+  });
+
+  it('applies one model output transform to the final canvas and reports transformed bounds', async () => {
+    const harness = installCanvasHarness();
+    const layout = createLayout();
+    layout.patternOutputTransform = { rotation: 180, mirrorX: true };
+    layout.pieceGroups.push(createGroup('side', '侧片', 2, 'side-mesh'));
+
+    const result = await createUvPatternPieces(createInput(harness, {
+      uvLayout: layout,
+      meshes: [
+        createRectMesh('front-mesh', 0, 0, 0.5, 1),
+        createRectMesh('back-mesh', 0.5, 0, 1, 1),
+        createRectMesh('side-mesh', 0, 0, 0.25, 0.25),
+      ],
+    }));
+
+    expect(result.outputTransform).toEqual({ rotation: 180, mirrorX: true });
+    expect(result.outputTransform).not.toBe(layout.patternOutputTransform);
+    expect(result.pieces[0].outputBounds.y).toBeGreaterThan(result.pieces[2].outputBounds.y);
+    expect(result.pieces.every(({ coveragePixels }) => coveragePixels > 0)).toBe(true);
+
+    const outputOperations = result.canvas.context.operations;
+    expect(outputOperations.filter(({ method }) => method === 'save')).toHaveLength(1);
+    expect(outputOperations.filter(({ method }) => method === 'restore')).toHaveLength(1);
+    expect(outputOperations.filter(({ method, args }) => (
+      method === 'scale' && args[0] === -1 && args[1] === 1
+    ))).toHaveLength(1);
+    expect(outputOperations.filter(({ method, args }) => (
+      method === 'rotate' && equivalentAngle(args[0], Math.PI)
+    ))).toHaveLength(1);
+    expectCoverageReadsStayInsidePieces(result, harness.created);
   });
 
   it('honors indexed/non-indexed render spans, drawRange, material visibility, and V flip', async () => {
@@ -551,6 +584,17 @@ describe('UV pattern pieces', () => {
     expect(first).toEqual(expect.any(String));
     expect(first).toBe(second);
     expect(rotated).not.toBe(first);
+  });
+
+  it('changes the layout fingerprint when the model output transform changes', async () => {
+    const identity = await createScenarioResult();
+    const transformedLayout = createLayout();
+    transformedLayout.patternOutputTransform = { rotation: 180, mirrorX: true };
+    const transformed = await createScenarioResult({ layout: transformedLayout });
+
+    expect(transformed.layoutFingerprint).not.toBe(identity.layoutFingerprint);
+    expect(identity.outputTransform).toEqual({ rotation: 0, mirrorX: false });
+    expect(transformed.outputTransform).toEqual({ rotation: 180, mirrorX: true });
   });
 
   it('fingerprints order, source bounds, output bounds, and aliases from real inputs', async () => {

@@ -65,10 +65,11 @@ describe('UV pattern pieces Chrome smoke', () => {
       expect(smokeResult.frontOutside).toEqual([0, 0, 0, 0]);
       [
         [255, 0, 0],
-        [0, 0, 255],
         [0, 255, 0],
+        [0, 0, 255],
         [255, 255, 0],
       ].forEach((color, index) => expectOpaqueColor(smokeResult.backCorners[index], color));
+      expect(smokeResult.outputTransform).toEqual({ rotation: 180, mirrorX: true });
       for (const alpha of smokeResult.sharedEdgeAlphas) expect(alpha).toBeGreaterThanOrEqual(250);
       expect(smokeResult.blobType).toBe('image/png');
       expect(smokeResult.blobHasBytes).toBe(true);
@@ -163,13 +164,14 @@ try {
   ]);
   const uvLayout = {
     version: 1,
+    patternOutputTransform: { rotation: 180, mirrorX: true },
     pieceGroups: [
       {
-        id: 'front', label: 'front', order: 0, zone: 'body', rotation: 0, mirrorX: false,
+        id: 'front', label: 'front', order: 0, zone: 'body', rotation: 180, mirrorX: true,
         islandRefs: [{ meshName: 'front-mesh' }],
       },
       {
-        id: 'back', label: 'back', order: 1, zone: 'body', rotation: 90, mirrorX: true,
+        id: 'back', label: 'back', order: 1, zone: 'body', rotation: 180, mirrorX: true,
         islandRefs: [{ meshName: 'back-mesh' }],
       },
     ],
@@ -193,6 +195,7 @@ try {
 
   publish({
     ok: true,
+    outputTransform: extracted.outputTransform,
     frontInside: readRelativePixel(outputContext, frontPiece.outputBounds, 0.2, 0.2),
     frontOutside: readRelativePixel(outputContext, frontPiece.outputBounds, 0.8, 0.8),
     backCorners: [

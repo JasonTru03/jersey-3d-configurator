@@ -44,7 +44,7 @@ describe('production package', () => {
       variantId: '48039101923479',
       size: 'm',
       model: { id: 'chelsea-jersey', version: '1' },
-      uvExportVersion: '1',
+      uvExportVersion: '2',
       atlas: { width: 4096, height: 4096, colorSpace: 'sRGB' },
       patternPieces: {
         width: 4096,

@@ -19,7 +19,7 @@ export const jerseyProduct = {
     id: 'chelsea-jersey',
     version: '1',
     uvExportLayoutId: 'chelsea-jersey@1',
-    uvExportVersion: '1',
+    uvExportVersion: '2',
     uvAtlasSize: 4096,
     glbUrl: '/models/chelsea-jersey.glb',
     assetName: 'chelsea-jersey.glb',

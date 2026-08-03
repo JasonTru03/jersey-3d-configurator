@@ -1840,8 +1840,8 @@ describe('garment decoration mesh selection', () => {
 
     await renderer.loadModel('/models/chelsea-jersey.glb');
 
-    expect(renderer.modelUvLayout).toMatchObject({ version: 1 });
-    expect(renderer.modelUvLayoutKey).toBe('chelsea-jersey@1:v1');
+    expect(renderer.modelUvLayout).toMatchObject({ version: 2 });
+    expect(renderer.modelUvLayoutKey).toBe('chelsea-jersey@1:v2');
     expect(productionArtifactMocks.createGarmentAppearanceCanvas).toHaveBeenLastCalledWith(
       2048,
       appearance,
@@ -1875,8 +1875,8 @@ describe('garment decoration mesh selection', () => {
 
     await renderer.loadModel('/models/shared.glb');
 
-    expect(renderer.modelUvLayout).toMatchObject({ version: 1 });
-    expect(renderer.modelUvLayoutKey).toBe('chelsea-jersey@1:v1');
+    expect(renderer.modelUvLayout).toMatchObject({ version: 2 });
+    expect(renderer.modelUvLayoutKey).toBe('chelsea-jersey@1:v2');
     renderer.dispose();
   });
 
@@ -2008,7 +2008,7 @@ describe('garment decoration mesh selection', () => {
     await Promise.resolve();
 
     expect(renderer.loadModel).toHaveBeenCalledTimes(2);
-    expect(renderer.currentModelIdentity).toContain('"layoutVersion":1');
+    expect(renderer.currentModelIdentity).toContain('"layoutVersion":2');
     expect(renderer.currentModelIdentity).toContain('"uvExportLayoutId":"fn8788-jersey@1"');
   });
 

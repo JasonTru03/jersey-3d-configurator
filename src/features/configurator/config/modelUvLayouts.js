@@ -8,6 +8,9 @@ function freezeLayout(layout) {
   if (layout.appearanceGroups) {
     frozenLayout.appearanceGroups = freezeGroups(layout.appearanceGroups);
   }
+  if (layout.patternOutputTransform !== undefined) {
+    frozenLayout.patternOutputTransform = Object.freeze({ ...layout.patternOutputTransform });
+  }
   return Object.freeze(frozenLayout);
 }
 
@@ -20,7 +23,9 @@ function freezeGroups(groups) {
 
 export const MODEL_UV_LAYOUTS = Object.freeze({
   'chelsea-jersey@1': freezeLayout({
-    version: 1,
+    version: 2,
+    // 当前需先旋转180再水平镜像；未来若模型已朝上 rotation 改0，若文字已正向 mirrorX 改false。
+    patternOutputTransform: { rotation: 180, mirrorX: true },
     pieceGroups: [
       {
         id: 'front',
@@ -92,7 +97,9 @@ export const MODEL_UV_LAYOUTS = Object.freeze({
     ],
   }),
   'fn8788-jersey@1': freezeLayout({
-    version: 1,
+    version: 2,
+    // 当前需先旋转180再水平镜像；未来若模型已朝上 rotation 改0，若文字已正向 mirrorX 改false。
+    patternOutputTransform: { rotation: 180, mirrorX: true },
     pieceGroups: [
       {
         id: 'front',
@@ -176,6 +183,7 @@ export function validateModelUvLayout(layout, meshes, { appearanceOnly = false }
   if (!Number.isInteger(layout.version) || layout.version <= 0) {
     throwInvalidLayout('version 版本必须是正整数');
   }
+  validatePatternOutputTransform(layout.patternOutputTransform);
   if (!Array.isArray(layout.pieceGroups) || layout.pieceGroups.length === 0) {
     throwInvalidLayout('pieceGroups 裁片组必须是非空数组');
   }
@@ -226,6 +234,20 @@ export function validateModelUvLayout(layout, meshes, { appearanceOnly = false }
     requireFullCoverage: hasAppearanceGroups,
   });
   return true;
+}
+
+function validatePatternOutputTransform(patternOutputTransform) {
+  if (patternOutputTransform === undefined) return;
+  if (!isObject(patternOutputTransform)) {
+    throwInvalidLayout('patternOutputTransform 必须是对象');
+  }
+  if (!Number.isFinite(patternOutputTransform.rotation)
+    || ![0, 90, 180, 270].includes(patternOutputTransform.rotation)) {
+    throwInvalidLayout('patternOutputTransform 的 rotation 必须是 0、90、180 或 270 度');
+  }
+  if (typeof patternOutputTransform.mirrorX !== 'boolean') {
+    throwInvalidLayout('patternOutputTransform 的 mirrorX 必须是 boolean');
+  }
 }
 
 function validateGroups(groups, groupLabel, { requirePieceFields = false } = {}) {

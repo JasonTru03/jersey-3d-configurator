@@ -30,6 +30,16 @@ afterAll(() => {
 
 describe('model UV seam layouts', () => {
   it.each([
+    { model: { id: 'chelsea-jersey', version: '1' } },
+    { model: { id: 'fn8788-jersey', version: '1' } },
+  ])('declares the production pattern output orientation for $model.id', ({ model }) => {
+    const layout = getModelUvLayout(model);
+
+    expect(layout.version).toBe(2);
+    expect(layout.patternOutputTransform).toEqual({ rotation: 180, mirrorX: true });
+  });
+
+  it.each([
     {
       model: { id: 'chelsea-jersey', version: '1' },
       meshes: ['Cloth_mesh_7', 'Cloth_mesh_4'],
@@ -149,6 +159,7 @@ describe('model UV seam layouts', () => {
     expect(Object.isFrozen(MODEL_UV_LAYOUTS)).toBe(true);
     for (const layout of Object.values(MODEL_UV_LAYOUTS)) {
       expect(Object.isFrozen(layout)).toBe(true);
+      expect(Object.isFrozen(layout.patternOutputTransform)).toBe(true);
       expect(Object.isFrozen(layout.pieceGroups)).toBe(true);
       for (const group of layout.pieceGroups) {
         expect(Object.isFrozen(group)).toBe(true);
@@ -222,6 +233,25 @@ describe('model UV seam layouts', () => {
   });
 
   it.each([
+    ['patternOutputTransform is null', (layout) => { layout.patternOutputTransform = null; }, 'patternOutputTransform'],
+    ['patternOutputTransform rotation is not a right angle', (layout) => {
+      layout.patternOutputTransform = { rotation: 45, mirrorX: true };
+    }, 'rotation'],
+    ['patternOutputTransform mirrorX is not boolean', (layout) => {
+      layout.patternOutputTransform = { rotation: 180, mirrorX: 'true' };
+    }, 'mirrorX'],
+  ])('rejects an invalid pattern output transform: %s', (_label, mutate, message) => {
+    const layout = createValidLayout();
+    mutate(layout);
+
+    expect(() => validateModelUvLayout(layout, VALID_MESHES)).toThrow(message);
+  });
+
+  it('accepts legacy layouts that omit patternOutputTransform', () => {
+    expect(validateModelUvLayout(createValidLayout(), VALID_MESHES)).toBe(true);
+  });
+
+  it.each([
     ['layout 为 null', null, '配置'],
     ['version 为零', { ...createValidLayout(), version: 0 }, '版本'],
     ['version 为字符串', { ...createValidLayout(), version: '1' }, '版本'],
@@ -283,6 +313,7 @@ describe('model UV seam layouts', () => {
     expect(jerseyProduct.model.uvExportLayoutId)
       .toBe(`${jerseyProduct.model.id}@${jerseyProduct.model.version}`);
     expect(MODEL_UV_LAYOUTS).toHaveProperty(jerseyProduct.model.uvExportLayoutId);
+    expect(jerseyProduct.model.uvExportVersion).toBe('2');
   });
 });
 

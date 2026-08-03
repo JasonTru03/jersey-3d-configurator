@@ -24,6 +24,7 @@ export function verifyProductionPackageBytes(bytes) {
   const manifest = readJson(entries.get('manifest.json'), 'manifest.json');
   verifyManifest(entries, manifest);
   readJson(entries.get('design.json'), 'design.json');
+  verifyPatternPieceDeclarations(manifest.patternPieces, manifest.atlas);
 
   const atlas = readPngSize(entries.get('uv-atlas.png'));
   if (atlas.width !== 4096 || atlas.height !== 4096) {
@@ -42,7 +43,7 @@ export function verifyProductionPackageBytes(bytes) {
       `uv-pattern-pieces.png must be 4096x4096; received ${patternPieces.width}x${patternPieces.height}`,
     );
   }
-  verifyPatternPieces(manifest.patternPieces, patternPieces);
+  verifyPatternPieceDimensions(manifest.patternPieces, patternPieces);
 
   const pdfPages = countPdfPages(entries.get('uv-reference.pdf'));
   if (pdfPages !== 2) {
@@ -221,18 +222,19 @@ function verifyManifest(entries, manifest) {
   }
 }
 
-function verifyPatternPieces(declared, png) {
+function verifyPatternPieceDeclarations(declared, atlas) {
   if (
     !isPositiveInteger(declared?.width)
     || !isPositiveInteger(declared?.height)
+    || !isPositiveInteger(atlas?.width)
+    || !isPositiveInteger(atlas?.height)
+    || declared.width !== atlas.width
+    || declared.height !== atlas.height
     || !isNonEmptyString(declared.layoutFingerprint)
     || !Array.isArray(declared.pieces)
     || declared.pieces.length === 0
   ) {
     throw new Error('manifest.json patternPieces is invalid');
-  }
-  if (declared.width !== png.width || declared.height !== png.height) {
-    throw new Error('uv-pattern-pieces.png dimensions do not match manifest.json');
   }
 
   const ids = new Set();
@@ -260,8 +262,8 @@ function verifyPatternPieces(declared, png) {
       || !Array.isArray(islandMeshes)
       || islandMeshes.some((name) => !isNonEmptyString(name))
       || JSON.stringify(sourceMeshes) !== JSON.stringify(islandMeshes)
-      || !isPositiveBounds(piece.sourceBounds, 4096, 4096)
-      || !isPositiveBounds(piece.outputBounds, png.width, png.height)
+      || !isPositiveBounds(piece.sourceBounds, atlas.width, atlas.height)
+      || !isPositiveBounds(piece.outputBounds, declared.width, declared.height)
       || ![0, 90, 180, 270].includes(piece.rotation)
       || typeof piece.mirrorX !== 'boolean'
       || !Number.isFinite(piece.scale)
@@ -275,6 +277,12 @@ function verifyPatternPieces(declared, png) {
   }
   if (!ids.has('front') || !ids.has('back')) {
     throw new Error('manifest.json patternPieces is invalid');
+  }
+}
+
+function verifyPatternPieceDimensions(declared, png) {
+  if (declared.width !== png.width || declared.height !== png.height) {
+    throw new Error('uv-pattern-pieces.png dimensions do not match manifest.json');
   }
 }
 

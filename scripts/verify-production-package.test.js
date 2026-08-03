@@ -3,6 +3,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { createProductionBundle } from '../src/features/configurator/designs/productionBundle.js';
 import {
+  readPngSize,
   readStoreOnlyZip,
   verifyProductionPackageBytes,
 } from './verify-production-package.mjs';
@@ -63,51 +64,47 @@ describe('verifyProductionPackageBytes', () => {
   });
 
   it.each([
-    ['a truncated IHDR chunk', () => createTruncatedPngHeader(4096, 4096)],
-    ['an IHDR length other than 13', () => createMinimalPng(4096, 4096, {
+    ['a truncated IHDR chunk', () => createTruncatedPngHeader(2, 2)],
+    ['an IHDR length other than 13', () => createMinimalPng(2, 2, {
       ihdrLength: 12,
     })],
-    ['a missing IDAT chunk', () => createMinimalPng(4096, 4096, {
+    ['a missing IDAT chunk', () => createMinimalPng(2, 2, {
       includeIdat: false,
     })],
-    ['an empty IDAT chunk', () => createMinimalPng(4096, 4096, {
+    ['an empty IDAT chunk', () => createMinimalPng(2, 2, {
       idatData: new Uint8Array(),
     })],
-    ['a missing IEND chunk', () => createMinimalPng(4096, 4096, {
+    ['a missing IEND chunk', () => createMinimalPng(2, 2, {
       includeIend: false,
     })],
-    ['a truncated later chunk', () => createPngWithTruncatedIdat(4096, 4096)],
-    ['bytes after IEND', () => concatenateBytes(createMinimalPng(4096, 4096), [1])],
+    ['a truncated later chunk', () => createPngWithTruncatedIdat(2, 2)],
+    ['bytes after IEND', () => concatenateBytes(createMinimalPng(2, 2), [1])],
   ])('rejects uv-pattern-pieces.png with %s', async (_label, createPng) => {
-    const packageBytes = await createPackageBytes({ patternPiecesPng: createPng() });
-
-    expect(() => verifyProductionPackageBytes(packageBytes)).toThrow('Invalid PNG structure');
+    expect(() => readPngSize(createPng())).toThrow('Invalid PNG structure');
   });
 
   it.each([
-    ['an invalid IHDR CRC', () => createMinimalPng(4096, 4096, {
+    ['an invalid IHDR CRC', () => createMinimalPng(2, 2, {
       corruptIhdrCrc: true,
     })],
-    ['an invalid IEND CRC', () => createMinimalPng(4096, 4096, {
+    ['an invalid IEND CRC', () => createMinimalPng(2, 2, {
       corruptIendCrc: true,
     })],
-    ['bit depth zero', () => createMinimalPng(4096, 4096, { bitDepth: 0 })],
-    ['a nonstandard compression method', () => createMinimalPng(4096, 4096, {
+    ['bit depth zero', () => createMinimalPng(2, 2, { bitDepth: 0 })],
+    ['a nonstandard compression method', () => createMinimalPng(2, 2, {
       compression: 1,
     })],
-    ['non-zlib IDAT data', () => createMinimalPng(4096, 4096, {
+    ['non-zlib IDAT data', () => createMinimalPng(2, 2, {
       idatData: new Uint8Array([1, 2, 3]),
     })],
-    ['a decompressed scanline length mismatch', () => createMinimalPng(4096, 4096, {
+    ['a decompressed scanline length mismatch', () => createMinimalPng(2, 2, {
       rawScanlines: new Uint8Array([0]),
     })],
-    ['an invalid scanline filter byte', () => createMinimalPng(4096, 4096, {
+    ['an invalid scanline filter byte', () => createMinimalPng(2, 2, {
       scanlineFilter: 5,
     })],
   ])('rejects uv-pattern-pieces.png with %s', async (_label, createPng) => {
-    const packageBytes = await createPackageBytes({ patternPiecesPng: createPng() });
-
-    expect(() => verifyProductionPackageBytes(packageBytes)).toThrow('Invalid PNG structure');
+    expect(() => readPngSize(createPng())).toThrow('Invalid PNG structure');
   });
 
   it('rejects uv-pattern-pieces.png whose bytes do not match the manifest', async () => {
@@ -128,7 +125,7 @@ describe('verifyProductionPackageBytes', () => {
     );
   });
 
-  it('rejects pattern piece dimensions that do not match uv-pattern-pieces.png', async () => {
+  it('rejects pattern piece dimensions that do not match the atlas declaration', async () => {
     const packageBytes = await createPackageBytes({
       mutateManifest: (manifest) => ({
         ...manifest,
@@ -137,7 +134,7 @@ describe('verifyProductionPackageBytes', () => {
     });
 
     expect(() => verifyProductionPackageBytes(packageBytes)).toThrow(
-      'uv-pattern-pieces.png dimensions do not match manifest.json',
+      'manifest.json patternPieces is invalid',
     );
   });
 
@@ -192,9 +189,21 @@ describe('verifyProductionPackageBytes', () => {
       'manifest.json patternPieces is invalid',
     );
   });
+
+  it('rejects invalid piece declarations before decoding PNG payloads', async () => {
+    const packageBytes = await createPackageBytes({
+      atlasPng: new Uint8Array([0]),
+      mutateManifest: (manifest) => withFirstPiece(manifest, { label: undefined }),
+    });
+
+    expect(() => verifyProductionPackageBytes(packageBytes)).toThrow(
+      'manifest.json patternPieces is invalid',
+    );
+  });
 });
 
 async function createPackageBytes({
+  atlasPng = createMinimalPng(4096, 4096),
   corruptAtlasHash = false,
   corruptPatternPiecesHash = false,
   emptyPatternPieces = false,
@@ -205,7 +214,7 @@ async function createPackageBytes({
   const artifacts = [
     file('design.json', '{"schemaVersion":1}', 'application/json'),
     {
-      blob: new Blob([createMinimalPng(4096, 4096)], { type: 'image/png' }),
+      blob: new Blob([atlasPng], { type: 'image/png' }),
       filename: 'uv-atlas.png',
     },
     {

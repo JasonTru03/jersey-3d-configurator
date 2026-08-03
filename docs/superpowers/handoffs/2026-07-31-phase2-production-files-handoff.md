@@ -178,14 +178,14 @@ ZIP 中七个文件齐全：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.
 
 Task 7 将离线 CLI verifier 从旧六文件契约升级为严格七文件契约，顺序固定为：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.png`、`uv-reference.pdf`、`preview-front.png`、`preview-back.png`、`manifest.json`。`manifest.json` 必须为六个非 manifest 文件声明精确 byte length 与 SHA-256；`uv-atlas.png` 和 `uv-pattern-pieces.png` 都必须是 4096×4096 PNG。生产 PNG 标准明确限定为 8-bit RGBA（`bitDepth: 8`、`colorType: 6`）、`compression: 0`、`filter: 0`、非交错（`interlace: 0`）；palette、Adam7 及其他编码 fail closed。PNG 检查会遍历完整 chunk 边界，使用 Node `crc32` 校验每个 chunk 的 type+data CRC：首块必须是 length 13 的唯一完整 IHDR、宽高为正数，连续 IDAT 必须非空并能由 `inflateSync` 解压，解压长度必须精确等于 4096 行 RGBA scanline，且每行 filter byte 只能为 0–4；最终必须是 CRC 正确的零长度 IEND，不能截断或在 IEND 后追加伪记录。裁片声明必须包含非空布局指纹、尺寸匹配的非空 pieces，并以不同 id 包含 `front` / `back`；每个裁片的 `label`、`zone`、`order`、`islandRefs`、`sourceMeshes`、`mappedTriangles`、source/output bounds、`rotation`、`mirrorX`、`scale`、`coveragePixels`、`aliases`、`duplicateGroup` 均按生产 manifest 契约校验，source mesh 必须与 island refs 一致，id/order 不得重复。缺失文件、CRC 或 IHDR 编码错误、IDAT 非 zlib/解压长度错误/scanline filter 非法、长度/哈希不匹配、尺寸不匹配及缺失、空、重复或不完整裁片声明都会 fail closed。
 
-最终规格收口继续按 TDD 执行：合法 fixture 使用 `deflateSync` 生成真实 zlib 压缩的 4096×4096 RGBA8 scanline，并为 IHDR、IDAT、IEND 写入真实 CRC32。只修改测试后的 focused RED 为 1 file / 40 tests，其中 7 failed / 33 passed；7 项均明确显示当前结构-only verifier 对 IHDR CRC、IEND CRC、`bitDepth: 0`、`compression: 1`、非 zlib IDAT、解压长度不匹配和非法 scanline filter byte“未抛错”。最小实现后的 focused GREEN 为 1 file / 40 tests passed。2026-08-03 的完整验证结果：
+最终规格收口继续按 TDD 执行：合法 fixture 使用 `deflateSync` 生成真实 zlib 压缩的 RGBA8 scanline，并为 IHDR、IDAT、IEND 写入真实 CRC32。payload 安全 RED 为 1 file / 40 tests，其中 7 failed / 33 passed；7 项均明确显示结构-only verifier 对 IHDR CRC、IEND CRC、`bitDepth: 0`、`compression: 1`、非 zlib IDAT、解压长度不匹配和非法 scanline filter byte“未抛错”。资源压力收口继续以两次默认 `npm test` 的 native Canvas Chrome `ETIMEDOUT` 为全量 RED，并新增声明校验顺序 focused RED：1 file / 41 tests，其中 2 failed / 39 passed，分别证明旧 verifier 会先解码无效 Atlas、且未在解码前拒绝 pattern/Atlas 声明尺寸不一致。GREEN 后，14 个纯 PNG parser 负向用例改为直接调用已导出的 `readPngSize` 并使用 2×2 真实 zlib fixture；完整 manifest 声明校验移到两张4K PNG inflate 之前，实际 PNG 尺寸仍在解码后核对。focused 最终为 1 file / 41 tests passed，测试体耗时由约 5.4s 降至约 1.1s。2026-08-03 的完整验证结果：
 
 ```powershell
 npx vitest run scripts/verify-production-package.test.js
-# 1 file / 40 tests passed，exit 0
+# 1 file / 41 tests passed，exit 0
 
-npm test -- --no-file-parallelism
-# 78 files / 1,238 tests passed，exit 0
+npm test
+# 默认并行模式，78 files / 1,239 tests passed，exit 0
 
 npm run build
 # app 与 Shopify production build 均完成，exit 0
@@ -203,7 +203,7 @@ node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn87
 # PASS (693aeaa8, 4096x4096, 2 PDF pages)，精确七文件
 ```
 
-全量测试仍打印两条既有 jsdom navigation 提示；两次预最终并行全量运行分别因 native Canvas Chrome 启动资源竞争出现 2 项和 1 项 `ETIMEDOUT`，对应失败文件隔离重跑为 7/7 通过，最终使用 Vitest 官方共享外部资源串行模式 `npm test -- --no-file-parallelism` 完成 1,238/1,238，通过期间没有为该环境瞬态修改源码。Vite 仍打印大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler dry-run 还打印代理环境提示，并由 `npx` 临时取得 Wrangler 4.118.0。两个真实 ZIP 使用 payload verifier 的单包耗时分别约 599ms 与 449ms，未发现不可接受的内存或性能问题。最终要求的命令均为 exit 0，没有新增依赖、secret 或 binding。
+全量测试仍打印两条既有 jsdom navigation 提示。优化前，纯 parser/package 负向用例与 manifest 负向用例会反复触发 Atlas+pieces 4K RGBA inflate，与 native Canvas Chrome 并发造成资源争抢；两次默认全量分别出现 2 项和 1 项 `ETIMEDOUT`，失败文件隔离重跑为 7/7 通过，串行全量仅作为根因诊断证据。优化后新鲜原始 `npm test` 在默认并行模式完成 1,239/1,239，exit 0，因此最终门槛未使用串行参数。Vite 仍打印大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler dry-run 还打印代理环境提示，并由 `npx` 临时取得 Wrangler 4.118.0。两个真实 ZIP 使用 payload verifier 的单包耗时分别约 599ms 与 449ms，未发现不可接受的内存或性能问题。最终要求的命令均为 exit 0，没有新增依赖、secret 或 binding。
 
 七文件格式目前只是本地生产产物契约变更；已发布 showcase 保持不变，必须取得用户明确发布批准后才能部署。代码侧回退方式是对未来 feature merge 执行普通 `git revert`；若以后已部署到 Cloudflare，则使用 Cloudflare deployment rollback 回到上一已知正常版本。本任务未 push、未 merge、未发布、未部署。
 

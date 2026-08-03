@@ -107,6 +107,17 @@ describe('verifyProductionPackageBytes', () => {
     expect(() => readPngSize(createPng())).toThrow('Invalid PNG structure');
   });
 
+  it('rejects uv-pattern-pieces.png with bytes after the zlib image data', () => {
+    const idatData = concatenateBytes(
+      deflateSync(createRgbaScanlines(2, 2, 0)),
+      [1, 2, 3],
+    );
+
+    expect(() => readPngSize(createMinimalPng(2, 2, { idatData }))).toThrow(
+      'Invalid PNG structure',
+    );
+  });
+
   it('rejects uv-pattern-pieces.png whose bytes do not match the manifest', async () => {
     const packageBytes = await createPackageBytes({ corruptPatternPiecesHash: true });
 

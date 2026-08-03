@@ -179,11 +179,17 @@ export function readPngSize(bytes) {
     throw new Error('Invalid PNG structure');
   }
 
+  const compressedImageData = concatenateBytes(imageDataChunks);
   let scanlines;
   try {
-    scanlines = inflateSync(concatenateBytes(imageDataChunks), {
+    const result = inflateSync(compressedImageData, {
+      info: true,
       maxOutputLength: expectedLength,
     });
+    scanlines = result.buffer;
+    if (result.engine.bytesWritten !== compressedImageData.byteLength) {
+      throw new Error('Invalid PNG structure');
+    }
   } catch {
     throw new Error('Invalid PNG structure');
   }

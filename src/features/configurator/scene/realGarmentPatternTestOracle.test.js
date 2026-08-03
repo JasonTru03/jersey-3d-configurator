@@ -17,31 +17,42 @@ describe('real garment pattern test oracle', () => {
     );
     expect(oracleSource).not.toContain('renderableUvTriangles.js');
     expect(oracleSource).not.toContain('uvPatternPieces.js');
+    expect(oracleSource).not.toContain('uvPatternOutputTransform.js');
     expect(fixtureSource).not.toContain(['transform', 'PiecePoint'].join(''));
   });
 
-  it('maps rotation 180 plus mirrorX as a vertical flip with an independent oracle', () => {
+  it('maps final output bounds through global and per-piece transforms with an independent oracle', () => {
     const piece = {
       mirrorX: true,
-      outputBounds: { height: 400, width: 300, x: 500, y: 600 },
+      outputBounds: { height: 400, width: 300, x: 500, y: 3096 },
       rotation: 180,
       sourceBounds: { height: 200, width: 100, x: 10, y: 20 },
     };
     const atlasPoint = { x: 35, y: 70 };
+    const outputOptions = {
+      outputSize: { height: 4096, width: 4096 },
+      outputTransform: { mirrorX: true, rotation: 180 },
+    };
 
-    expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint)).toEqual({ x: 575, y: 900 });
+    expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint, outputOptions)).toEqual({
+      x: 575,
+      y: 3196,
+    });
     expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint, {
       mirrorX: false,
+      ...outputOptions,
       rotation: 0,
-    })).toEqual({ x: 575, y: 700 });
+    })).toEqual({ x: 575, y: 3396 });
     expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint, {
       mirrorX: false,
+      ...outputOptions,
       rotation: 180,
-    })).toEqual({ x: 725, y: 900 });
+    })).toEqual({ x: 725, y: 3196 });
     expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint, {
       mirrorX: true,
+      ...outputOptions,
       rotation: 0,
-    })).toEqual({ x: 725, y: 700 });
+    })).toEqual({ x: 725, y: 3396 });
   });
 
   it('keeps the shared real-model loader unfiltered and applies selectors in each caller', () => {

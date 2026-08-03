@@ -97,6 +97,7 @@ describe('UV pattern pieces on supported real garment models', () => {
       });
 
       expect(result.ok, result.error).toBe(true);
+      expect(result.outputTransform).toEqual({ mirrorX: true, rotation: 180 });
       expect(result.pieceIds).toEqual(['front', 'back']);
       expect(result.pieces).toHaveLength(2);
       expect(result.blob).toMatchObject({ hasBytes: true, type: 'image/png' });
@@ -502,17 +503,27 @@ function createAtlas() {
   return canvas;
 }
 
-function outputPointForCurrentLayout(piece, atlasPoint) {
-  return mapAtlasPointToPieceOutput(piece, atlasPoint);
+function outputPointForCurrentLayout(piece, atlasPoint, outputTransform, outputSize) {
+  return mapAtlasPointToPieceOutput(piece, atlasPoint, { outputSize, outputTransform });
 }
 
-function outputPointForCounterfactual(piece, atlasPoint, counterfactual) {
+function outputPointForCounterfactual(
+  piece,
+  atlasPoint,
+  counterfactual,
+  outputTransform,
+  outputSize,
+) {
   const transforms = {
     identity: { mirrorX: false, rotation: 0 },
     mirrorX: { mirrorX: true, rotation: 0 },
     rotation180: { mirrorX: false, rotation: 180 },
   };
-  return mapAtlasPointToPieceOutput(piece, atlasPoint, transforms[counterfactual]);
+  return mapAtlasPointToPieceOutput(piece, atlasPoint, {
+    ...transforms[counterfactual],
+    outputSize,
+    outputTransform,
+  });
 }
 
 function readPixel(context, point) {
@@ -578,6 +589,7 @@ try {
   });
   const atlasContext = atlasCanvas.getContext('2d');
   const outputContext = extracted.canvas.getContext('2d');
+  const outputSize = { height: extracted.height, width: extracted.width };
   const piecesById = Object.fromEntries(extracted.pieces.map((piece) => [piece.id, piece]));
   const rawColorCounts = countColors(atlasContext, { x: 0, y: 0, width: atlasSize, height: atlasSize });
   const pieceColorCounts = Object.fromEntries(extracted.pieces.map((piece) => [
@@ -592,7 +604,7 @@ try {
       outputPointForCurrentLayout(piecesById[design.region], {
         x: average(design.triangle).x * atlasSize,
         y: average(design.triangle).y * atlasSize,
-      }),
+      }, extracted.outputTransform, outputSize),
     );
   }
   const upload = fixture.designs.find(({ kind }) => kind === 'transparent-upload');
@@ -626,7 +638,13 @@ try {
       'rotation180',
     ].map((counterfactual) => [counterfactual, directionMarker.points.map((point) => readPixel(
       outputContext,
-      outputPointForCounterfactual(piece, point, counterfactual),
+      outputPointForCounterfactual(
+        piece,
+        point,
+        counterfactual,
+        extracted.outputTransform,
+        outputSize,
+      ),
     ))]));
     directionalEvidence[directionDesign.region] = {
       counterfactualMatches: Object.fromEntries(Object.entries(counterfactualSamples).map(([
@@ -639,7 +657,7 @@ try {
       },
       outputSamples: directionMarker.points.map((point) => readPixel(
         outputContext,
-        outputPointForCurrentLayout(piece, point),
+        outputPointForCurrentLayout(piece, point, extracted.outputTransform, outputSize),
       )),
       rawSamples: directionMarker.points.map((point) => readPixel(atlasContext, point)),
     };
@@ -651,6 +669,7 @@ try {
     designSamples,
     directionalEvidence,
     gapAlpha: readPixel(outputContext, gapPoint)[3],
+    outputTransform: extracted.outputTransform,
     pieceColorCounts,
     pieceIds: extracted.pieces.map(({ id }) => id),
     pieces: extracted.pieces.map((piece) => ({
@@ -667,7 +686,7 @@ try {
       outputCenterAlpha: readPixel(outputContext, outputPointForCurrentLayout(front, {
         x: uploadCenter.x * atlasSize,
         y: uploadCenter.y * atlasSize,
-      }))[3],
+      }, extracted.outputTransform, outputSize))[3],
       rawCenterAlpha: readPixel(atlasContext, {
         x: uploadCenter.x * atlasSize,
         y: uploadCenter.y * atlasSize,
@@ -675,7 +694,7 @@ try {
       ringAlphas: ringPoints.map((point) => readPixel(outputContext, outputPointForCurrentLayout(front, {
         x: point.x * atlasSize,
         y: point.y * atlasSize,
-      }))[3]),
+      }, extracted.outputTransform, outputSize))[3]),
     },
   });
 } catch (error) {

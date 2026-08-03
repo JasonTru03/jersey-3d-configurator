@@ -103,6 +103,7 @@ export async function createProductionPackage({
       patternPieces: {
         height: rendered.pieces.height,
         layoutFingerprint: rendered.pieces.layoutFingerprint,
+        outputTransform: rendered.pieces.outputTransform,
         pieces: rendered.pieces.pieces,
         width: rendered.pieces.width,
       },

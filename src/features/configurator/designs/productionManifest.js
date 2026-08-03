@@ -143,7 +143,8 @@ async function validateImageMetadata(input, files) {
 
 function validatePatternPieces(patternPieces, atlas) {
   if (
-    !isPositiveInteger(patternPieces?.width)
+    !isValidOutputTransform(patternPieces?.outputTransform)
+    || !isPositiveInteger(patternPieces?.width)
     || !isPositiveInteger(patternPieces?.height)
     || patternPieces.width !== atlas.width
     || patternPieces.height !== atlas.height
@@ -198,6 +199,14 @@ function validatePatternPieces(patternPieces, atlas) {
   if (!ids.has('front') || !ids.has('back')) {
     throwInvalidPatternPieces('裁片清单必须包含独立的 front 和 back。');
   }
+}
+
+function isValidOutputTransform(outputTransform) {
+  return outputTransform !== null
+    && typeof outputTransform === 'object'
+    && !Array.isArray(outputTransform)
+    && [0, 90, 180, 270].includes(outputTransform.rotation)
+    && typeof outputTransform.mirrorX === 'boolean';
 }
 
 async function validatePngArtifact(files, name, expected) {

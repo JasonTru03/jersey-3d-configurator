@@ -39,6 +39,7 @@ describe('production package', () => {
     expect(result.filename).toMatch(/^fn8788-jersey-design-[0-9a-f]{8}\.zip$/);
     expect(result.files.map((file) => file.filename)).toEqual(ZIP_NAMES);
     expect(result.manifest).toMatchObject({
+      schemaVersion: 2,
       designFingerprint: result.fingerprint,
       productId: 'fn8788-jersey',
       variantId: '48039101923479',
@@ -50,9 +51,14 @@ describe('production package', () => {
         width: 4096,
         height: 4096,
         layoutFingerprint: 'uv-pieces-v1-12ab34cd',
+        outputTransform: { rotation: 180, mirrorX: true },
         pieces: rendered.pieces.pieces,
       },
     });
+    expect(result.manifest.patternPieces.outputTransform)
+      .toEqual(rendered.pieces.outputTransform);
+    expect(result.manifest.patternPieces.outputTransform)
+      .not.toBe(rendered.pieces.outputTransform);
     expect(result.manifest.files).toHaveLength(6);
     const providerRequest = artifactProvider.mock.calls[0][0];
     expect(providerRequest.model).toEqual(jerseyProduct.model);
@@ -247,6 +253,7 @@ function createRenderedArtifacts() {
       canvas: { id: 'pieces', width: 4096, height: 4096 },
       height: 4096,
       layoutFingerprint: 'uv-pieces-v1-12ab34cd',
+      outputTransform: { rotation: 180, mirrorX: true },
       pieces: [createPieceMetadata(), createPieceMetadata({
         id: 'back',
         label: '背片',

@@ -3,6 +3,7 @@ import {
   canonicalizeProductionValue,
   createDesignFingerprint,
   createProductionFilename,
+  PRODUCTION_PACKAGE_SCHEMA_VERSION,
 } from './productionFingerprint.js';
 
 const input = {
@@ -29,6 +30,10 @@ afterEach(() => {
 });
 
 describe('production fingerprint', () => {
+  it('uses production package schema version 2 in fingerprint semantics', () => {
+    expect(PRODUCTION_PACKAGE_SCHEMA_VERSION).toBe(2);
+  });
+
   it('sorts object keys recursively without reordering arrays', () => {
     expect(canonicalizeProductionValue({
       z: 1,

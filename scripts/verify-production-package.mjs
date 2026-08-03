@@ -16,12 +16,16 @@ const ZIP_ENTRY_NAMES = Object.freeze([
 const ARTIFACT_NAMES = Object.freeze(ZIP_ENTRY_NAMES.slice(0, -1));
 const LOCAL_FILE_HEADER = 0x04034b50;
 const CENTRAL_DIRECTORY_HEADER = 0x02014b50;
+const EXPECTED_SCHEMA_VERSION = 2;
 const MAX_PNG_INFLATED_BYTES = (4096 * 4 + 1) * 4096;
 
 export function verifyProductionPackageBytes(bytes) {
   const entries = readStoreOnlyZip(bytes);
   assertExactNames([...entries.keys()], ZIP_ENTRY_NAMES, 'ZIP entries');
   const manifest = readJson(entries.get('manifest.json'), 'manifest.json');
+  if (manifest?.schemaVersion !== EXPECTED_SCHEMA_VERSION) {
+    throw new Error(`manifest.json schemaVersion must be ${EXPECTED_SCHEMA_VERSION}`);
+  }
   verifyManifest(entries, manifest);
   readJson(entries.get('design.json'), 'design.json');
   verifyPatternPieceDeclarations(manifest.patternPieces, manifest.atlas);
@@ -230,7 +234,8 @@ function verifyManifest(entries, manifest) {
 
 function verifyPatternPieceDeclarations(declared, atlas) {
   if (
-    !isPositiveInteger(declared?.width)
+    !isValidOutputTransform(declared?.outputTransform)
+    || !isPositiveInteger(declared?.width)
     || !isPositiveInteger(declared?.height)
     || !isPositiveInteger(atlas?.width)
     || !isPositiveInteger(atlas?.height)
@@ -284,6 +289,14 @@ function verifyPatternPieceDeclarations(declared, atlas) {
   if (!ids.has('front') || !ids.has('back')) {
     throw new Error('manifest.json patternPieces is invalid');
   }
+}
+
+function isValidOutputTransform(outputTransform) {
+  return outputTransform !== null
+    && typeof outputTransform === 'object'
+    && !Array.isArray(outputTransform)
+    && [0, 90, 180, 270].includes(outputTransform.rotation)
+    && typeof outputTransform.mirrorX === 'boolean';
 }
 
 function verifyPatternPieceDimensions(declared, png) {

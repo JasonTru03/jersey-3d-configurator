@@ -41,6 +41,20 @@ describe('verifyProductionPackageBytes', () => {
     );
   });
 
+  it.each([
+    ['missing', (manifest) => {
+      const { schemaVersion: _schemaVersion, ...rest } = manifest;
+      return rest;
+    }],
+    ['not 2', (manifest) => ({ ...manifest, schemaVersion: 1 })],
+  ])('rejects a manifest whose schemaVersion is %s', async (_label, mutateManifest) => {
+    const packageBytes = await createPackageBytes({ mutateManifest });
+
+    expect(() => verifyProductionPackageBytes(packageBytes)).toThrow(
+      'manifest.json schemaVersion must be 2',
+    );
+  });
+
   it('rejects a package missing uv-pattern-pieces.png', async () => {
     const packageBytes = await createPackageBytes({ omitArtifact: 'uv-pattern-pieces.png' });
 
@@ -151,6 +165,24 @@ describe('verifyProductionPackageBytes', () => {
 
   it.each([
     ['missing metadata', (manifest) => ({ ...manifest, patternPieces: null })],
+    ['a missing output transform', (manifest) => ({
+      ...manifest,
+      patternPieces: { ...manifest.patternPieces, outputTransform: undefined },
+    })],
+    ['an unsupported output rotation', (manifest) => ({
+      ...manifest,
+      patternPieces: {
+        ...manifest.patternPieces,
+        outputTransform: { ...manifest.patternPieces.outputTransform, rotation: 45 },
+      },
+    })],
+    ['a non-boolean output mirror flag', (manifest) => ({
+      ...manifest,
+      patternPieces: {
+        ...manifest.patternPieces,
+        outputTransform: { ...manifest.patternPieces.outputTransform, mirrorX: 'true' },
+      },
+    })],
     ['an empty piece list', (manifest) => ({
       ...manifest,
       patternPieces: { ...manifest.patternPieces, pieces: [] },
@@ -262,6 +294,7 @@ async function createPackageBytes({
     records.find(({ name }) => name === 'uv-pattern-pieces.png').sha256 = '0'.repeat(64);
   }
   const manifest = mutateManifest({
+    schemaVersion: 2,
     designFingerprint: '12ab34cd',
     atlas: { width: 4096, height: 4096 },
     patternPieces: createPatternPieces(),
@@ -288,6 +321,7 @@ function createPatternPieces() {
   return {
     height: 4096,
     layoutFingerprint: 'uv-pieces-v1-12ab34cd',
+    outputTransform: { rotation: 180, mirrorX: true },
     pieces: [
       createPiece(),
       createPiece({

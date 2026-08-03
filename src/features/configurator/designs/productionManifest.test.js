@@ -29,7 +29,7 @@ const manifestInput = (files) => ({
   patternPieces: createPatternPieces(),
   productId: 'fn8788-jersey',
   size: 'm',
-  uvExportVersion: '1',
+  uvExportVersion: '2',
   variantId: null,
 });
 
@@ -43,13 +43,13 @@ describe('production manifest', () => {
     const manifest = await createProductionManifest(manifestInput(files));
 
     expect(manifest).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       designFingerprint: '12ab34cd',
       productId: 'fn8788-jersey',
       variantId: null,
       size: 'm',
       model: { id: 'chelsea-jersey', version: '1' },
-      uvExportVersion: '1',
+      uvExportVersion: '2',
       atlas: { colorSpace: 'sRGB', height: 4096, width: 4096 },
       patternPieces: createPatternPieces(),
       generatedAt: '2026-07-31T00:00:00.000Z',
@@ -161,6 +161,24 @@ describe('production manifest', () => {
 
   it.each([
     ['missing metadata', (input) => ({ ...input, patternPieces: null })],
+    ['missing output transform', (input) => ({
+      ...input,
+      patternPieces: { ...input.patternPieces, outputTransform: undefined },
+    })],
+    ['an unsupported output rotation', (input) => ({
+      ...input,
+      patternPieces: {
+        ...input.patternPieces,
+        outputTransform: { ...input.patternPieces.outputTransform, rotation: 45 },
+      },
+    })],
+    ['a non-boolean output mirror flag', (input) => ({
+      ...input,
+      patternPieces: {
+        ...input.patternPieces,
+        outputTransform: { ...input.patternPieces.outputTransform, mirrorX: 'true' },
+      },
+    })],
     ['empty piece list', (input) => ({
       ...input,
       patternPieces: { ...input.patternPieces, pieces: [] },
@@ -264,6 +282,7 @@ function createPatternPieces() {
   return {
     height: 4096,
     layoutFingerprint: 'uv-pieces-v1-12ab34cd',
+    outputTransform: { rotation: 180, mirrorX: true },
     pieces: [createPieceMetadata(), createPieceMetadata({
       id: 'back',
       label: '背片',

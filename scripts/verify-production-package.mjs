@@ -98,17 +98,55 @@ export function readStoreOnlyZip(bytes) {
 export function readPngSize(bytes) {
   const source = asUint8Array(bytes);
   if (
-    source.length < 24
+    source.length < 8
     || !sameBytes(source.subarray(0, 8), [137, 80, 78, 71, 13, 10, 26, 10])
-    || !sameBytes(source.subarray(12, 16), [73, 72, 68, 82])
   ) {
     throw new Error('Invalid PNG header');
   }
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
-  return {
-    width: view.getUint32(16),
-    height: view.getUint32(20),
-  };
+  let offset = 8;
+  let width;
+  let height;
+  let hasImageData = false;
+  let hasEnd = false;
+
+  while (offset < source.length) {
+    if (offset + 12 > source.length) throw new Error('Invalid PNG structure');
+    const length = view.getUint32(offset);
+    const dataStart = offset + 8;
+    const chunkEnd = dataStart + length + 4;
+    if (chunkEnd > source.length) throw new Error('Invalid PNG structure');
+
+    const type = source.subarray(offset + 4, offset + 8);
+    if (offset === 8) {
+      if (length !== 13 || !sameBytes(type, [73, 72, 68, 82])) {
+        throw new Error('Invalid PNG structure');
+      }
+      width = view.getUint32(dataStart);
+      height = view.getUint32(dataStart + 4);
+      if (!isPositiveInteger(width) || !isPositiveInteger(height)) {
+        throw new Error('Invalid PNG structure');
+      }
+    } else if (sameBytes(type, [73, 72, 68, 82])) {
+      throw new Error('Invalid PNG structure');
+    }
+
+    if (sameBytes(type, [73, 68, 65, 84]) && length > 0) hasImageData = true;
+    if (sameBytes(type, [73, 69, 78, 68])) {
+      if (length !== 0 || chunkEnd !== source.length) {
+        throw new Error('Invalid PNG structure');
+      }
+      hasEnd = true;
+      offset = chunkEnd;
+      break;
+    }
+    offset = chunkEnd;
+  }
+
+  if (!hasImageData || !hasEnd || offset !== source.length) {
+    throw new Error('Invalid PNG structure');
+  }
+  return { width, height };
 }
 
 export function countPdfPages(bytes) {
@@ -152,22 +190,42 @@ function verifyPatternPieces(declared, png) {
   }
 
   const ids = new Set();
+  const orders = new Set();
   for (const piece of declared.pieces) {
+    const sourceMeshes = piece?.sourceMeshes;
+    const islandMeshes = Array.isArray(piece?.islandRefs)
+      ? piece.islandRefs.map((island) => island?.meshName)
+      : null;
     if (
       !isNonEmptyString(piece?.id)
       || ids.has(piece.id)
+      || !isNonEmptyString(piece.label)
+      || !isNonEmptyString(piece.zone)
+      || (piece.duplicateGroup !== null && !isNonEmptyString(piece.duplicateGroup))
+      || !Array.isArray(piece.aliases)
+      || piece.aliases.some((alias) => !isNonEmptyString(alias))
+      || !Number.isInteger(piece.order)
+      || piece.order < 0
+      || orders.has(piece.order)
       || !isPositiveInteger(piece.mappedTriangles)
-      || !Array.isArray(piece.sourceMeshes)
-      || piece.sourceMeshes.length === 0
-      || piece.sourceMeshes.some((name) => !isNonEmptyString(name))
+      || !Array.isArray(sourceMeshes)
+      || sourceMeshes.length === 0
+      || sourceMeshes.some((name) => !isNonEmptyString(name))
+      || !Array.isArray(islandMeshes)
+      || islandMeshes.some((name) => !isNonEmptyString(name))
+      || JSON.stringify(sourceMeshes) !== JSON.stringify(islandMeshes)
       || !isPositiveBounds(piece.sourceBounds, 4096, 4096)
       || !isPositiveBounds(piece.outputBounds, png.width, png.height)
       || ![0, 90, 180, 270].includes(piece.rotation)
       || typeof piece.mirrorX !== 'boolean'
+      || !Number.isFinite(piece.scale)
+      || piece.scale <= 0
+      || !isPositiveInteger(piece.coveragePixels)
     ) {
       throw new Error('manifest.json patternPieces is invalid');
     }
     ids.add(piece.id);
+    orders.add(piece.order);
   }
   if (!ids.has('front') || !ids.has('back')) {
     throw new Error('manifest.json patternPieces is invalid');

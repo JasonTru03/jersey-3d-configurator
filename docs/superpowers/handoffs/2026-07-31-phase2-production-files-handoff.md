@@ -1,7 +1,7 @@
 # 第二阶段交接：生产文件包
 
 日期：2026-07-31  
-分支：`codex/phase2-production-files`
+分支：`codex/uv-pattern-pieces`
 
 ## 交付范围
 
@@ -166,7 +166,7 @@ ZIP 中七个文件齐全：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.
 
 第二轮七文件同样齐全。`preview-front.png` 只显示 `FRONT` 自定义文字；`preview-back.png` 只显示 player set 的姓名 `FRONT` 与号码 `11`。`design.json` 中 front custom text 的 `placement` 为 `null`，由默认规则落在正面；player set 的 `printPlacement.normal.z` 为 `-1`，对应背面；`decorations` 为空。`manifest.json` 记录 `chelsea-jersey` version `1`、4096×4096，pieces 为 `front` / `back`，`mappedTriangles` 分别为 `10,142` / `12,320`，两者均为 `rotation: 0`、`mirrorX: false`，裁片之间保持透明分隔。
 
-`uv-atlas.png` 与 `uv-pattern-pieces.png` 的设计内容一致，后者沿 front/back 两块 seam 轮廓重新排布。平铺 UV 中的文字看起来倒置或反向，属于模型 UV 岛本身的朝向；缝合到 `preview-front.png` / `preview-back.png` 后方向正确，不能把 raw UV 的视觉方向误记为用户可见的镜像缺陷。
+`uv-atlas.png` 与 `uv-pattern-pieces.png` 的设计内容一致，后者沿 front/back 两块 seam 轮廓重新排布。平铺 UV 中的文字看起来倒置或反向，属于模型 UV 岛本身的朝向；按模型 UV 映射回 3D 网格并渲染到 `preview-front.png` / `preview-back.png` 后方向正确，不能把 raw UV 的视觉方向误记为用户可见的镜像缺陷。
 
 浏览器页面没有切换到 `fn8788-jersey.glb` 的入口，因此 FN8788 尚无同等的 in-app WebGL ZIP 视觉证据；其 Task 6 证据仍是 native Canvas 中真实加载 FN8788 GLB 的集成测试。该限制已明确保留，不能将 Chelsea 页面验收外推为 FN8788 浏览器验收。
 
@@ -176,16 +176,16 @@ ZIP 中七个文件齐全：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.
 
 ### 七文件生产包回归与发布检查点（2026-08-03）
 
-Task 7 将离线 CLI verifier 从旧六文件契约升级为严格七文件契约，顺序固定为：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.png`、`uv-reference.pdf`、`preview-front.png`、`preview-back.png`、`manifest.json`。`manifest.json` 必须为六个非 manifest 文件声明精确 byte length 与 SHA-256；`uv-atlas.png` 和 `uv-pattern-pieces.png` 都必须是 4096×4096 PNG。裁片声明必须包含非空布局指纹、尺寸匹配的非空 pieces，并以不同 id 包含 `front` / `back`；每个裁片必须声明正数 `mappedTriangles`、非空来源 mesh、合法旋转/镜像和位于图像范围内的 source/output bounds。缺失文件、空或非法 PNG、长度/哈希不匹配、尺寸不匹配及缺失、空、重复或不完整裁片声明都会 fail closed。
+Task 7 将离线 CLI verifier 从旧六文件契约升级为严格七文件契约，顺序固定为：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.png`、`uv-reference.pdf`、`preview-front.png`、`preview-back.png`、`manifest.json`。`manifest.json` 必须为六个非 manifest 文件声明精确 byte length 与 SHA-256；`uv-atlas.png` 和 `uv-pattern-pieces.png` 都必须是 4096×4096 PNG。PNG 检查会遍历完整 chunk 边界：首块必须是 length 13 的完整 IHDR、宽高为正数，后续 chunk 不得截断，必须存在非空 IDAT，并以零长度 IEND 精确结束，不能在 IEND 后追加伪记录。裁片声明必须包含非空布局指纹、尺寸匹配的非空 pieces，并以不同 id 包含 `front` / `back`；每个裁片的 `label`、`zone`、`order`、`islandRefs`、`sourceMeshes`、`mappedTriangles`、source/output bounds、`rotation`、`mirrorX`、`scale`、`coveragePixels`、`aliases`、`duplicateGroup` 均按生产 manifest 契约校验，source mesh 必须与 island refs 一致，id/order 不得重复。缺失文件、空或结构截断的 PNG、长度/哈希不匹配、尺寸不匹配及缺失、空、重复或不完整裁片声明都会 fail closed。
 
-TDD 证据：只修改测试后的 focused RED 为 1 file / 16 tests failed，合法七文件包被旧六文件列表拒绝，其余断言也因旧契约未进入目标校验；最小实现后的 focused GREEN 为 1 file / 16 tests passed。2026-08-03 的完整验证结果：
+规格复审加固继续按 TDD 执行：合法 fixture 先升级为带完整 IHDR、非空 IDAT 和 IEND 的最小 PNG，以及完整生产 piece 元数据；只修改测试后的 focused RED 为 1 file / 33 tests，其中 17 failed / 16 passed。7 个 PNG 失败均明确显示当前 verifier 对截断 IHDR、错误 IHDR length、缺失或空 IDAT、缺失 IEND、截断后续 chunk、IEND 后尾随数据“未抛错”；10 个 piece 失败明确显示缺失生产字段、source mesh/island refs 不一致或 order 重复时“未抛错”。最小实现后的 focused GREEN 为 1 file / 33 tests passed。2026-08-03 的完整验证结果：
 
 ```powershell
 npx vitest run scripts/verify-production-package.test.js
-# 1 file / 16 tests passed，exit 0
+# 1 file / 33 tests passed，exit 0
 
 npm test
-# 78 files / 1,214 tests passed，exit 0
+# 78 files / 1,231 tests passed，exit 0
 
 npm run build
 # app 与 Shopify production build 均完成，exit 0

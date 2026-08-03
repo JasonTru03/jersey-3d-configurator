@@ -60,6 +60,28 @@ describe('verifyProductionPackageBytes', () => {
     expect(() => verifyProductionPackageBytes(packageBytes)).toThrow('Invalid PNG header');
   });
 
+  it.each([
+    ['a truncated IHDR chunk', () => createTruncatedPngHeader(4096, 4096)],
+    ['an IHDR length other than 13', () => createMinimalPng(4096, 4096, {
+      ihdrLength: 12,
+    })],
+    ['a missing IDAT chunk', () => createMinimalPng(4096, 4096, {
+      includeIdat: false,
+    })],
+    ['an empty IDAT chunk', () => createMinimalPng(4096, 4096, {
+      idatData: new Uint8Array(),
+    })],
+    ['a missing IEND chunk', () => createMinimalPng(4096, 4096, {
+      includeIend: false,
+    })],
+    ['a truncated later chunk', () => createPngWithTruncatedIdat(4096, 4096)],
+    ['bytes after IEND', () => concatenateBytes(createMinimalPng(4096, 4096), [1])],
+  ])('rejects uv-pattern-pieces.png with %s', async (_label, createPng) => {
+    const packageBytes = await createPackageBytes({ patternPiecesPng: createPng() });
+
+    expect(() => verifyProductionPackageBytes(packageBytes)).toThrow('Invalid PNG structure');
+  });
+
   it('rejects uv-pattern-pieces.png whose bytes do not match the manifest', async () => {
     const packageBytes = await createPackageBytes({ corruptPatternPiecesHash: true });
 
@@ -70,7 +92,7 @@ describe('verifyProductionPackageBytes', () => {
 
   it('rejects a non-4096 uv-pattern-pieces.png', async () => {
     const packageBytes = await createPackageBytes({
-      patternPiecesPng: createPngHeader(2048, 4096),
+      patternPiecesPng: createMinimalPng(2048, 4096),
     });
 
     expect(() => verifyProductionPackageBytes(packageBytes)).toThrow(
@@ -119,6 +141,22 @@ describe('verifyProductionPackageBytes', () => {
     ['an out-of-bounds output declaration', (manifest) => withFirstPiece(manifest, {
       outputBounds: { x: 4000, y: 192, width: 1600, height: 3600 },
     })],
+    ['a missing label', (manifest) => withFirstPiece(manifest, { label: undefined })],
+    ['a missing zone', (manifest) => withFirstPiece(manifest, { zone: undefined })],
+    ['a missing order', (manifest) => withFirstPiece(manifest, { order: undefined })],
+    ['missing island refs', (manifest) => withFirstPiece(manifest, { islandRefs: undefined })],
+    ['a missing scale', (manifest) => withFirstPiece(manifest, { scale: undefined })],
+    ['missing coverage pixels', (manifest) => withFirstPiece(manifest, {
+      coveragePixels: undefined,
+    })],
+    ['missing aliases', (manifest) => withFirstPiece(manifest, { aliases: undefined })],
+    ['a missing duplicate group', (manifest) => withFirstPiece(manifest, {
+      duplicateGroup: undefined,
+    })],
+    ['source meshes that do not match island refs', (manifest) => withFirstPiece(manifest, {
+      sourceMeshes: ['Other_mesh'],
+    })],
+    ['duplicate piece orders', (manifest) => withFirstPiece(manifest, { order: 1 })],
   ])('rejects %s for UV pattern pieces', async (_label, mutateManifest) => {
     const packageBytes = await createPackageBytes({ mutateManifest });
 
@@ -134,12 +172,12 @@ async function createPackageBytes({
   emptyPatternPieces = false,
   mutateManifest = (manifest) => manifest,
   omitArtifact = null,
-  patternPiecesPng = createPngHeader(4096, 4096),
+  patternPiecesPng = createMinimalPng(4096, 4096),
 } = {}) {
   const artifacts = [
     file('design.json', '{"schemaVersion":1}', 'application/json'),
     {
-      blob: new Blob([createPngHeader(4096, 4096)], { type: 'image/png' }),
+      blob: new Blob([createMinimalPng(4096, 4096)], { type: 'image/png' }),
       filename: 'uv-atlas.png',
     },
     {
@@ -152,11 +190,11 @@ async function createPackageBytes({
       'application/pdf',
     ),
     {
-      blob: new Blob([createPngHeader(1600, 1600)], { type: 'image/png' }),
+      blob: new Blob([createMinimalPng(1600, 1600)], { type: 'image/png' }),
       filename: 'preview-front.png',
     },
     {
-      blob: new Blob([createPngHeader(1600, 1600)], { type: 'image/png' }),
+      blob: new Blob([createMinimalPng(1600, 1600)], { type: 'image/png' }),
       filename: 'preview-back.png',
     },
   ];
@@ -206,7 +244,9 @@ function createPatternPieces() {
       createPiece(),
       createPiece({
         id: 'back',
+        label: '背片',
         meshName: 'Cloth_mesh_4',
+        order: 1,
         outputBounds: { x: 2200, y: 192, width: 1600, height: 3600 },
         sourceBounds: { x: 2200, y: 200, width: 1067, height: 2400 },
       }),
@@ -217,18 +257,28 @@ function createPatternPieces() {
 
 function createPiece({
   id = 'front',
+  label = '正片',
   meshName = 'Cloth_mesh_7',
+  order = 0,
   outputBounds = { x: 192, y: 192, width: 1600, height: 3600 },
   sourceBounds = { x: 100, y: 200, width: 1067, height: 2400 },
 } = {}) {
   return {
+    aliases: [],
+    coveragePixels: 840000,
+    duplicateGroup: null,
     id,
+    islandRefs: [{ meshName }],
+    label,
     mappedTriangles: 128,
     mirrorX: false,
+    order,
     outputBounds,
     rotation: 0,
+    scale: 1.5,
     sourceBounds,
     sourceMeshes: [meshName],
+    zone: 'body',
   };
 }
 
@@ -277,7 +327,24 @@ function file(filename, contents, type) {
   };
 }
 
-function createPngHeader(width, height) {
+function createMinimalPng(width, height, {
+  idatData = new Uint8Array([0]),
+  ihdrLength = 13,
+  includeIdat = true,
+  includeIend = true,
+} = {}) {
+  const ihdr = new Uint8Array(13);
+  const view = new DataView(ihdr.buffer);
+  view.setUint32(0, width);
+  view.setUint32(4, height);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  const chunks = [createPngChunk('IHDR', ihdr, ihdrLength)];
+  if (includeIdat) chunks.push(createPngChunk('IDAT', idatData));
+  if (includeIend) chunks.push(createPngChunk('IEND', new Uint8Array()));
+  return concatenateBytes([137, 80, 78, 71, 13, 10, 26, 10], ...chunks);
+}
+
+function createTruncatedPngHeader(width, height) {
   const bytes = new Uint8Array(24);
   bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
   bytes.set([0, 0, 0, 13, 73, 72, 68, 82], 8);
@@ -285,6 +352,51 @@ function createPngHeader(width, height) {
   view.setUint32(16, width);
   view.setUint32(20, height);
   return bytes;
+}
+
+function createPngWithTruncatedIdat(width, height) {
+  const validPrefix = createMinimalPng(width, height, {
+    includeIdat: false,
+    includeIend: false,
+  });
+  return concatenateBytes(validPrefix, createPngChunk('IDAT', [1], 5, false));
+}
+
+function createPngChunk(type, data, declaredLength = data.length, includeCrc = true) {
+  const bytes = new Uint8Array(8 + data.length + (includeCrc ? 4 : 0));
+  const view = new DataView(bytes.buffer);
+  const typeBytes = new TextEncoder().encode(type);
+  view.setUint32(0, declaredLength);
+  bytes.set(typeBytes, 4);
+  bytes.set(data, 8);
+  if (includeCrc) {
+    view.setUint32(8 + data.length, crc32(concatenateBytes(typeBytes, data)));
+  }
+  return bytes;
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function concatenateBytes(...parts) {
+  const arrays = parts.map((part) => (
+    part instanceof Uint8Array ? part : new Uint8Array(part)
+  ));
+  const output = new Uint8Array(arrays.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of arrays) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
 }
 
 function sha256(bytes) {

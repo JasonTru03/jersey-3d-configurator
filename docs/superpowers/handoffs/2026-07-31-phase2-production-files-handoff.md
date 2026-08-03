@@ -1,7 +1,10 @@
 # 第二阶段交接：生产文件包
 
-日期：2026-07-31  
-分支：`codex/uv-pattern-pieces`
+日期：2026-07-31
+发布收口更新：2026-08-03
+当前本地分支：`codex/uv-pattern-pieces-clean`
+
+> 发布证据边界：原分支 `codex/uv-pattern-pieces` 夹带了不属于本 UV 范围的 Shopify form ownership / 结账链路。当前发布候选已在本地从 `0a0bd1c` 重建为纯 UV 分支，并排除全部 Shopify 提交。本文下方列出的既有浏览器 ZIP、解包目录和 preview 均生成于方向与外观覆盖修复之前，只能作为 pre-fix 历史证据，不能继续作为最终视觉通过证据。
 
 ## 交付范围
 
@@ -39,6 +42,10 @@ Atlas 使用模型声明的 `4096 × 4096` UV 尺寸。生产层会先使用快�
 - `32a4eb4`：真实模型 Atlas 映射回退与投影缓存
 - `27ce2fa`：图集烘焙按三角形批次主动让出主线程
 - `330e574`：锁定异步图集、预览与生产包生成顺序
+- `c8f5709`：将两模型 front/back 工厂裁片方向改为 `rotation: 180`、`mirrorX: true`
+- `543ce0c`：补齐 back 裁片独立方向证据
+- `0216c55`：将 `appearanceGroups` 与 `pieceGroups` 分离并覆盖全部外观网格
+- `acbe882`：修正袖底、袖口等外观网格的 sleeves 区域归属
 
 ## 自动化验证
 
@@ -101,10 +108,10 @@ Production package verification: PASS (950cdaa3, 4096x4096, 2 PDF pages)
 
 | 模型 | 正面单图 | 背面单图 | 同侧自动错位双图 | 浏览器完整包 |
 | --- | --- | --- | --- | --- |
-| Chelsea `chelsea-jersey.glb` | PASS | PASS | PASS | PASS |
-| FN8788 `fn8788-jersey.glb` | PASS | PASS | PASS | 未在浏览器页切换产品，已通过真实 GLB Atlas 回归 |
+| Chelsea `chelsea-jersey.glb` | PASS | PASS | PASS | PRE-FIX ONLY；需重新导出 |
+| FN8788 `fn8788-jersey.glb` | PASS | PASS | PASS | 未在浏览器页切换产品；最终浏览器证据待补 |
 
-Atlas 视觉检查确认：预设徽章、上传透明图案、正背面文字和号码均出现在对应 UV 区域；透明图案未被填充成不透明背景；PDF 第 1 页中文和正背面预览清晰，第 2 页 Atlas 未裁切，底部警示语和页码可见。
+旧 Atlas 视觉检查只能确认预设徽章、上传透明图案、正背面文字和号码进入了对应 UV 区域，以及 PDF/透明度/页码等结构表现；它没有证明工厂裁片方向和全部外观网格覆盖正确。后续复审确认旧裁片文字存在垂直翻转，且下摆/侧面出现黑块，因此该浏览器完整包结论已被 release-fix 取代，不能外推为最终视觉 PASS。
 
 ## UV 裁片真实模型自动化验证（2026-08-01）
 
@@ -112,10 +119,10 @@ Task 6 在未修改生产 renderer 或 UV 实现的前提下，使用 `GLTFLoade
 
 | 模型 ID / version | GLB | piece count / ids | front `mappedTriangles` / `coveragePixels` | back `mappedTriangles` / `coveragePixels` | 配置方向 |
 | --- | --- | --- | --- | --- | --- |
-| `chelsea-jersey@1` | `chelsea-jersey.glb` | 2 / `front`, `back` | 10,142 / 1,887 | 12,320 / 910 | front/back 均 `rotation: 0`, `mirrorX: false` |
-| `fn8788-jersey@1` | `fn8788-jersey.glb` | 2 / `front`, `back` | 6,282 / 3,323 | 7,316 / 1,533 | front/back 均 `rotation: 0`, `mirrorX: false` |
+| `chelsea-jersey@1` | `chelsea-jersey.glb` | 2 / `front`, `back` | 10,142 / 1,887 | 12,320 / 910 | front/back 均 `rotation: 180`, `mirrorX: true` |
+| `fn8788-jersey@1` | `fn8788-jersey.glb` | 2 / `front`, `back` | 6,282 / 3,323 | 7,316 / 1,533 | front/back 均 `rotation: 180`, `mirrorX: true` |
 
-稳定证据包括：每个 piece 非空且 `coveragePixels > 0`；正面设计色只出现在 `front`，背面设计色只出现在 `back`；player set、custom text、preset artwork、transparent upload 使用不同 raster 形状；front player set 另带三个非对称、有序的红/绿/蓝方形锚点。测试不再复用生产 `transformPiecePoint`，而是依据当前布局明确声明的 `rotation: 0` / `mirrorX: false` 使用独立 identity 坐标公式。三个锚点对应的 raw/output 中心 RGB 使用数组直接相等断言，不依赖目标色容差；三色 normalized coverage 使用显式绝对差并严格断言 `< 0.025`。方向方块扩大为 9×9，并从中心向顶点方向外移到 65%，避免覆盖小三角形的设计中心；实测最大差分别为 Chelsea `0.012345679012345678`、FN8788 `0.014846565585481863`，本轮全局最大值为 `0.014846565585481863`。按 mirrorX 或 180° rotation 反事实坐标采样时均为 0/3 匹配，因此能识别方向错误。两个完全重叠的可见 draw group 不会让 `mappedTriangles` 翻倍；raw Atlas 与裁片图中的上传图案中心 alpha 均为 0，裁片之间的间隔 alpha 也为 0。
+稳定证据包括：每个 piece 非空且 `coveragePixels > 0`；正面设计色只出现在 `front`，背面设计色只出现在 `back`；player set、custom text、preset artwork、transparent upload 使用不同 raster 形状。方向修复后的真实 GLB 用例在 Chelsea 与 FN8788 的 front/back 四个裁片上分别放置非对称、有序像素证据，独立按 `rotation: 180`、`mirrorX: true` 计算预期位置；identity、仅 mirror、仅 rotation 三条反事实路径都会被拒绝，不能用正片结果替代背片方向证明。三个锚点对应的 raw/output 中心 RGB 使用数组直接相等断言，不依赖目标色容差；normalized coverage 使用显式绝对差并严格断言 `< 0.025`。两个完全重叠的可见 draw group 不会让 `mappedTriangles` 翻倍；raw Atlas 与裁片图中的上传图案中心 alpha 均为 0，裁片之间的间隔 alpha 也为 0。
 
 TDD 记录：首次真实链路 RED 为 1 passed / 2 failed，不是缺文件或语法错误；两份 GLB 均已完成加载和裁片提取，但 1024 测试 Atlas 中过小的透明上传孔在 raw/output 中分别出现非零 alpha（Chelsea 198/42，FN8788 21/26），没有满足透明内容证据。根因是代表性上传 fixture 的孔径落入 Canvas 抗锯齿边缘，不是生产 UV 代码缺陷；将测试 Atlas 提高到 2048 并把采样点放到透明孔内部及环带中段后，raw/output 中心 alpha 均为 0，环带 alpha 为 246–255，进入 GREEN。
 
@@ -142,13 +149,13 @@ npm run build
 git diff --check
 ```
 
-本机结果：2026-08-03 focused 5 files / 22 tests 通过；scene/designs 33 files / 562 tests 通过；排除 package verifier 的全量 77 files / 1,198 tests 通过；app 与 Shopify 构建通过；`git diff --check` 无空白错误。全量测试打印两条既有 jsdom `Not implemented: navigation to another Document` 提示；构建打印既有大 chunk 与 `inlineDynamicImports` 警告，均未造成失败。
+本机结果：2026-08-03 focused 5 files / 22 tests 通过；scene/designs 33 files / 562 tests 通过；排除 package verifier 的全量 77 files / 1,198 tests 通过；app 与 Shopify 构建通过；`git diff --check` 无空白错误。全量测试打印两条既有 jsdom `Not implemented: navigation to another Document` 提示；构建打印既有大 chunk 与 `inlineDynamicImports` 警告，均未造成失败。这些结果早于 `c8f5709`、`543ce0c`、`0216c55`、`acbe882` 四个 release-fix 提交，不能写成当前 clean 分支的最终全量发布验证；四个修复已有 focused/agent 定向验证证据，最终全量命令仍由主代理重新执行和记录。
 
 平台限制：像素级集成测试要求能找到 Chrome、Chromium 或 Edge；可用 `CHROME_PATH` / `BROWSER_PATH` 显式指定。所有平台缺少可识别浏览器时都会失败，不再跳过 native Canvas 用例。本轮没有为 CI 新增浏览器或 Canvas 依赖。
 
-### 真实 in-app WebGL 浏览器验收（2026-08-03）
+### 真实 in-app WebGL 浏览器验收（2026-08-03，pre-fix 历史证据）
 
-主代理在 `http://127.0.0.1:4178/` 的真实 in-app WebGL 页面完成 Chelsea 验收。页面标题为 Chelsea Match Jersey，实际加载模型为 `chelsea-jersey.glb`；页面 `productId` 仍为 `fn8788-jersey`，因此导出文件名前缀仍是 `fn8788-jersey`，但第二轮 ZIP 的 `manifest.json` 明确记录模型为 `chelsea-jersey@1`。本轮只记录该身份差异，没有修改生产代码。
+主代理曾在 `http://127.0.0.1:4178/` 的真实 in-app WebGL 页面完成 Chelsea 导出。页面标题为 Chelsea Match Jersey，实际加载模型为 `chelsea-jersey.glb`；页面 `productId` 仍为 `fn8788-jersey`，因此导出文件名前缀仍是 `fn8788-jersey`，但第二轮 ZIP 的 `manifest.json` 明确记录模型为 `chelsea-jersey@1`。这两轮导出均发生在 release-fix 之前，本节只保留历史复现与文件身份信息，不再给出最终视觉通过结论。
 
 第一轮使用包含正背面徽章、文字和号码的复杂设计，导出文件为：
 
@@ -164,17 +171,17 @@ ZIP 中七个文件齐全：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.
 
 `C:\Users\ADMINI~1\AppData\Local\Temp\uv-text-export-be3d755751d644c58776dcf0411dd774`
 
-第二轮七文件同样齐全。`preview-front.png` 只显示 `FRONT` 自定义文字；`preview-back.png` 只显示 player set 的姓名 `FRONT` 与号码 `11`。`design.json` 中 front custom text 的 `placement` 为 `null`，由默认规则落在正面；player set 的 `printPlacement.normal.z` 为 `-1`，对应背面；`decorations` 为空。`manifest.json` 记录 `chelsea-jersey` version `1`、4096×4096，pieces 为 `front` / `back`，`mappedTriangles` 分别为 `10,142` / `12,320`，两者均为 `rotation: 0`、`mirrorX: false`，裁片之间保持透明分隔。
+第二轮七文件同样齐全。`preview-front.png` 只显示 `FRONT` 自定义文字；`preview-back.png` 只显示 player set 的姓名 `FRONT` 与号码 `11`。`design.json` 中 front custom text 的 `placement` 为 `null`，由默认规则落在正面；player set 的 `printPlacement.normal.z` 为 `-1`，对应背面；`decorations` 为空。旧 `manifest.json` 当时记录 `chelsea-jersey` version `1`、4096×4096，pieces 为 `front` / `back`，`mappedTriangles` 分别为 `10,142` / `12,320`，两者均为 `rotation: 0`、`mirrorX: false`。该值正是已被 `c8f5709` 更正的 pre-fix 配置，不代表当前 clean 分支；当前两模型 front/back 均为 `rotation: 180`、`mirrorX: true`。
 
-`uv-atlas.png` 与 `uv-pattern-pieces.png` 的设计内容一致，后者沿 front/back 两块 seam 轮廓重新排布。平铺 UV 中的文字看起来倒置或反向，属于模型 UV 岛本身的朝向；按模型 UV 映射回 3D 网格并渲染到 `preview-front.png` / `preview-back.png` 后方向正确，不能把 raw UV 的视觉方向误记为用户可见的镜像缺陷。
+旧 `uv-atlas.png` 与旧 `uv-pattern-pieces.png` 的设计内容来自同一份 Atlas，后者沿 front/back 两块 seam 轮廓重新排布。后续复审已确认旧工厂裁片图中的文字是垂直翻转，而不是可以忽略的 raw UV 视觉现象；旧图同时暴露下摆/侧面黑块。`preview-front.png` / `preview-back.png` 的 3D 方向正确不能证明工厂裁片图方向正确，因此旧 ZIP 和 preview 不得继续作为 release-fix 后的最终视觉证据。
 
 浏览器页面没有切换到 `fn8788-jersey.glb` 的入口，因此 FN8788 尚无同等的 in-app WebGL ZIP 视觉证据；其 Task 6 证据仍是 native Canvas 中真实加载 FN8788 GLB 的集成测试。该限制已明确保留，不能将 Chelsea 页面验收外推为 FN8788 浏览器验收。
 
-已知接缝边界：当前布局只声明每个模型的主身 `front` / `back` mesh，不覆盖袖片、领片、侧片等未声明裁片；输出不是工厂 CAD 纸样，仍不包含缝份、放码、对位标记或裁片编号。自动化 fixture 的 `coveragePixels` 是代表性设计内容的非透明像素数，不是整块 UV 岛面积。
+已知接缝边界：`pieceGroups` 仍只生成 `front` / `back` 两个 factory pieces；输出不是工厂 CAD 纸样，仍不包含缝份、放码、对位标记或裁片编号。基础外观不再受这两个 factory pieces 限制：独立 `appearanceGroups` 已覆盖 Chelsea 19 个、FN8788 16 个可渲染服装 mesh，并将袖底、袖口归入 `sleeves`。每个被配置 mesh 若没有有效 UV 会 fail closed，不会以黑块或默认填充伪装成功。自动化 fixture 的 `coveragePixels` 是代表性设计内容的非透明像素数，不是整块 UV 岛面积。
 
-状态：Task 6 已完成两份真实 GLB 的 native Canvas 自动化、Chelsea 真实 in-app WebGL 双轮 ZIP 验收与交接记录；FN8788 的 in-app WebGL 页面验收受产品切换入口限制，仍以真实 GLB 集成测试为证据。真实 ZIP 路径为 `C:\Users\Administrator\Downloads\fn8788-jersey-design-001e2b3e.zip` 与 `C:\Users\Administrator\Downloads\fn8788-jersey-design-693aeaa8.zip`。仍未 push、未 merge、未发布、未部署。Task 6 任务前回滚点为 `ebf6b6b2efe79639bb6d65e901dcead1509757af`；本次浏览器证据记录前检查点为 `5841f50e19f1d280a4a62938571753df980baace`。
+状态：两份真实 GLB 的 native Canvas 方向与覆盖 focused 证据已更新；本节两份 Chelsea ZIP 只保留为 pre-fix 复现材料。FN8788 仍没有同等 in-app WebGL 页面导出，Chelsea 也必须在四个 release-fix 提交后重新导出。当前 clean 分支仍未 push、未 merge、未发布、未部署。
 
-### 七文件生产包回归与发布检查点（2026-08-03）
+### 七文件生产包回归与发布检查点（2026-08-03，结构证据）
 
 Task 7 将离线 CLI verifier 从旧六文件契约升级为严格七文件契约，顺序固定为：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.png`、`uv-reference.pdf`、`preview-front.png`、`preview-back.png`、`manifest.json`。`manifest.json` 必须为六个非 manifest 文件声明精确 byte length 与 SHA-256；`uv-atlas.png` 和 `uv-pattern-pieces.png` 都必须是 4096×4096 PNG。生产 PNG 标准明确限定为 8-bit RGBA（`bitDepth: 8`、`colorType: 6`）、`compression: 0`、`filter: 0`、非交错（`interlace: 0`）；palette、Adam7 及其他编码 fail closed。PNG 检查会遍历完整 chunk 边界，使用 Node `crc32` 校验每个 chunk 的 type+data CRC：首块必须是 length 13 的唯一完整 IHDR、宽高为正数，连续 IDAT 必须非空并能由 `inflateSync` 解压，所有拼接后的 IDAT 压缩字节都必须被同一 zlib stream 消费，合法 zlib stream 后的尾随垃圾也会 fail closed；解压长度必须精确等于 4096 行 RGBA scanline，且每行 filter byte 只能为 0–4；最终必须是 CRC 正确的零长度 IEND，不能截断或在 IEND 后追加伪记录。裁片声明必须包含非空布局指纹、尺寸匹配的非空 pieces，并以不同 id 包含 `front` / `back`；每个裁片的 `label`、`zone`、`order`、`islandRefs`、`sourceMeshes`、`mappedTriangles`、source/output bounds、`rotation`、`mirrorX`、`scale`、`coveragePixels`、`aliases`、`duplicateGroup` 均按生产 manifest 契约校验，source mesh 必须与 island refs 一致，id/order 不得重复。缺失文件、CRC 或 IHDR 编码错误、IDAT 非 zlib/解压长度错误/未消费尾随字节/scanline filter 非法、长度/哈希不匹配、尺寸不匹配及缺失、空、重复或不完整裁片声明都会 fail closed。
 
@@ -205,7 +212,27 @@ node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn87
 
 全量测试仍打印两条既有 jsdom navigation 提示。优化前，纯 parser/package 负向用例与 manifest 负向用例会反复触发 Atlas+pieces 4K RGBA inflate，与 native Canvas Chrome 并发造成资源争抢；两次默认全量分别出现 2 项和 1 项 `ETIMEDOUT`，失败文件隔离重跑为 7/7 通过，串行全量仅作为根因诊断证据。资源压力优化后，尾随压缩数据修复的首次默认全量仍在本轮 Vite PID 28048 及 in-app WebGL 验收标签页保持运行时出现 2 项 Chrome `spawnSync ... ETIMEDOUT`；关闭仅属于本轮任务的 in-app WebGL 标签页和 Vite PID 28048 精确进程树后，用户已有 Chrome/Edge 保持运行，新鲜原始 `npm test` 于 2026-08-03 11:51:25 在默认并行模式完成 1,240/1,240，Duration 56.01s，exit 0。该结果说明最终门槛在清理本轮验收资源后通过，并不表示 verifier 代码本身可以消除所有外部浏览器资源争抢；最终门槛也未使用串行参数。Vite 仍打印大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler dry-run 还打印代理环境提示，并由 `npx` 临时取得 Wrangler 4.118.0。两个真实 ZIP 使用 payload verifier 的单包耗时分别约 599ms 与 449ms，未发现不可接受的内存或性能问题。最终要求的命令均为 exit 0，没有新增依赖、secret 或 binding。
 
-七文件格式目前只是本地生产产物契约变更；已发布 showcase 保持不变，必须取得用户明确发布批准后才能部署。代码侧回退方式是对未来 feature merge 执行普通 `git revert`；若以后已部署到 Cloudflare，则使用 Cloudflare deployment rollback 回到上一已知正常版本。本任务未 push、未 merge、未发布、未部署。
+上述旧 ZIP 的 verifier PASS 只证明七文件结构、哈希、PNG/PDF payload 和 manifest 契约在当时成立，不证明修复后的工厂裁片方向或全 mesh 外观覆盖。七文件格式目前只是本地生产产物契约变更；已发布 showcase 保持不变，必须取得用户明确发布批准后才能部署。代码侧回退方式是对未来 feature merge 执行普通 `git revert`；若以后已部署到 Cloudflare，则使用 Cloudflare deployment rollback 回到上一已知正常版本。本任务未 push、未 merge、未发布、未部署。
+
+### UV release-fix 收口（2026-08-03）
+
+发布候选不再使用原 `codex/uv-pattern-pieces` 分支。该分支夹带 Shopify form ownership / 结账链路，已在本地以 `0a0bd1c` 为基线重建 `codex/uv-pattern-pieces-clean`，只保留 UV 裁片范围的提交；当前没有 push、merge、release 或 deploy。
+
+本轮 release-fix 包含：
+
+- 方向：`c8f5709` 与 `543ce0c` 将 Chelsea、FN8788 的 front/back 全部固定为 `rotation: 180`、`mirrorX: true`，并让两模型正背片各自使用非对称像素证据；identity、仅 mirror、仅 rotation 都必须失败。
+- 外观覆盖：`0216c55` 与 `acbe882` 将用于基础外观烘焙的 `appearanceGroups` 与用于工厂裁片输出的 `pieceGroups` 分离。Chelsea 19 个、FN8788 16 个服装 mesh 均被外观组覆盖，袖底/袖口归入 `sleeves`；任何配置 mesh 缺少有效 UV 都 fail closed。
+- 工厂输出边界：`pieceGroups` 仍保持 `front` / `back` 两片，不把外观 mesh 分组误写成新增 CAD 裁片，也不新增缝份、放码、对位标记或裁片编号。
+- 验证状态：四个修复已有 focused/agent 定向验证；本文档收口不把此前全量结果或旧浏览器 ZIP 写成当前分支的最终 PASS。最终全量测试、构建、真实浏览器导出与视觉检查仍待主代理执行。
+
+#### 发布前待验收
+
+- 在当前 `codex/uv-pattern-pieces-clean` HEAD 上重新执行主代理规定的全量测试、构建和发布前检查，并记录命令、时间、计数与 exit code。
+- 用真实浏览器重新导出修复后的 Chelsea ZIP；如果产品入口允许，再补 FN8788 同等 ZIP。不要复用本文列出的两个旧 ZIP。
+- 检查新 `manifest.json` 中两模型 front/back 方向均为 `rotation: 180`、`mirrorX: true`。
+- 目视检查新 `uv-pattern-pieces.png` 与 PDF 裁片页：文字不再垂直翻转，下摆/侧面不再出现黑块，front/back 内容隔离且透明间隔保持正确。
+- 核对基础外观在 Chelsea 19 个、FN8788 16 个服装 mesh 上无遗漏，尤其检查袖底、袖口、肩侧、下摆和领口；缺失有效 UV 时应明确失败。
+- 发布、push、merge 或 deploy 前必须再次取得用户明确确认。
 
 ## 生产边界与回滚
 

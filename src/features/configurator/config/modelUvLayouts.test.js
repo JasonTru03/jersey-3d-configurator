@@ -46,8 +46,8 @@ describe('model UV seam layouts', () => {
     ))).toEqual(meshes);
     expect(layout.pieceGroups.map(({ rotation, mirrorX }) => ({ rotation, mirrorX })))
       .toEqual([
-        { rotation: 0, mirrorX: false },
-        { rotation: 0, mirrorX: false },
+        { rotation: 180, mirrorX: true },
+        { rotation: 180, mirrorX: true },
       ]);
   });
 

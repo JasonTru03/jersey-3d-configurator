@@ -20,6 +20,7 @@ import { selectGarmentPatternMeshes } from './modelProjection.js';
 import {
   assertPinnedTriangleCounts,
   collectRawRenderableUvTriangles,
+  mapAtlasPointToPieceOutput,
 } from './realGarmentPatternTestOracle.js';
 
 const ATLAS_SIZE = 2048;
@@ -68,6 +69,14 @@ describe('UV pattern pieces on supported real garment models', () => {
         raw: [0.34, 0.33, 0.33],
         output: [0.37, 0.30, 0.33],
       },
+    });
+
+    expect(() => expectDirectionalEvidence(evidence)).toThrow();
+  });
+
+  it('rejects identity output even when the configured direction anchors otherwise match', () => {
+    const evidence = createDirectionalEvidence({
+      counterfactualMatches: { identity: 3, mirrorX: 0, rotation180: 0 },
     });
 
     expect(() => expectDirectionalEvidence(evidence)).toThrow();
@@ -232,7 +241,11 @@ function runBrowserExtraction({ assetName, fixture, model }) {
       process.cwd(),
       'src/features/configurator/scene/uvPatternPieces.js',
     )).href;
-    writeFileSync(htmlPath, createBrowserHtml(moduleUrl, fixture), 'utf8');
+    const oracleUrl = pathToFileURL(resolvePath(
+      process.cwd(),
+      'src/features/configurator/scene/realGarmentPatternTestOracle.js',
+    )).href;
+    writeFileSync(htmlPath, createBrowserHtml(moduleUrl, oracleUrl, fixture), 'utf8');
     const argumentsList = [
       '--headless=new',
       '--allow-file-access-from-files',
@@ -262,12 +275,13 @@ function runBrowserExtraction({ assetName, fixture, model }) {
   }
 }
 
-function createBrowserHtml(moduleUrl, fixture) {
+function createBrowserHtml(moduleUrl, oracleUrl, fixture) {
   return `<!doctype html>
 <html>
 <body>UV_REAL_MODEL:{"ok":false,"error":"module did not finish"}</body>
 <script type="module">
 import { createUvPatternPieces } from ${JSON.stringify(moduleUrl)};
+import { mapAtlasPointToPieceOutput } from ${JSON.stringify(oracleUrl)};
 
 const fixture = ${JSON.stringify(fixture)};
 const atlasSize = ${ATLAS_SIZE};
@@ -469,27 +483,16 @@ function createAtlas() {
 }
 
 function outputPointForCurrentLayout(piece, atlasPoint) {
-  if (piece.rotation !== 0 || piece.mirrorX !== false) {
-    throw new Error('真实模型测试的独立坐标公式只允许当前明确配置的 rotation=0/mirrorX=false。');
-  }
-  const relativeX = (atlasPoint.x - piece.sourceBounds.x) / piece.sourceBounds.width;
-  const relativeY = (atlasPoint.y - piece.sourceBounds.y) / piece.sourceBounds.height;
-  return {
-    x: piece.outputBounds.x + relativeX * piece.outputBounds.width,
-    y: piece.outputBounds.y + relativeY * piece.outputBounds.height,
-  };
+  return mapAtlasPointToPieceOutput(piece, atlasPoint);
 }
 
 function outputPointForCounterfactual(piece, atlasPoint, counterfactual) {
-  const relativeX = (atlasPoint.x - piece.sourceBounds.x) / piece.sourceBounds.width;
-  const relativeY = (atlasPoint.y - piece.sourceBounds.y) / piece.sourceBounds.height;
-  const outputRelative = counterfactual === 'mirrorX'
-    ? { x: 1 - relativeX, y: relativeY }
-    : { x: 1 - relativeX, y: 1 - relativeY };
-  return {
-    x: piece.outputBounds.x + outputRelative.x * piece.outputBounds.width,
-    y: piece.outputBounds.y + outputRelative.y * piece.outputBounds.height,
+  const transforms = {
+    identity: { mirrorX: false, rotation: 0 },
+    mirrorX: { mirrorX: true, rotation: 0 },
+    rotation180: { mirrorX: false, rotation: 180 },
   };
+  return mapAtlasPointToPieceOutput(piece, atlasPoint, transforms[counterfactual]);
 }
 
 function readPixel(context, point) {
@@ -593,6 +596,10 @@ try {
     front.outputBounds,
     directionMarker.colors,
   );
+  const identitySamples = directionMarker.points.map((point) => readPixel(
+    outputContext,
+    outputPointForCounterfactual(front, point, 'identity'),
+  ));
   const mirrorSamples = directionMarker.points.map((point) => readPixel(
     outputContext,
     outputPointForCounterfactual(front, point, 'mirrorX'),
@@ -608,6 +615,7 @@ try {
     designSamples,
     directionalEvidence: {
       counterfactualMatches: {
+        identity: countMatchingSamples(identitySamples, directionMarker.colors),
         mirrorX: countMatchingSamples(mirrorSamples, directionMarker.colors),
         rotation180: countMatchingSamples(rotationSamples, directionMarker.colors),
       },
@@ -666,7 +674,7 @@ function expectColor(actual, expected, label = 'direction marker') {
 function createDirectionalEvidence(overrides = {}) {
   const exactSamples = DIRECTION_MARKER_COLORS.map((color) => [...color, 255]);
   return {
-    counterfactualMatches: { mirrorX: 0, rotation180: 0 },
+    counterfactualMatches: { identity: 0, mirrorX: 0, rotation180: 0 },
     normalizedCoverage: {
       raw: [0.34, 0.33, 0.33],
       output: [0.34, 0.33, 0.33],
@@ -691,6 +699,7 @@ function expectDirectionalEvidence(evidence) {
   coverageDifferences.forEach((difference) => {
     expect(difference).toBeLessThan(MAX_NORMALIZED_COVERAGE_DIFF);
   });
+  expect(evidence.counterfactualMatches.identity).toBe(0);
   expect(evidence.counterfactualMatches.mirrorX).toBe(0);
   expect(evidence.counterfactualMatches.rotation180).toBe(0);
   return Math.max(...coverageDifferences);

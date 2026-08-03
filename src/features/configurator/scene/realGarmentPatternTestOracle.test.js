@@ -16,6 +16,32 @@ describe('real garment pattern test oracle', () => {
       'utf8',
     );
     expect(oracleSource).not.toContain('renderableUvTriangles.js');
+    expect(oracleSource).not.toContain('uvPatternPieces.js');
+    expect(fixtureSource).not.toContain(['transform', 'PiecePoint'].join(''));
+  });
+
+  it('maps rotation 180 plus mirrorX as a vertical flip with an independent oracle', () => {
+    const piece = {
+      mirrorX: true,
+      outputBounds: { height: 400, width: 300, x: 500, y: 600 },
+      rotation: 180,
+      sourceBounds: { height: 200, width: 100, x: 10, y: 20 },
+    };
+    const atlasPoint = { x: 35, y: 70 };
+
+    expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint)).toEqual({ x: 575, y: 900 });
+    expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint, {
+      mirrorX: false,
+      rotation: 0,
+    })).toEqual({ x: 575, y: 700 });
+    expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint, {
+      mirrorX: false,
+      rotation: 180,
+    })).toEqual({ x: 725, y: 900 });
+    expect(oracle.mapAtlasPointToPieceOutput(piece, atlasPoint, {
+      mirrorX: true,
+      rotation: 0,
+    })).toEqual({ x: 725, y: 700 });
   });
 
   it('keeps the shared real-model loader unfiltered and applies selectors in each caller', () => {

@@ -52,6 +52,38 @@ export function assertPinnedTriangleCounts(modelId, actual) {
   }
 }
 
+export function mapAtlasPointToPieceOutput(piece, atlasPoint, {
+  rotation = piece?.rotation,
+  mirrorX = piece?.mirrorX,
+} = {}) {
+  const relativePoint = {
+    x: (atlasPoint.x - piece.sourceBounds.x) / piece.sourceBounds.width,
+    y: (atlasPoint.y - piece.sourceBounds.y) / piece.sourceBounds.height,
+  };
+  let orientedPoint;
+  switch (rotation) {
+    case 0:
+      orientedPoint = relativePoint;
+      break;
+    case 90:
+      orientedPoint = { x: 1 - relativePoint.y, y: relativePoint.x };
+      break;
+    case 180:
+      orientedPoint = { x: 1 - relativePoint.x, y: 1 - relativePoint.y };
+      break;
+    case 270:
+      orientedPoint = { x: relativePoint.y, y: 1 - relativePoint.x };
+      break;
+    default:
+      throw new Error(`真实模型方向 oracle 不支持 rotation=${rotation}。`);
+  }
+  if (mirrorX) orientedPoint = { x: 1 - orientedPoint.x, y: orientedPoint.y };
+  return {
+    x: piece.outputBounds.x + orientedPoint.x * piece.outputBounds.width,
+    y: piece.outputBounds.y + orientedPoint.y * piece.outputBounds.height,
+  };
+}
+
 function getVisibleDrawRanges(mesh, elementCount) {
   const geometry = mesh.geometry;
   const drawRange = intersectRanges(

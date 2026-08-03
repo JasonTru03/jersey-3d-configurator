@@ -145,11 +145,33 @@ git diff --check
 
 平台限制：像素级集成测试要求能找到 Chrome、Chromium 或 Edge；可用 `CHROME_PATH` / `BROWSER_PATH` 显式指定。所有平台缺少可识别浏览器时都会失败，不再跳过 native Canvas 用例。本轮没有为 CI 新增浏览器或 Canvas 依赖。
 
-视觉验收仍待主代理在真实页面执行，不能标记为已通过：分别切换 `chelsea-jersey@1` 与 `fn8788-jersey@1`，生成生产 ZIP，对照 `uv-atlas.png` 与 `uv-pattern-pieces.png` 检查正背面文字/号码只落入对应裁片、裁片轮廓符合接缝、文字无镜像、透明间隔存在，并保存可追溯的导出或截图路径。
+### 真实 in-app WebGL 浏览器验收（2026-08-03）
+
+主代理在 `http://127.0.0.1:4178/` 的真实 in-app WebGL 页面完成 Chelsea 验收。页面标题为 Chelsea Match Jersey，实际加载模型为 `chelsea-jersey.glb`；页面 `productId` 仍为 `fn8788-jersey`，因此导出文件名前缀仍是 `fn8788-jersey`，但第二轮 ZIP 的 `manifest.json` 明确记录模型为 `chelsea-jersey@1`。本轮只记录该身份差异，没有修改生产代码。
+
+第一轮使用包含正背面徽章、文字和号码的复杂设计，导出文件为：
+
+`C:\Users\Administrator\Downloads\fn8788-jersey-design-001e2b3e.zip`（4,182,480 bytes）
+
+ZIP 中七个文件齐全：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.png`、`uv-reference.pdf`、`preview-front.png`、`preview-back.png`、`manifest.json`。正面 Crest 只出现在正面，背面 Roundel 只出现在背面；Atlas/pieces 均包含 front/back 两块大裁片及透明分隔。由于徽章遮挡了文字和号码，第二轮删除全部徽章后重新导出，以便单独核对文字与 player set 的正背面方向和隔离。
+
+第二次点击 Save design 后，按钮的 `disabled` attribute 立即变为 `''`；约 6,919ms 后恢复为 `null`，并出现 Download production ZIP。第二轮文件为：
+
+`C:\Users\Administrator\Downloads\fn8788-jersey-design-693aeaa8.zip`（3,276,791 bytes）
+
+解包目录：
+
+`C:\Users\ADMINI~1\AppData\Local\Temp\uv-text-export-be3d755751d644c58776dcf0411dd774`
+
+第二轮七文件同样齐全。`preview-front.png` 只显示 `FRONT` 自定义文字；`preview-back.png` 只显示 player set 的姓名 `FRONT` 与号码 `11`。`design.json` 中 front custom text 的 `placement` 为 `null`，由默认规则落在正面；player set 的 `printPlacement.normal.z` 为 `-1`，对应背面；`decorations` 为空。`manifest.json` 记录 `chelsea-jersey` version `1`、4096×4096，pieces 为 `front` / `back`，`mappedTriangles` 分别为 `10,142` / `12,320`，两者均为 `rotation: 0`、`mirrorX: false`，裁片之间保持透明分隔。
+
+`uv-atlas.png` 与 `uv-pattern-pieces.png` 的设计内容一致，后者沿 front/back 两块 seam 轮廓重新排布。平铺 UV 中的文字看起来倒置或反向，属于模型 UV 岛本身的朝向；缝合到 `preview-front.png` / `preview-back.png` 后方向正确，不能把 raw UV 的视觉方向误记为用户可见的镜像缺陷。
+
+浏览器页面没有切换到 `fn8788-jersey.glb` 的入口，因此 FN8788 尚无同等的 in-app WebGL ZIP 视觉证据；其 Task 6 证据仍是 native Canvas 中真实加载 FN8788 GLB 的集成测试。该限制已明确保留，不能将 Chelsea 页面验收外推为 FN8788 浏览器验收。
 
 已知接缝边界：当前布局只声明每个模型的主身 `front` / `back` mesh，不覆盖袖片、领片、侧片等未声明裁片；输出不是工厂 CAD 纸样，仍不包含缝份、放码、对位标记或裁片编号。自动化 fixture 的 `coveragePixels` 是代表性设计内容的非透明像素数，不是整块 UV 岛面积。
 
-状态：Task 6 仅完成本地测试与交接记录，未 push、未发布、未部署。任务前回滚点为 `ebf6b6b2efe79639bb6d65e901dcead1509757af`；如需撤销本轮，可回到该提交并移除本节及真实模型测试辅助文件。
+状态：Task 6 已完成两份真实 GLB 的 native Canvas 自动化、Chelsea 真实 in-app WebGL 双轮 ZIP 验收与交接记录；FN8788 的 in-app WebGL 页面验收受产品切换入口限制，仍以真实 GLB 集成测试为证据。真实 ZIP 路径为 `C:\Users\Administrator\Downloads\fn8788-jersey-design-001e2b3e.zip` 与 `C:\Users\Administrator\Downloads\fn8788-jersey-design-693aeaa8.zip`。仍未 push、未 merge、未发布、未部署。Task 6 任务前回滚点为 `ebf6b6b2efe79639bb6d65e901dcead1509757af`；本次浏览器证据记录前检查点为 `5841f50e19f1d280a4a62938571753df980baace`。
 
 ## 生产边界与回滚
 

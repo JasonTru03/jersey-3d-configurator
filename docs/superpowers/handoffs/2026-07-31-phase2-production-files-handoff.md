@@ -114,11 +114,13 @@ Task 6 在未修改生产 renderer 或 UV 实现的前提下，使用 `GLTFLoade
 | `chelsea-jersey@1` | `chelsea-jersey.glb` | 2 / `front`, `back` | 10,142 / 1,592 | 12,320 / 910 | front/back 均 `rotation: 0`, `mirrorX: false` |
 | `fn8788-jersey@1` | `fn8788-jersey.glb` | 2 / `front`, `back` | 6,282 / 2,849 | 7,316 / 1,533 | front/back 均 `rotation: 0`, `mirrorX: false` |
 
-稳定证据包括：每个 piece 非空且 `coveragePixels > 0`；正面设计色只出现在 `front`，背面设计色只出现在 `back`；player set、custom text、preset artwork、transparent upload 使用不同 raster 形状；front player set 另带三个非对称、有序的红/绿/蓝方形锚点。测试不再复用生产 `transformPiecePoint`，而是依据当前布局明确声明的 `rotation: 0` / `mirrorX: false` 使用独立 identity 坐标公式。三个锚点在 raw Atlas 与 piece 中的中心 RGB 全部精确一致，三色归一化 coverage 最大偏差小于 0.025；按 mirrorX 或 180° rotation 反事实坐标采样时均为 0/3 匹配，因此能识别方向错误。两个完全重叠的可见 draw group 不会让 `mappedTriangles` 翻倍；raw Atlas 与裁片图中的上传图案中心 alpha 均为 0，裁片之间的间隔 alpha 也为 0。
+稳定证据包括：每个 piece 非空且 `coveragePixels > 0`；正面设计色只出现在 `front`，背面设计色只出现在 `back`；player set、custom text、preset artwork、transparent upload 使用不同 raster 形状；front player set 另带三个非对称、有序的红/绿/蓝方形锚点。测试不再复用生产 `transformPiecePoint`，而是依据当前布局明确声明的 `rotation: 0` / `mirrorX: false` 使用独立 identity 坐标公式。三个锚点对应的 raw/output 中心 RGB 使用数组直接相等断言，不依赖目标色容差；三色 normalized coverage 使用显式绝对差并严格断言 `< 0.025`。实测最大差分别为 Chelsea `0.006340579710144956`、FN8788 `0.024492587312074765`，本轮全局最大值为 `0.024492587312074765`。按 mirrorX 或 180° rotation 反事实坐标采样时均为 0/3 匹配，因此能识别方向错误。两个完全重叠的可见 draw group 不会让 `mappedTriangles` 翻倍；raw Atlas 与裁片图中的上传图案中心 alpha 均为 0，裁片之间的间隔 alpha 也为 0。
 
 TDD 记录：首次真实链路 RED 为 1 passed / 2 failed，不是缺文件或语法错误；两份 GLB 均已完成加载和裁片提取，但 1024 测试 Atlas 中过小的透明上传孔在 raw/output 中分别出现非零 alpha（Chelsea 198/42，FN8788 21/26），没有满足透明内容证据。根因是代表性上传 fixture 的孔径落入 Canvas 抗锯齿边缘，不是生产 UV 代码缺陷；将测试 Atlas 提高到 2048 并把采样点放到透明孔内部及环带中段后，raw/output 中心 alpha 均为 0，环带 alpha 为 246–255，进入 GREEN。
 
 规格审查修复也按 TDD 执行：review RED 为 1 passed / 2 failed，明确报错“缺少可识别旋转/镜像错误的非对称像素证据”，不是加载或语法错误。GREEN 后加入独立坐标公式、不同 artwork raster、三色方向锚点、归一化 coverage 与 mirror/rotation 反事实断言；未修改生产实现。
+
+二次规格复审继续按 TDD：新增两个负向断言后的 RED 为 3 passed / 2 failed，证明旧 helper 会接受 raw/output 每通道 RGB 漂移 1，也会接受 normalized coverage 漂移 0.03。GREEN 后对应 RGB 改为直接相等，coverage 改为显式绝对差 `< 0.025`；没有使用 `toBeCloseTo`，也没有修改生产代码。
 
 本轮自动化命令：
 
@@ -132,7 +134,7 @@ npm run build
 git diff --check
 ```
 
-本机结果：focused 2 files / 9 tests 通过；scene/designs 31 files / 551 tests 通过；排除 package verifier 的全量 75 files / 1,187 tests 通过；app 与 Shopify 构建通过；`git diff --check` 无输出。全量测试仍打印两条既有 jsdom `Not implemented: navigation to another Document` 提示；构建仍打印既有大 chunk 与 `inlineDynamicImports` 警告，均未造成失败。
+本机结果：focused 2 files / 11 tests 通过；scene/designs 31 files / 553 tests 通过；排除 package verifier 的全量 75 files / 1,189 tests 通过；app 与 Shopify 构建通过；`git diff --check` 无输出。全量测试仍打印两条既有 jsdom `Not implemented: navigation to another Document` 提示；构建仍打印既有大 chunk 与 `inlineDynamicImports` 警告，均未造成失败。
 
 平台限制：像素级集成测试会优先使用本机已安装的 Chrome/Edge，并在 Windows 上明确要求能找到浏览器；非 Windows 环境若没有可识别浏览器路径则跳过 native Canvas 用例。本轮没有为 CI 新增浏览器或 Canvas 依赖。
 

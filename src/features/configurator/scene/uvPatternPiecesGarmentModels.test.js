@@ -17,6 +17,7 @@ import {
 import { collectRenderableUvTriangles } from './renderableUvTriangles.js';
 
 const ATLAS_SIZE = 2048;
+const MAX_NORMALIZED_COVERAGE_DIFF = 0.025;
 const DIRECTION_MARKER_COLORS = [
   [245, 85, 35],
   [35, 205, 95],
@@ -43,6 +44,30 @@ describe('UV pattern pieces on supported real garment models', () => {
     if (process.platform === 'win32') expect(CHROME_PATH).toBeTruthy();
   });
 
+  it('rejects output RGB drift even when both samples remain inside the target-color tolerance', () => {
+    const evidence = createDirectionalEvidence({
+      outputSamples: DIRECTION_MARKER_COLORS.map(([red, green, blue]) => [
+        red + 1,
+        green + 1,
+        blue + 1,
+        255,
+      ]),
+    });
+
+    expect(() => expectDirectionalEvidence(evidence)).toThrow();
+  });
+
+  it('rejects normalized coverage drift that the previous implicit 0.05 tolerance accepted', () => {
+    const evidence = createDirectionalEvidence({
+      normalizedCoverage: {
+        raw: [0.34, 0.33, 0.33],
+        output: [0.37, 0.30, 0.33],
+      },
+    });
+
+    expect(() => expectDirectionalEvidence(evidence)).toThrow();
+  });
+
   const browserIt = CHROME_PATH ? it : it.skip;
   browserIt.each(REAL_GARMENT_MODELS)(
     'extracts isolated front/back design content from $model.id@$model.version',
@@ -63,7 +88,7 @@ describe('UV pattern pieces on supported real garment models', () => {
         rawCenterAlpha: 0,
       });
       expect(result.uploadTransparency.ringAlphas.every((alpha) => alpha > 200)).toBe(true);
-      expectDirectionalEvidence(result.directionalEvidence);
+      const maximumCoverageDifference = expectDirectionalEvidence(result.directionalEvidence);
 
       const fixture = loadedModels.get(model.id);
       for (const piece of result.pieces) {
@@ -96,6 +121,7 @@ describe('UV pattern pieces on supported real garment models', () => {
           coveragePixels: piece.coveragePixels,
           mappedTriangles: piece.mappedTriangles,
         })),
+        maximumCoverageDifference,
       });
     },
     60_000,
@@ -657,17 +683,35 @@ function expectColor(actual, expected) {
   expect(actual[3]).toBeGreaterThan(200);
 }
 
+function createDirectionalEvidence(overrides = {}) {
+  const exactSamples = DIRECTION_MARKER_COLORS.map((color) => [...color, 255]);
+  return {
+    counterfactualMatches: { mirrorX: 0, rotation180: 0 },
+    normalizedCoverage: {
+      raw: [0.34, 0.33, 0.33],
+      output: [0.34, 0.33, 0.33],
+    },
+    outputSamples: exactSamples,
+    rawSamples: exactSamples,
+    ...overrides,
+  };
+}
+
 function expectDirectionalEvidence(evidence) {
   expect(evidence, '缺少可识别旋转/镜像错误的非对称像素证据。').toBeDefined();
-  evidence.rawSamples.forEach((sample, index) => {
-    expectColor(sample, DIRECTION_MARKER_COLORS[index]);
+  evidence.rawSamples.forEach((rawSample, index) => {
+    const outputSample = evidence.outputSamples[index];
+    expectColor(rawSample, DIRECTION_MARKER_COLORS[index]);
+    expectColor(outputSample, DIRECTION_MARKER_COLORS[index]);
+    expect(outputSample.slice(0, 3)).toEqual(rawSample.slice(0, 3));
   });
-  evidence.outputSamples.forEach((sample, index) => {
-    expectColor(sample, DIRECTION_MARKER_COLORS[index]);
-  });
-  evidence.normalizedCoverage.raw.forEach((coverage, index) => {
-    expect(evidence.normalizedCoverage.output[index]).toBeCloseTo(coverage, 1);
+  const coverageDifferences = evidence.normalizedCoverage.raw.map((rawCoverage, index) => (
+    Math.abs(evidence.normalizedCoverage.output[index] - rawCoverage)
+  ));
+  coverageDifferences.forEach((difference) => {
+    expect(difference).toBeLessThan(MAX_NORMALIZED_COVERAGE_DIFF);
   });
   expect(evidence.counterfactualMatches.mirrorX).toBe(0);
   expect(evidence.counterfactualMatches.rotation180).toBe(0);
+  return Math.max(...coverageDifferences);
 }

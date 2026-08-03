@@ -1793,7 +1793,7 @@ describe('garment decoration mesh selection', () => {
 
     expect(renderer.appearanceTexture).toBeInstanceOf(THREE.CanvasTexture);
     expect(renderer.appearanceTexture.colorSpace).toBe(THREE.SRGBColorSpace);
-    expect(renderer.appearanceTexture.flipY).toBe(false);
+    expect(renderer.appearanceTexture.flipY).toBe(true);
     expect(renderer.modelMaterials.every((material) => material.map === renderer.appearanceTexture)).toBe(true);
     const previousTexture = renderer.appearanceTexture;
     const dispose = vi.spyOn(previousTexture, 'dispose');
@@ -1849,6 +1849,7 @@ describe('garment decoration mesh selection', () => {
     );
     expect(legacyDispose).toHaveBeenCalledOnce();
     expect(renderer.appearanceTexture).not.toBe(legacyTexture);
+    expect(renderer.appearanceTexture.flipY).toBe(true);
     renderer.dispose();
   });
 

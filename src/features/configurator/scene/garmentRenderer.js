@@ -430,7 +430,7 @@ export class GarmentRenderer {
         });
         stagedAppearanceTexture = new THREE.CanvasTexture(canvas);
         stagedAppearanceTexture.colorSpace = THREE.SRGBColorSpace;
-        stagedAppearanceTexture.flipY = false;
+        stagedAppearanceTexture.flipY = true;
       }
 
       transactionSnapshot = captureModelLoadSnapshot(this);
@@ -588,7 +588,7 @@ export class GarmentRenderer {
       uvLayout: this.modelUvLayout,
     }));
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.flipY = false;
+    texture.flipY = true;
     this.disposeAppearanceTexture();
     this.appearanceTexture = texture;
     this.appearanceTextureKey = appearanceKey;

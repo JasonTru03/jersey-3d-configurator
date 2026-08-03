@@ -225,7 +225,9 @@ node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn87
 - 工厂输出边界：`pieceGroups` 仍保持 `front` / `back` 两片，不把外观 mesh 分组误写成新增 CAD 裁片，也不新增缝份、放码、对位标记或裁片编号。
 - 验证状态：四个修复已有 focused/agent 定向验证；本文档收口不把此前全量结果或旧浏览器 ZIP 写成当前分支的最终 PASS。最终全量测试、构建、真实浏览器导出与视觉检查仍待主代理执行。
 
-#### 发布前待验收
+#### 发布前验收清单（已于 2026-08-03 执行）
+
+以下是 release-fix 收口时留下的检查清单；Chelsea 浏览器导出和最终命令已由后续小节完成。FN8788 因页面没有模型切换入口，仍保留 native Canvas 自动化证据边界。
 
 - 在当前 `codex/uv-pattern-pieces-clean` HEAD 上重新执行主代理规定的全量测试、构建和发布前检查，并记录命令、时间、计数与 exit code。
 - 用真实浏览器重新导出修复后的 Chelsea ZIP；如果产品入口允许，再补 FN8788 同等 ZIP。不要复用本文列出的两个旧 ZIP。
@@ -233,6 +235,29 @@ node scripts/verify-production-package.mjs C:\Users\Administrator\Downloads\fn87
 - 目视检查新 `uv-pattern-pieces.png` 与 PDF 裁片页：文字不再垂直翻转，下摆/侧面不再出现黑块，front/back 内容隔离且透明间隔保持正确。
 - 核对基础外观在 Chelsea 19 个、FN8788 16 个服装 mesh 上无遗漏，尤其检查袖底、袖口、肩侧、下摆和领口；缺失有效 UV 时应明确失败。
 - 发布、push、merge 或 deploy 前必须再次取得用户明确确认。
+
+#### Release-fix 后真实浏览器验收（2026-08-03）
+
+主代理在 clean 分支 `f4840e3` 之后进行真实 WebGL 验收时，首次发现基础外观画布虽按生产 Atlas 坐标使用 `y = 1 - v` 绘制，运行时 `CanvasTexture` 却仍为 `flipY = false`。结果是模型采样垂直镜像位置，正面下摆与侧片出现大块黑色，分区色只落到偶然重叠区域。控制台没有运行时异常；这是坐标约定不一致，不是 GLB 缺面或 `appearanceGroups` 漏 mesh。
+
+修复只调整 `garmentRenderer.js` 中模型加载和后续外观更新两个运行时入口，将 appearance texture 固定为 `flipY = true`；生产 Atlas 及 factory piece 坐标保持不变。TDD RED 为 1 file / 2 failed，两个失败都明确收到 `false` 而期望 `true`；GREEN 为 1 file / 2 passed。硬刷新后的 Chelsea WebGL 页面中，正面与背面主身完整着色，袖子分区为红色，领口分区为金色，旧版下摆/侧面大片黑块消失。窄黑色袖口/领口背面及侧缝内侧来自双面模型的内侧/背光面，不是透明 Atlas 缺片；生产 Atlas 中对应袖口/袖底为已绘制红色 UV 岛。
+
+由于 in-app Browser 只能通过局域网 IP 访问本地 Vite，页面不处于 secure context，点击 Save design 会明确显示“此浏览器不支持 SHA-256”。随后改用 Chrome 访问 `http://localhost:4182/`，重新设置四区配色、正面 `FRONT` 自定义文字和背面 `FACTORY / 18` player set，成功生成并下载：
+
+`C:\Users\Administrator\Downloads\fn8788-jersey-design-07f60cd8.zip`（3,872,784 bytes）
+
+页面标题仍为 Chelsea Match Jersey，`manifest.json` 的 `model.id` 为 `chelsea-jersey`、version `1`；文件名前缀和 `productId` 仍沿用既有 `fn8788-jersey` 产品 ID。该命名差异未在本阶段改动。
+
+新 ZIP 的真实验收结果：
+
+- 精确七文件：`design.json`、`uv-atlas.png`、`uv-pattern-pieces.png`、`uv-reference.pdf`、`preview-front.png`、`preview-back.png`、`manifest.json`。
+- CLI verifier：`PASS (07f60cd8, 4096x4096, 2 PDF pages)`。
+- `preview-front.png` 正面完整且只显示 `FRONT`；`preview-back.png` 背面完整且只显示 `FACTORY / 18`，无 release-fix 前的大块黑色缺片。
+- `uv-pattern-pieces.png` 放大裁片后，正片 V 领朝上且 `FRONT` 正向可读；背片领窝朝上且 `FACTORY / 18` 正向可读。两片之间保持透明间隔。
+- `manifest.json` 中 front/back 均为 `rotation: 180`、`mirrorX: true`，mapped triangles 分别为 `10,142` / `12,320`，coveragePixels 分别为 `4,194,130` / `3,659,805`。
+- `uv-reference.pdf` 由 Poppler 实际渲染为两页 A4 横向页面。第 1 页正背预览、产品/颜色/指纹信息清晰；第 2 页裁片方向和文字清晰，无裁切、重叠、乱码或黑块。
+
+当前页面仍没有切换到 `fn8788-jersey.glb` 的入口，因此 FN8788 的发布证据仍限于真实 GLB native Canvas 自动化，不伪造同等浏览器 ZIP 证据。浏览器验收结束后已释放 Chrome 标签页并停止本轮 Vite 服务，再在相同代码 HEAD 上执行发布门槛：package verifier tests 1 file / 42 passed；默认 `npm test` 76 files / 1,096 passed；`npm run build`、`npm run build:showcase`、`npx wrangler deploy --dry-run` 与新 ZIP CLI verifier 均 exit 0。全量仍打印两条既有 jsdom navigation 提示；构建仍打印既有大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler 仅打印代理环境提示。push、merge、release、deploy 继续等待用户明确确认。
 
 ## 生产边界与回滚
 

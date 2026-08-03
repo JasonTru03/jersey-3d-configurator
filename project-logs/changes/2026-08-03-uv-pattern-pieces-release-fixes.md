@@ -8,14 +8,16 @@
 
 - 将 UV 裁片发布候选收敛到不含 Shopify form ownership / 结账链路的纯 UV 分支。
 - 更正工厂裁片方向和基础外观 mesh 覆盖记录。
-- 明确旧浏览器 ZIP 仅为修复前证据，保留最终主代理验证和用户发布确认边界。
+- 修复 release-fix 后运行时贴图 V 轴不一致，并完成新的真实浏览器生产包验收。
+- 明确用户发布确认边界。
 
 ## 修改范围
 
 - 更新阶段二生产文件 handoff 的当前分支、方向、外观覆盖、证据状态和发布前待验收项。
 - 清理 UV 裁片设计规格第 3 行尾随空格。
 - 新增本变更日志和对应聊天收口日志。
-- 本次不修改代码、测试、依赖、Shopify、Cloudflare 或任何线上环境。
+- 修改 `garmentRenderer.js` 与对应测试，更新交接和项目日志。
+- 不修改依赖、Shopify、Cloudflare 或任何线上环境。
 
 ## 新增内容
 
@@ -38,22 +40,44 @@
 
 ## 影响范围
 
-- 只影响发布交接、规格格式、变更记录和聊天收口记录。
-- 不改变 `c8f5709`、`543ce0c`、`0216c55`、`acbe882` 已实现的代码行为。
-- 不代表已经生成新的 ZIP、截图或浏览器视觉证据。
+- 代码只影响基础外观 CanvasTexture 的运行时 V 轴方向；生产 Atlas、factory pieces、七文件契约和 Shopify/Cloudflare 链路不变。
+- 文档更新发布交接、规格格式、变更记录、聊天收口和真实 ZIP 证据。
 - 未 push、未 merge、未发布、未部署。
 
 ## 自检
 
-- 已核对当前分支为 `codex/uv-pattern-pieces-clean`，文档修改前工作区干净，HEAD 为 `acbe882`。
+- 已核对当前分支为 `codex/uv-pattern-pieces-clean`，修复前 HEAD 为 `f4840e3`。
 - 已核对当前配置：两模型 front/back 均为 `rotation: 180`、`mirrorX: true`；Chelsea 19 个、FN8788 16 个 appearance mesh；factory pieces 仍为 front/back。
-- 四个 release-fix 已有 focused/agent 定向验证证据；本日志不把这些证据扩大为当前分支的最终全量发布验证。
-- 文档提交前执行 `git diff --check`、完整 diff 自审和文件范围检查；结果以本次提交前的新鲜命令输出为准。
+- 已完成 TDD RED/GREEN、真实 Chrome WebGL/ZIP/PDF 验收、42 项 package verifier tests、1,096 项全量测试、两类构建和 Wrangler dry-run。
+- 提交前继续执行 `git diff --check`、完整 diff 自审和文件范围检查。
 
 ## 遗留问题
 
-- 主代理仍需在 clean 分支 HEAD 上执行最终全量测试、构建和发布前检查。
-- 主代理仍需重新生成真实浏览器 Chelsea ZIP，并在入口允许时补 FN8788；旧 ZIP 不可复用为最终证据。
-- 新裁片图/PDF 仍需确认文字方向、下摆/侧面黑块、透明间隔和正背面隔离。
-- 新导出的 manifest 仍需确认 front/back 均为 `rotation: 180`、`mirrorX: true`。
+- 页面没有 FN8788 模型切换入口，因此 FN8788 仍无同等浏览器 ZIP；保留真实 GLB native Canvas 自动化证据。
+- 页面标题/模型为 Chelsea，但产品 ID 与 ZIP 前缀仍为 `fn8788-jersey`；本阶段不改命名。
 - push、merge、release、deploy 均需用户明确确认。
+
+## 运行时贴图方向与真实生产包补充
+
+### 修复内容
+
+- 修复 release-fix 后 WebGL 外观画布与运行时 `CanvasTexture` 的 V 轴约定不一致：模型加载和外观更新两个入口均改为 `flipY = true`。
+- 保留生产 Atlas 的 `1 - v` 坐标和 factory piece 变换，不改变七文件契约或工厂裁片布局。
+- 在 `garmentRenderer.test.js` 为两个运行时入口补充方向断言。RED 为 2 failed，GREEN 为 2 passed。
+
+### 真实链路自检
+
+- Chrome `http://localhost:4182/` 真实 WebGL 中，正背主身、袖子和领口均完整；旧版下摆/侧面大块黑块消失。
+- 生成新包 `C:\Users\Administrator\Downloads\fn8788-jersey-design-07f60cd8.zip`，大小 3,872,784 bytes，设计指纹 `07f60cd8`。
+- 七文件齐全；两张 PNG 为 4096×4096；PDF 为两页 A4 横向；CLI verifier 输出 `PASS (07f60cd8, 4096x4096, 2 PDF pages)`。
+- 正面 preview 仅含 `FRONT`，背面 preview 仅含 `FACTORY / 18`。放大后的 front/back factory pieces 均领口朝上、文字正向可读。
+- manifest 的 front/back 均为 `rotation: 180`、`mirrorX: true`。
+
+### 验证边界
+
+- in-app Browser 的局域网地址不是 secure context，不能调用 SHA-256；这是验收环境限制，Chrome localhost 已覆盖完整生成链路。
+- 页面仍只提供 Chelsea 模型；FN8788 继续依赖真实 GLB native Canvas 自动化证据。
+- 页面标题/模型为 Chelsea，但 `productId` 和 ZIP 前缀仍为既有 `fn8788-jersey`。本阶段未改产品命名。
+- 浏览器资源释放并停止本轮 Vite 后，新鲜验证结果为：package verifier tests 42/42；默认全量 76 files / 1,096 tests；app/Shopify build、showcase build、Wrangler dry-run 和新 ZIP CLI verifier 均 exit 0。
+- 全量仍有两条既有 jsdom navigation 提示；构建仍有大 chunk 与 Shopify `inlineDynamicImports` 警告；Wrangler 仅有代理环境提示，均不阻塞。
+- 仍未 push、merge、release 或 deploy。

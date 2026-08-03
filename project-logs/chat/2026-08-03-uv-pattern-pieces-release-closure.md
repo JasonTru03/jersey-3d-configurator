@@ -29,13 +29,15 @@ UV 裁片发布候选必须使用本地 `codex/uv-pattern-pieces-clean`，不能
 - 原分支：`codex/uv-pattern-pieces`，不作为发布候选
 - 远端/发布状态：未 push、未 merge、未发布、未部署
 
-## 当前验证边界
+## 验收前验证边界（历史状态）
 
 - `c8f5709`、`543ce0c`、`0216c55`、`acbe882` 已有 focused/agent 定向验证证据。
 - 旧全量测试、构建、ZIP verifier 和浏览器导出早于 release-fix，只能作为历史或结构证据。
 - 本次文档代理只负责文档范围检查、`git diff --check` 和 diff 自审，不声明功能全量验证完成。
 
-## 下一步
+## 当时下一步（已执行）
+
+以下清单中的 clean HEAD 全量验证、Chelsea 浏览器 ZIP、manifest/裁片视觉检查和 handoff 回写均已由后续真实验收完成；FN8788 因页面没有切换入口，继续保留 native Canvas 自动化证据。
 
 1. 主代理在 clean 分支最新 HEAD 上重新执行最终全量测试、构建和发布前检查。
 2. 主代理用真实浏览器重新导出 Chelsea 七文件 ZIP；产品入口允许时补 FN8788 同等导出。
@@ -46,3 +48,15 @@ UV 裁片发布候选必须使用本地 `codex/uv-pattern-pieces-clean`，不能
 ## 发布需用户确认
 
 完成上述最终验证后，仍需用户明确批准才能 push、merge、release 或 deploy。不得因本地 focused 测试、文档提交或旧 ZIP verifier PASS 自动视为获得发布授权。
+
+## 后续真实验收结论
+
+- 首次 release-fix 后 WebGL 检查发现大块黑色仍存在，根因不是 GLB 或 appearance mesh 覆盖，而是 production Atlas 使用 `1 - v`、运行时 appearance texture 却设置 `flipY = false`。
+- 已按 TDD 修正两个运行时入口为 `flipY = true`；测试先 2 failed，再 2 passed。
+- 硬刷新后 Chelsea 正背面完整，旧下摆/侧面黑块消失；正面 `FRONT` 与背面 `FACTORY / 18` 均在真实预览中正确隔离。
+- 新生产包：`C:\Users\Administrator\Downloads\fn8788-jersey-design-07f60cd8.zip`，精确七文件，CLI verifier PASS，4K Atlas/pieces 与两页 PDF 均已目视检查。
+- front/back 裁片放大后领口朝上、文字正向；manifest 两片均为 `rotation: 180`、`mirrorX: true`。
+- in-app Browser 因局域网非安全上下文无法执行 SHA-256，完整生成改由 Chrome localhost 验收。这不改变代码发布边界。
+- FN8788 仍无页面切换入口；不把 Chelsea ZIP 外推成 FN8788 浏览器证据。
+- 释放 Chrome 标签页并停止本轮 Vite 后，最终门槛通过：42/42 package verifier tests、76 files / 1,096 全量 tests、app/Shopify build、showcase build、Wrangler dry-run、新 ZIP verifier 均 exit 0。
+- 当前仍未 push、merge、release 或 deploy，最终动作必须由用户明确选择。

@@ -79,9 +79,14 @@ describe('UV pattern pieces on supported real garment models', () => {
     expect(() => expectDirectionalEvidence(evidence)).toThrow();
   });
 
-  it('rejects identity output even when the configured direction anchors otherwise match', () => {
+  it('rejects the legacy double correction even when the RGB anchors otherwise match', () => {
     const evidence = createDirectionalEvidence({
-      counterfactualMatches: { identity: 3, mirrorX: 0, rotation180: 0 },
+      orientationMatches: {
+        configuredIdentity: 0,
+        legacyDoubleCorrection: 3,
+        mirrorX: 0,
+        rotation180: 0,
+      },
     });
 
     expect(() => expectDirectionalEvidence(evidence)).toThrow();
@@ -507,20 +512,21 @@ function outputPointForCurrentLayout(piece, atlasPoint, outputTransform, outputS
   return mapAtlasPointToPieceOutput(piece, atlasPoint, { outputSize, outputTransform });
 }
 
-function outputPointForCounterfactual(
+function outputPointForPieceTransform(
   piece,
   atlasPoint,
-  counterfactual,
+  transformName,
   outputTransform,
   outputSize,
 ) {
   const transforms = {
-    identity: { mirrorX: false, rotation: 0 },
+    configuredIdentity: { mirrorX: false, rotation: 0 },
+    legacyDoubleCorrection: { mirrorX: true, rotation: 180 },
     mirrorX: { mirrorX: true, rotation: 0 },
     rotation180: { mirrorX: false, rotation: 180 },
   };
   return mapAtlasPointToPieceOutput(piece, atlasPoint, {
-    ...transforms[counterfactual],
+    ...transforms[transformName],
     outputSize,
     outputTransform,
   });
@@ -632,25 +638,26 @@ try {
       piece.outputBounds,
       directionMarker.colors,
     );
-    const counterfactualSamples = Object.fromEntries([
-      'identity',
+    const orientationSamples = Object.fromEntries([
+      'configuredIdentity',
+      'legacyDoubleCorrection',
       'mirrorX',
       'rotation180',
-    ].map((counterfactual) => [counterfactual, directionMarker.points.map((point) => readPixel(
+    ].map((transformName) => [transformName, directionMarker.points.map((point) => readPixel(
       outputContext,
-      outputPointForCounterfactual(
+      outputPointForPieceTransform(
         piece,
         point,
-        counterfactual,
+        transformName,
         extracted.outputTransform,
         outputSize,
       ),
     ))]));
     directionalEvidence[directionDesign.region] = {
-      counterfactualMatches: Object.fromEntries(Object.entries(counterfactualSamples).map(([
-        counterfactual,
+      orientationMatches: Object.fromEntries(Object.entries(orientationSamples).map(([
+        transformName,
         samples,
-      ]) => [counterfactual, countMatchingSamples(samples, directionMarker.colors)])),
+      ]) => [transformName, countMatchingSamples(samples, directionMarker.colors)])),
       normalizedCoverage: {
         output: normalizeCounts(outputDirectionCounts),
         raw: normalizeCounts(rawDirectionCounts),
@@ -714,7 +721,12 @@ function expectColor(actual, expected, label = 'direction marker') {
 function createDirectionalEvidence(overrides = {}) {
   const exactSamples = DIRECTION_MARKER_COLORS.map((color) => [...color, 255]);
   return {
-    counterfactualMatches: { identity: 0, mirrorX: 0, rotation180: 0 },
+    orientationMatches: {
+      configuredIdentity: 3,
+      legacyDoubleCorrection: 0,
+      mirrorX: 0,
+      rotation180: 0,
+    },
     normalizedCoverage: {
       raw: [0.34, 0.33, 0.33],
       output: [0.34, 0.33, 0.33],
@@ -739,8 +751,9 @@ function expectDirectionalEvidence(evidence, expectedColors = DIRECTION_MARKER_C
   coverageDifferences.forEach((difference) => {
     expect(difference).toBeLessThan(MAX_NORMALIZED_COVERAGE_DIFF);
   });
-  expect(evidence.counterfactualMatches.identity).toBe(0);
-  expect(evidence.counterfactualMatches.mirrorX).toBe(0);
-  expect(evidence.counterfactualMatches.rotation180).toBe(0);
+  expect(evidence.orientationMatches.configuredIdentity).toBe(3);
+  expect(evidence.orientationMatches.legacyDoubleCorrection).toBe(0);
+  expect(evidence.orientationMatches.mirrorX).toBe(0);
+  expect(evidence.orientationMatches.rotation180).toBe(0);
   return Math.max(...coverageDifferences);
 }

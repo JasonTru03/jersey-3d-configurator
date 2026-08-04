@@ -17,7 +17,7 @@ describe('UV pattern pieces Chrome smoke', () => {
     expect(requireNativeCanvasBrowserPath()).toBeTruthy();
   });
 
-  it('runs the public extraction pipeline against native Canvas and Blob', () => {
+  it('applies the shared vertical correction once to produce the verified upright direction', () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'uv-pattern-pieces-'));
     try {
       const htmlPath = join(temporaryDirectory, 'smoke.html');
@@ -128,13 +128,15 @@ function createAtlas() {
   canvas.width = 32;
   canvas.height = 32;
   const context = canvas.getContext('2d');
-  context.fillStyle = '#ff0000';
-  context.fillRect(0, 0, 16, 16);
-  context.fillStyle = '#00ff00';
-  context.fillRect(16, 0, 16, 16);
+  // The asymmetric source is vertically inverted, like the real baked atlas evidence.
+  // Identity pieces plus the shared global transform must restore red/green/blue/yellow.
   context.fillStyle = '#0000ff';
-  context.fillRect(0, 16, 16, 16);
+  context.fillRect(0, 0, 16, 16);
   context.fillStyle = '#ffff00';
+  context.fillRect(16, 0, 16, 16);
+  context.fillStyle = '#ff0000';
+  context.fillRect(0, 16, 16, 16);
+  context.fillStyle = '#00ff00';
   context.fillRect(16, 16, 16, 16);
   return canvas;
 }
@@ -167,11 +169,11 @@ try {
     patternOutputTransform: { rotation: 180, mirrorX: true },
     pieceGroups: [
       {
-        id: 'front', label: 'front', order: 0, zone: 'body', rotation: 180, mirrorX: true,
+        id: 'front', label: 'front', order: 0, zone: 'body', rotation: 0, mirrorX: false,
         islandRefs: [{ meshName: 'front-mesh' }],
       },
       {
-        id: 'back', label: 'back', order: 1, zone: 'body', rotation: 180, mirrorX: true,
+        id: 'back', label: 'back', order: 1, zone: 'body', rotation: 0, mirrorX: false,
         islandRefs: [{ meshName: 'back-mesh' }],
       },
     ],
@@ -196,8 +198,8 @@ try {
   publish({
     ok: true,
     outputTransform: extracted.outputTransform,
-    frontInside: readRelativePixel(outputContext, frontPiece.outputBounds, 0.2, 0.2),
-    frontOutside: readRelativePixel(outputContext, frontPiece.outputBounds, 0.8, 0.8),
+    frontInside: readRelativePixel(outputContext, frontPiece.outputBounds, 0.1, 0.3),
+    frontOutside: readRelativePixel(outputContext, frontPiece.outputBounds, 0.8, 0.5),
     backCorners: [
       readRelativePixel(outputContext, backPiece.outputBounds, 0.25, 0.25),
       readRelativePixel(outputContext, backPiece.outputBounds, 0.85, 0.35),

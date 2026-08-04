@@ -889,3 +889,17 @@ Expected: 全部 exit 0，且 `git status --short --branch` 无文件改动。
 - [ ] **Step 3: 使用完成分支流程交付**
 
 调用 `superpowers:finishing-a-development-branch`，向用户提供该技能要求的四个本地/远端集成选项。未经用户明确确认，不执行 merge、push、PR 或 Cloudflare 发布。
+
+## 附录：真实验收修正（2026-08-04）
+
+原实施步骤完成后，真实生产 ZIP/PDF 视觉验收否决了“双层均配置 `{ rotation: 180, mirrorX: true }`”的结果。该组合在 piece 层和 global 层各执行一次上下翻转，两次变换互相抵消，导致领口、`FRONT TOP`、`PLAYER`、`16` 与 Crest 仍然上下颠倒。
+
+修正任务保留根级 `patternOutputTransform: { rotation: 180, mirrorX: true }`，把 Chelsea 与 FN8788 的正片、背片全部恢复为单片恒等变换 `{ rotation: 0, mirrorX: false }`。本次不修改布局 `version: 2`、模型 `uvExportVersion: '2'` 或生产包 `schemaVersion: 2`。
+
+新增验收要求：
+
+- 模型注册测试精确锁定两个正式模型的 front/back piece 为恒等变换，并继续锁定 global 为 `{ rotation: 180, mirrorX: true }`；
+- 原生 Canvas 四色 fixture 使用固定倒置源图，静态断言共享 global 变换只执行一次后得到红、绿、蓝、黄的正确方向；
+- 两个真实 GLB 的独立 oracle 固定要求 configured identity 命中 3 个方向 marker，并要求 legacy double-correction、仅 `rotation: 180`、仅 `mirrorX: true` 均为 0；
+- 保留真实输出 RGB、覆盖率、透明上传、正背隔离、三角形数量与 global transform 的回归断言；
+- 后续独立验收任务重新生成并视觉核对最终生产 ZIP；本修正任务不生成、不发布，也不把 blocked 验收日志提前改为 PASS。

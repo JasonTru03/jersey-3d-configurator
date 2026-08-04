@@ -212,7 +212,6 @@ describe('validateUploadedProductionPackage', () => {
   it.each([
     ['declared MIME', 'preview-front.png', new Blob([pngBytes()], { type: 'application/octet-stream' })],
     ['PNG signature', 'preview-front.png', new Blob(['not-png'], { type: 'image/png' })],
-    ['PDF signature', 'uv-reference.pdf', new Blob(['not-pdf'], { type: 'application/pdf' })],
     ['design JSON', 'design.json', new Blob(['{'], { type: 'application/json' })],
     ['manifest JSON', 'manifest.json', new Blob(['{'], { type: 'application/json' })],
   ])('rejects invalid %s before returning metadata', async (_label, filename, blob) => {
@@ -220,6 +219,26 @@ describe('validateUploadedProductionPackage', () => {
       expectedShop: SHOP,
       files: replaceFile(validFiles, filename, blob),
     })).rejects.toThrow();
+  });
+
+  it('rejects non-PDF content after its manifest hash and byte length are refreshed', async () => {
+    const replaced = replaceFile(
+      validFiles,
+      'uv-reference.pdf',
+      new Blob(['NOT-A-PDF-DOCUMENT'], { type: 'application/pdf' }),
+    );
+    const files = await refreshManifest(replaced);
+
+    const error = await validateUploadedProductionPackage({ expectedShop: SHOP, files })
+      .then(() => null, (reason) => reason);
+    expect(error).toMatchObject({
+      code: 'invalid-production-package',
+      message: 'Uploaded production package is invalid.',
+      name: 'ProductionPackageValidationError',
+    });
+    expect(error.cause).toMatchObject({
+      message: 'Production file uv-reference.pdf has invalid content.',
+    });
   });
 
   it.each([
@@ -344,7 +363,6 @@ describe('validateUploadedProductionPackage', () => {
 
   it.each([
     ['product', (manifest) => ({ ...manifest, productId: 'other-product' })],
-    ['variant', (manifest) => ({ ...manifest, variantId: 'other-variant' })],
     ['fingerprint', (manifest) => ({ ...manifest, designFingerprint: 'deadbeef' })],
     ['schema', (manifest) => ({ ...manifest, schemaVersion: 1 })],
     ['UV export version', (manifest) => ({ ...manifest, uvExportVersion: '1' })],
@@ -352,6 +370,24 @@ describe('validateUploadedProductionPackage', () => {
     const files = await replaceManifest(validFiles, mutate);
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
       .rejects.toThrow();
+  });
+
+  it('rejects a different valid Shopify variant as a design/manifest mismatch', async () => {
+    const files = await replaceManifest(validFiles, (manifest) => ({
+      ...manifest,
+      variantId: '48039101923480',
+    }));
+
+    const error = await validateUploadedProductionPackage({ expectedShop: SHOP, files })
+      .then(() => null, (reason) => reason);
+    expect(error).toMatchObject({
+      code: 'invalid-production-package',
+      message: 'Uploaded production package is invalid.',
+      name: 'ProductionPackageValidationError',
+    });
+    expect(error.cause).toMatchObject({
+      message: 'Production design and manifest do not match.',
+    });
   });
 
   it.each([

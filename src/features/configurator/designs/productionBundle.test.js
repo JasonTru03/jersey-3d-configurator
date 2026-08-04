@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { createProductionBundle, rebuildProductionBundle } from './productionBundle.js';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  createProductionBundle,
+  createStreamingProductionBundle,
+} from './productionBundle.js';
 
 const ZIP_NAMES = [
   'design.json',
@@ -10,6 +13,22 @@ const ZIP_NAMES = [
   'preview-back.png',
   'manifest.json',
 ];
+const MEBIBYTE = 1024 * 1024;
+let originalBlobStream;
+
+beforeAll(() => {
+  originalBlobStream = Object.getOwnPropertyDescriptor(Blob.prototype, 'stream');
+  if (!originalBlobStream) installBlobStreamPolyfill();
+});
+
+afterAll(() => {
+  if (originalBlobStream) Object.defineProperty(Blob.prototype, 'stream', originalBlobStream);
+  else delete Blob.prototype.stream;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const createFiles = () => ZIP_NAMES.map((filename) => ({
   blob: new Blob([filename]),
@@ -17,7 +36,7 @@ const createFiles = () => ZIP_NAMES.map((filename) => ({
 }));
 
 describe('createProductionBundle', () => {
-  it('packages exactly the ordered seven-file production contract', async () => {
+  it('keeps the browser Blob API while packaging the ordered seven-file contract', async () => {
     const result = await createProductionBundle({
       files: createFiles(),
       fingerprint: '12ab34cd',
@@ -26,11 +45,9 @@ describe('createProductionBundle', () => {
 
     expect(result.filename).toBe('fn8788-jersey-design-12ab34cd.zip');
     expect(result.blob.type).toBe('application/zip');
-
-    const bytes = new Uint8Array(await result.blob.arrayBuffer());
-    expect(readCentralNames(bytes)).toEqual(ZIP_NAMES);
-    expect(Array.from(bytes.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
-    expect(Array.from(bytes.slice(-22, -18))).toEqual([0x50, 0x4b, 0x05, 0x06]);
+    const entries = readZipEntries(new Uint8Array(await result.blob.arrayBuffer()));
+    expect(entries.map(({ name }) => name)).toEqual(ZIP_NAMES);
+    expect(entries.map(({ body }) => new TextDecoder().decode(body))).toEqual(ZIP_NAMES);
   });
 
   it.each([
@@ -61,40 +78,160 @@ describe('createProductionBundle', () => {
   });
 });
 
-describe('rebuildProductionBundle', () => {
-  it('rebuilds the ZIP only from verified seven-file input', async () => {
-    const result = await rebuildProductionBundle({
-      designFingerprint: '12ab34cd',
-      files: createFiles(),
+describe('createStreamingProductionBundle', () => {
+  it('rejects a Worker input without Blob.stream instead of silently buffering it', () => {
+    const files = createFiles();
+    Object.defineProperty(files[0].blob, 'stream', { value: undefined });
+
+    expect(() => createStreamingProductionBundle({
+      files,
+      fingerprint: '12ab34cd',
+      productId: 'fn8788-jersey',
+    })).toThrow('生产 ZIP 文件不支持流式读取。');
+  });
+
+  it('returns an R2-consumable lazy Web Stream with exact content length', async () => {
+    const files = createFiles();
+    const arrayBufferSpy = vi.spyOn(Blob.prototype, 'arrayBuffer');
+    const streamSpy = vi.spyOn(Blob.prototype, 'stream');
+
+    const result = createStreamingProductionBundle({
+      files,
+      fingerprint: '12ab34cd',
       productId: 'fn8788-jersey',
     });
 
-    expect(result.filename).toBe('fn8788-jersey-design-12ab34cd.zip');
-    expect(readCentralNames(new Uint8Array(await result.blob.arrayBuffer())))
-      .toEqual(ZIP_NAMES);
+    expect(result).toMatchObject({
+      byteLength: expect.any(Number),
+      contentLength: expect.any(Number),
+      filename: 'fn8788-jersey-design-12ab34cd.zip',
+      mediaType: 'application/zip',
+      stream: expect.any(ReadableStream),
+    });
+    expect(result.byteLength).toBe(result.contentLength);
+    expect(arrayBufferSpy).not.toHaveBeenCalled();
+    expect(streamSpy).not.toHaveBeenCalled();
+
+    const reader = result.stream.getReader();
+    const first = await reader.read();
+    expect(Array.from(first.value.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    expect(streamSpy).not.toHaveBeenCalled();
+    await reader.read();
+    expect(streamSpy).toHaveBeenCalledTimes(1);
+    expect(arrayBufferSpy).not.toHaveBeenCalled();
+    await reader.cancel();
   });
 
-  it('rejects an uploaded ZIP or arbitrary metadata instead of passing it through', async () => {
-    await expect(rebuildProductionBundle({
-      designFingerprint: '12ab34cd',
+  it('streams a valid STORE ZIP with descriptors, ordered names, and exact contents', async () => {
+    const result = createStreamingProductionBundle({
       files: createFiles(),
+      fingerprint: '12ab34cd',
       productId: 'fn8788-jersey',
-      uploadedZip: new Blob(['untrusted'], { type: 'application/zip' }),
-    })).rejects.toThrow('服务端生产 ZIP 输入无效。');
+    });
+    const bytes = new Uint8Array(await new Response(result.stream).arrayBuffer());
+    const entries = readZipEntries(bytes);
+
+    expect(bytes.byteLength).toBe(result.contentLength);
+    expect(entries.map(({ name }) => name)).toEqual(ZIP_NAMES);
+    expect(entries.map(({ body }) => new TextDecoder().decode(body))).toEqual(ZIP_NAMES);
+    expect(entries.every(({ flags, method }) => (
+      flags === 0x0808 && method === 0
+    ))).toBe(true);
+    expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926);
+    expect(entries.every(({ body, checksum, descriptor }) => (
+      checksum === crc32(body)
+      && descriptor.signature === 0x08074b50
+      && descriptor.checksum === checksum
+      && descriptor.compressedSize === body.byteLength
+      && descriptor.uncompressedSize === body.byteLength
+    ))).toBe(true);
+  });
+
+  it('constructs the exact 64 MiB boundary without reading or preallocating a full ZIP', () => {
+    const oneMiB = new Blob([new Uint8Array(MEBIBYTE)]);
+    const sizes = [8, 16, 16, 8, 8, 7, 1];
+    const files = ZIP_NAMES.map((filename, index) => ({
+      blob: new Blob(Array(sizes[index]).fill(oneMiB)),
+      filename,
+    }));
+    const arrayBufferSpy = vi.spyOn(Blob.prototype, 'arrayBuffer');
+    const streamSpy = vi.spyOn(Blob.prototype, 'stream');
+
+    const result = createStreamingProductionBundle({
+      files,
+      fingerprint: '12ab34cd',
+      productId: 'fn8788-jersey',
+    });
+
+    expect(files.reduce((total, file) => total + file.blob.size, 0)).toBe(64 * MEBIBYTE);
+    expect(result.contentLength).toBeGreaterThan(64 * MEBIBYTE);
+    expect(arrayBufferSpy).not.toHaveBeenCalled();
+    expect(streamSpy).not.toHaveBeenCalled();
   });
 });
 
-function readCentralNames(bytes) {
+function readZipEntries(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const names = [];
+  const entries = [];
   for (let offset = 0; offset <= bytes.length - 46; offset += 1) {
     if (view.getUint32(offset, true) !== 0x02014b50) continue;
+    const flags = view.getUint16(offset + 8, true);
+    const method = view.getUint16(offset + 10, true);
+    const checksum = view.getUint32(offset + 16, true);
+    const size = view.getUint32(offset + 24, true);
     const nameLength = view.getUint16(offset + 28, true);
-    names.push(new TextDecoder().decode(bytes.slice(
-      offset + 46,
-      offset + 46 + nameLength,
-    )));
-    offset += 45 + nameLength;
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const bodyOffset = localOffset + 30 + localNameLength + localExtraLength;
+    const descriptorOffset = bodyOffset + size;
+    entries.push({
+      body: bytes.slice(bodyOffset, bodyOffset + size),
+      checksum,
+      descriptor: {
+        checksum: view.getUint32(descriptorOffset + 4, true),
+        compressedSize: view.getUint32(descriptorOffset + 8, true),
+        signature: view.getUint32(descriptorOffset, true),
+        uncompressedSize: view.getUint32(descriptorOffset + 12, true),
+      },
+      flags,
+      method,
+      name: new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + nameLength)),
+    });
+    offset += 45 + nameLength + extraLength + commentLength;
   }
-  return names;
+  return entries;
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function installBlobStreamPolyfill() {
+  Object.defineProperty(Blob.prototype, 'stream', {
+    configurable: true,
+    value() {
+      const blob = this;
+      return new ReadableStream({
+        start(controller) {
+          const reader = new FileReader();
+          reader.addEventListener('load', () => {
+            controller.enqueue(new Uint8Array(reader.result));
+            controller.close();
+          });
+          reader.addEventListener('error', () => controller.error(reader.error));
+          reader.readAsArrayBuffer(blob);
+        },
+      });
+    },
+  });
 }

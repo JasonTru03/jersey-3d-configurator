@@ -7,18 +7,63 @@ import {
   PRODUCTION_PACKAGE_SCHEMA_VERSION,
   PRODUCTION_UV_EXPORT_VERSION,
 } from '../../src/features/configurator/designs/productionFingerprint.js';
+import { createStreamingProductionBundle } from '../../src/features/configurator/designs/productionBundle.js';
 import {
   MAX_PRODUCTION_PACKAGE_BYTES,
   PRODUCTION_PACKAGE_FILE_CONTRACT,
+  readPngDimensions,
   verifyProductionArtifacts,
 } from '../../src/features/configurator/designs/productionManifest.js';
 
 const SHOP_DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
 const FINGERPRINT_PATTERN = /^[a-f0-9]{8}$/u;
-const PNG_SIGNATURE = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PDF_SIGNATURE = Object.freeze([37, 80, 68, 70, 45]);
+const PRODUCT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,100}$/u;
+const SHOPIFY_VARIANT_ID_PATTERN = /^[1-9][0-9]{0,31}$/u;
+const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
+const MODEL_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/u;
+
+export class ProductionPackageValidationError extends Error {
+  constructor(cause) {
+    super('Uploaded production package is invalid.', { cause });
+    this.code = 'invalid-production-package';
+    this.name = 'ProductionPackageValidationError';
+  }
+}
+
+export class ProductionPackageRebuildError extends Error {
+  constructor(cause) {
+    super('Production package rebuild failed.', { cause });
+    this.code = 'production-package-rebuild-failed';
+    this.name = 'ProductionPackageRebuildError';
+  }
+}
 
 export async function validateUploadedProductionPackage(input) {
+  try {
+    return await validateUploadedProductionPackageInternal(input);
+  } catch (error) {
+    if (error instanceof ProductionPackageValidationError) throw error;
+    throw new ProductionPackageValidationError(error);
+  }
+}
+
+export async function validateAndRebuildUploadedProductionPackage(input) {
+  const validated = await validateUploadedProductionPackage(input);
+  let bundle;
+  try {
+    bundle = createStreamingProductionBundle({
+      files: validated.files,
+      fingerprint: validated.designFingerprint,
+      productId: validated.productId,
+    });
+  } catch (error) {
+    throw new ProductionPackageRebuildError(error);
+  }
+  return Object.freeze({ validated, bundle });
+}
+
+async function validateUploadedProductionPackageInternal(input) {
   const request = snapshotRequest(input);
   const [design, manifest] = await Promise.all([
     parseJsonFile(request.files[0], 'design'),
@@ -27,7 +72,11 @@ export async function validateUploadedProductionPackage(input) {
   ]);
   assertDesignDocument(design);
   assertManifestMetadata(manifest);
-  if (design.productId !== manifest.productId || design.variantId !== manifest.variantId) {
+  if (
+    design.productId !== manifest.productId
+    || design.variantId !== manifest.variantId
+    || design.state.layout !== manifest.size
+  ) {
     throw new TypeError('Production design and manifest do not match.');
   }
 
@@ -150,9 +199,12 @@ async function parseJsonFile(file, label) {
 }
 
 async function assertFileMagic(file) {
-  const expected = file.filename.endsWith('.png') ? PNG_SIGNATURE : PDF_SIGNATURE;
-  const actual = new Uint8Array(await file.blob.slice(0, expected.length).arrayBuffer());
-  if (!sameBytes(actual, expected)) {
+  if (file.filename.endsWith('.png')) {
+    await readPngDimensions(file.blob, file.filename);
+    return;
+  }
+  const actual = new Uint8Array(await file.blob.slice(0, PDF_SIGNATURE.length).arrayBuffer());
+  if (!sameBytes(actual, PDF_SIGNATURE)) {
     throw new TypeError(`Production file ${file.filename} has invalid content.`);
   }
 }
@@ -160,11 +212,11 @@ async function assertFileMagic(file) {
 function assertDesignDocument(design) {
   if (
     design.format !== DESIGN_DOCUMENT_FORMAT
-    || ![1, 2, DESIGN_DOCUMENT_VERSION].includes(design.version)
-    || typeof design.productId !== 'string'
-    || design.productId.length === 0
-    || (design.variantId !== null && typeof design.variantId !== 'string')
+    || design.version !== DESIGN_DOCUMENT_VERSION
+    || !matchesPattern(design.productId, PRODUCT_ID_PATTERN)
+    || !isVariantId(design.variantId)
     || !isPlainObject(design.state)
+    || !matchesPattern(design.state.layout, SAFE_ID_PATTERN)
   ) throw new TypeError('Production design document is invalid.');
 }
 
@@ -174,17 +226,23 @@ function assertManifestMetadata(manifest) {
     || manifest.uvExportVersion !== PRODUCTION_UV_EXPORT_VERSION
     || typeof manifest.designFingerprint !== 'string'
     || !FINGERPRINT_PATTERN.test(manifest.designFingerprint)
-    || typeof manifest.productId !== 'string'
-    || manifest.productId.length === 0
-    || (manifest.variantId !== null && typeof manifest.variantId !== 'string')
-    || typeof manifest.size !== 'string'
-    || manifest.size.length === 0
+    || !matchesPattern(manifest.productId, PRODUCT_ID_PATTERN)
+    || !isVariantId(manifest.variantId)
+    || !matchesPattern(manifest.size, SAFE_ID_PATTERN)
     || !isPlainObject(manifest.model)
-    || typeof manifest.model.id !== 'string'
-    || manifest.model.id.length === 0
-    || typeof manifest.model.version !== 'string'
-    || manifest.model.version.length === 0
+    || !matchesPattern(manifest.model.id, SAFE_ID_PATTERN)
+    || !matchesPattern(manifest.model.version, MODEL_VERSION_PATTERN)
   ) throw new TypeError('Production manifest metadata is invalid.');
+}
+
+function isVariantId(value) {
+  return value === null || (
+    typeof value === 'string' && SHOPIFY_VARIANT_ID_PATTERN.test(value)
+  );
+}
+
+function matchesPattern(value, pattern) {
+  return typeof value === 'string' && pattern.test(value);
 }
 
 function readExactDataProperties(value, expectedKeys) {

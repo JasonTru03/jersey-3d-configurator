@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { jerseyProduct } from '../../src/features/configurator/config/productDefinitions.js';
 import {
   DESIGN_DOCUMENT_FORMAT,
@@ -11,7 +11,10 @@ import {
   PRODUCTION_PACKAGE_FILE_CONTRACT,
   createProductionManifest,
 } from '../../src/features/configurator/designs/productionManifest.js';
-import { validateUploadedProductionPackage } from './productionPackageValidator.js';
+import {
+  validateAndRebuildUploadedProductionPackage,
+  validateUploadedProductionPackage,
+} from './productionPackageValidator.js';
 
 const SHOP = 'testcsj.myshopify.com';
 const PRODUCT_ID = jerseyProduct.id;
@@ -38,9 +41,17 @@ const FILE_LIMITS = Object.freeze({
 });
 
 let validFiles;
+let originalBlobStream;
 
 beforeAll(async () => {
+  originalBlobStream = Object.getOwnPropertyDescriptor(Blob.prototype, 'stream');
+  if (!originalBlobStream) installBlobStreamPolyfill();
   validFiles = await createValidFiles();
+});
+
+afterAll(() => {
+  if (originalBlobStream) Object.defineProperty(Blob.prototype, 'stream', originalBlobStream);
+  else delete Blob.prototype.stream;
 });
 
 describe('validateUploadedProductionPackage', () => {
@@ -101,7 +112,7 @@ describe('validateUploadedProductionPackage', () => {
     await expect(validateUploadedProductionPackage({
       expectedShop: SHOP,
       files: mutate(cloneFiles(validFiles)),
-    })).rejects.toThrow('Production package files are invalid.');
+    })).rejects.toThrow('Uploaded production package is invalid.');
   });
 
   it('rejects top-level and per-file extra fields', async () => {
@@ -109,12 +120,12 @@ describe('validateUploadedProductionPackage', () => {
       expectedShop: SHOP,
       files: cloneFiles(validFiles),
       uploadedZip: new Blob(['untrusted']),
-    })).rejects.toThrow('Production package request is invalid.');
+    })).rejects.toThrow('Uploaded production package is invalid.');
 
     const files = cloneFiles(validFiles);
     files[0] = { ...files[0], clientMetadata: 'untrusted' };
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
-      .rejects.toThrow('Production package files are invalid.');
+      .rejects.toThrow('Uploaded production package is invalid.');
   });
 
   it.each([
@@ -127,7 +138,7 @@ describe('validateUploadedProductionPackage', () => {
     await expect(validateUploadedProductionPackage({
       expectedShop,
       files: cloneFiles(validFiles),
-    })).rejects.toThrow('Production package shop is invalid.');
+    })).rejects.toThrow('Uploaded production package is invalid.');
   });
 
   it('does not invoke accessor fields while snapshotting the request', async () => {
@@ -137,7 +148,7 @@ describe('validateUploadedProductionPackage', () => {
     });
 
     await expect(validateUploadedProductionPackage(request))
-      .rejects.toThrow('Production package request is invalid.');
+      .rejects.toThrow('Uploaded production package is invalid.');
   });
 
   it('does not invoke accessor entries while snapshotting the files array', async () => {
@@ -150,13 +161,13 @@ describe('validateUploadedProductionPackage', () => {
     });
 
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
-      .rejects.toThrow('Production package files are invalid.');
+      .rejects.toThrow('Uploaded production package is invalid.');
   });
 
   it('rejects an empty file', async () => {
     const files = replaceFile(validFiles, 'preview-front.png', new Blob([], { type: 'image/png' }));
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
-      .rejects.toThrow('Production package files are invalid.');
+      .rejects.toThrow('Uploaded production package is invalid.');
   });
 
   it.each(Object.entries(FILE_LIMITS))('accepts %s at its exact byte limit', async (filename, byteLimit) => {
@@ -172,7 +183,7 @@ describe('validateUploadedProductionPackage', () => {
       new Blob([new Uint8Array(byteLimit + 1)], { type: MIME_TYPES[filename] }),
     );
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
-      .rejects.toThrow('Production package files are invalid.');
+      .rejects.toThrow('Uploaded production package is invalid.');
   }, 30_000);
 
   it('accepts an exact 64 MiB aggregate and rejects one additional byte', async () => {
@@ -195,7 +206,7 @@ describe('validateUploadedProductionPackage', () => {
       blob: new Blob([above[5].blob, new Uint8Array(1)], { type: above[5].blob.type }),
     };
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files: above }))
-      .rejects.toThrow('Production package files are invalid.');
+      .rejects.toThrow('Uploaded production package is invalid.');
   }, 60_000);
 
   it.each([
@@ -218,7 +229,117 @@ describe('validateUploadedProductionPackage', () => {
   ])('rejects an invalid design document %s contract', async (_label, mutate) => {
     const files = await replaceJsonAndRefreshManifest(validFiles, 'design.json', mutate);
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
-      .rejects.toThrow('Production design document is invalid.');
+      .rejects.toThrow('Uploaded production package is invalid.');
+  });
+
+  it.each([1, 2])('rejects legacy design document version %s for production upload', async (version) => {
+    const files = await replaceJsonAndRefreshManifest(
+      validFiles,
+      'design.json',
+      (design) => ({ ...design, version }),
+    );
+
+    await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
+      .rejects.toThrow();
+  });
+
+  it.each([
+    ['preview-front.png', pngBytes().slice(0, 8)],
+    ['preview-back.png', pngBytes().slice(0, 16)],
+    ['preview-front.png', pngBytes(1, 1, [73, 68, 65, 84])],
+    ['preview-back.png', pngBytes(0, 1)],
+    ['preview-front.png', pngBytes(1, 0)],
+  ])('rejects structurally invalid preview PNG %s after hashes are refreshed', async (filename, bytes) => {
+    const replaced = replaceFile(
+      validFiles,
+      filename,
+      new Blob([bytes], { type: 'image/png' }),
+    );
+    const files = await refreshManifest(replaced);
+
+    await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
+      .rejects.toThrow();
+  });
+
+  it.each([
+    ['productId', 'line\r\nbreak'],
+    ['productId', '../escape'],
+    ['productId', `a${'x'.repeat(101)}`],
+    ['variantId', '0'],
+    ['variantId', '01'],
+    ['variantId', 'not-a-shopify-id'],
+    ['variantId', '1'.repeat(33)],
+    ['size', '   '],
+    ['size', '../xl'],
+    ['size', `x${'l'.repeat(64)}`],
+    ['modelId', 'chelsea\r\njersey'],
+    ['modelId', '../chelsea'],
+    ['modelId', `m${'x'.repeat(64)}`],
+    ['modelVersion', ' ../1'],
+    ['modelVersion', `v${'1'.repeat(32)}`],
+  ])('rejects unsafe %s metadata %j even with a matching fingerprint', async (field, value) => {
+    const files = await replaceProductionIdentity(validFiles, field, value);
+
+    await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
+      .rejects.toThrow();
+  });
+
+  it('rejects a design layout that does not match the manifest size', async () => {
+    const files = await replaceProductionIdentity(validFiles, 'layout', 'xl');
+
+    await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
+      .rejects.toThrow();
+  });
+
+  it('rejects non-string identifiers at the metadata boundary before fingerprinting', async () => {
+    const design = JSON.parse(
+      await validFiles.find(({ filename }) => filename === 'design.json').blob.text(),
+    );
+    const manifest = JSON.parse(
+      await validFiles.find(({ filename }) => filename === 'manifest.json').blob.text(),
+    );
+    design.state.layout = 1;
+    manifest.size = 1;
+    let files = replaceFile(
+      validFiles,
+      'design.json',
+      new Blob([JSON.stringify(design)], { type: 'application/json' }),
+    );
+    files = replaceFile(
+      files,
+      'manifest.json',
+      new Blob([JSON.stringify(manifest)], { type: 'application/json' }),
+    );
+    files = await refreshManifest(files);
+
+    const error = await validateUploadedProductionPackage({ expectedShop: SHOP, files })
+      .then(() => null, (reason) => reason);
+    expect(error.cause).toMatchObject({ message: 'Production design document is invalid.' });
+  });
+
+  it('returns one stable public error without leaking attacker-controlled metadata', async () => {
+    const attack = 'piece\r\nX-Internal-Path: ../secret';
+    const files = await replaceManifest(validFiles, (manifest) => ({
+      ...manifest,
+      patternPieces: {
+        ...manifest.patternPieces,
+        pieces: manifest.patternPieces.pieces.map((piece, index) => (
+          index ? piece : { ...piece, coveragePixels: 0, id: attack }
+        )),
+      },
+    }));
+
+    const error = await validateUploadedProductionPackage({ expectedShop: SHOP, files })
+      .then(() => null, (reason) => reason);
+    expect(error).toMatchObject({
+      code: 'invalid-production-package',
+      message: 'Uploaded production package is invalid.',
+      name: 'ProductionPackageValidationError',
+    });
+    expect(error.message).not.toContain(attack);
+    expect(JSON.stringify(error)).not.toContain(attack);
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(error.cause.message).toContain(attack);
   });
 
   it.each([
@@ -254,6 +375,63 @@ describe('validateUploadedProductionPackage', () => {
     const files = await replaceManifest(validFiles, mutate);
     await expect(validateUploadedProductionPackage({ expectedShop: SHOP, files }))
       .rejects.toThrow();
+  });
+});
+
+describe('validateAndRebuildUploadedProductionPackage', () => {
+  it('atomically validates the upload and rebuilds a lazy R2 stream from the normalized result', async () => {
+    const result = await validateAndRebuildUploadedProductionPackage({
+      expectedShop: SHOP,
+      files: cloneFiles(validFiles),
+    });
+
+    expect(Object.keys(result)).toEqual(['validated', 'bundle']);
+    expect(result.validated).toMatchObject({
+      designFingerprint: expect.stringMatching(/^[a-f0-9]{8}$/u),
+      files: expect.any(Array),
+      productId: PRODUCT_ID,
+    });
+    expect(result.bundle).toMatchObject({
+      contentLength: expect.any(Number),
+      filename: `${PRODUCT_ID}-design-${result.validated.designFingerprint}.zip`,
+      mediaType: 'application/zip',
+      stream: expect.any(ReadableStream),
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.bundle)).toBe(true);
+
+    const zip = new Uint8Array(await new Response(result.bundle.stream).arrayBuffer());
+    expect(readCentralNames(zip)).toEqual(FILE_NAMES);
+  });
+
+  it.each([
+    ['an uploaded ZIP', (request) => ({
+      ...request,
+      uploadedZip: new Blob(['untrusted'], { type: 'application/zip' }),
+    })],
+    ['forged metadata', (request) => ({
+      ...request,
+      designFingerprint: 'deadbeef',
+      productId: 'forged-product',
+    })],
+    ['an arbitrary replacement Blob', (request) => ({
+      ...request,
+      files: request.files.map((file, index) => (
+        index === 4
+          ? { ...file, blob: new Blob([pngBytes(2, 2)], { type: 'image/png' }) }
+          : file
+      )),
+    })],
+  ])('does not let %s bypass validation and reach ZIP rebuild', async (_label, mutate) => {
+    const request = mutate({ expectedShop: SHOP, files: cloneFiles(validFiles) });
+    const error = await validateAndRebuildUploadedProductionPackage(request)
+      .then(() => null, (reason) => reason);
+
+    expect(error).toMatchObject({
+      code: 'invalid-production-package',
+      message: 'Uploaded production package is invalid.',
+      name: 'ProductionPackageValidationError',
+    });
   });
 });
 
@@ -398,14 +576,64 @@ function jsonBlobAtSize(value, targetSize) {
   });
 }
 
-function pngBytes(width = 1, height = 1) {
+function pngBytes(width = 1, height = 1, chunkType = [73, 72, 68, 82]) {
   const bytes = new Uint8Array(24);
   bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
-  bytes.set([0, 0, 0, 13, 73, 72, 68, 82], 8);
+  bytes.set([0, 0, 0, 13, ...chunkType], 8);
   const view = new DataView(bytes.buffer);
   view.setUint32(16, width);
   view.setUint32(20, height);
   return bytes;
+}
+
+async function replaceProductionIdentity(files, field, value) {
+  const design = JSON.parse(await files.find(({ filename }) => filename === 'design.json').blob.text());
+  const manifest = JSON.parse(await files.find(({ filename }) => filename === 'manifest.json').blob.text());
+  if (field === 'productId' || field === 'variantId') {
+    design[field] = value;
+    manifest[field] = value;
+  } else if (field === 'layout') {
+    design.state.layout = value;
+  } else if (field === 'size') {
+    manifest.size = value;
+  } else if (field === 'modelId') {
+    manifest.model.id = value;
+  } else if (field === 'modelVersion') {
+    manifest.model.version = value;
+  }
+
+  let replaced = replaceFile(
+    files,
+    'design.json',
+    new Blob([JSON.stringify(design)], { type: 'application/json' }),
+  );
+  const fingerprint = await createDesignFingerprint({
+    model: {
+      id: manifest.model.id,
+      uvExportVersion: manifest.uvExportVersion,
+      version: manifest.model.version,
+    },
+    productId: manifest.productId,
+    size: manifest.size,
+    state: design.state,
+    variantId: manifest.variantId,
+  });
+  manifest.designFingerprint = fingerprint;
+  replaced = replaceFile(
+    replaced,
+    'manifest.json',
+    new Blob([JSON.stringify(manifest)], { type: 'application/json' }),
+  );
+  replaced = await refreshManifest(replaced);
+  const refreshedManifest = JSON.parse(
+    await replaced.find(({ filename }) => filename === 'manifest.json').blob.text(),
+  );
+  refreshedManifest.designFingerprint = fingerprint;
+  return replaceFile(
+    replaced,
+    'manifest.json',
+    new Blob([JSON.stringify(refreshedManifest)], { type: 'application/json' }),
+  );
 }
 
 function patternPieces() {
@@ -436,4 +664,39 @@ function piece(id, order) {
     sourceMeshes: [`${id}-mesh`],
     zone: id,
   };
+}
+
+function readCentralNames(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const names = [];
+  for (let offset = 0; offset <= bytes.length - 46; offset += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) continue;
+    const nameLength = view.getUint16(offset + 28, true);
+    names.push(new TextDecoder().decode(bytes.slice(
+      offset + 46,
+      offset + 46 + nameLength,
+    )));
+    offset += 45 + nameLength;
+  }
+  return names;
+}
+
+function installBlobStreamPolyfill() {
+  Object.defineProperty(Blob.prototype, 'stream', {
+    configurable: true,
+    value() {
+      const blob = this;
+      return new ReadableStream({
+        start(controller) {
+          const reader = new FileReader();
+          reader.addEventListener('load', () => {
+            controller.enqueue(new Uint8Array(reader.result));
+            controller.close();
+          });
+          reader.addEventListener('error', () => controller.error(reader.error));
+          reader.readAsArrayBuffer(blob);
+        },
+      });
+    },
+  });
 }

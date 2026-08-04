@@ -156,7 +156,7 @@ describe('DesignReviewDialog', () => {
     expect(onAddToCart).not.toHaveBeenCalled();
   });
 
-  it('explains that bottom-pattern production uses the downloaded local files', () => {
+  it('does not require a downloaded local production file before cart upload', () => {
     render(
       <DesignReviewDialog
         onAddToCart={() => {}}
@@ -171,7 +171,7 @@ describe('DesignReviewDialog', () => {
       />,
     );
 
-    expect(screen.getByText('Prepare the production ZIP, then use its download link before adding this design to the cart.')).toBeInTheDocument();
+    expect(screen.queryByText('Prepare the production ZIP, then use its download link before adding this design to the cart.')).not.toBeInTheDocument();
   });
 
   it('explains when the configurator was not launched from Shopify', () => {

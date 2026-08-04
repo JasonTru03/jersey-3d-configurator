@@ -25,13 +25,11 @@ import { PersonalizePanel } from './PersonalizePanel.jsx';
 import { TemplateLibrary } from './TemplateLibrary.jsx';
 import { ZoneColorPanel } from './ZoneColorPanel.jsx';
 import { APPEARANCE_PALETTE } from '../config/appearance.js';
+import { uploadProductionDraft } from '../api/productionDraftApi.js';
+import { getDesignUploadTurnstileToken } from '../api/turnstile.js';
 import { parseShopifyLaunch } from '../shopify/cartHandoff.js';
 import { createSecureCartHandoff } from '../shopify/cartQuoteClient.js';
 import { createBrowserDownload } from '../designs/browserDownload.js';
-import {
-  createLocalProductionReceipt,
-  getCurrentLocalProductionFiles,
-} from '../designs/localProductionReceipt.js';
 import { createProductionPackage } from '../designs/productionPackage.js';
 import './configurator.css';
 import '../scene/personalization-controls.css';
@@ -44,6 +42,8 @@ const sectionDefaults = [
   { id: 'decorations', label: 'Artwork', icon: Sticker },
   { id: 'extras', label: 'Extras', icon: Cable },
 ];
+
+const CART_PREPARATION_ERROR = "We couldn't prepare your Shopify cart. Please try again.";
 
 export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}) {
   const [shopifyContext] = useState(() => parseShopifyLaunch(window.location.search));
@@ -78,7 +78,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [fileError, setFileError] = useState('');
   const [cartError, setCartError] = useState('');
   const [cartPending, setCartPending] = useState(false);
-  const [localProductionReceipt, setLocalProductionReceipt] = useState(null);
   const [preparedDownload, setPreparedDownload] = useState(null);
   const [productionPending, setProductionPending] = useState(false);
   const [productionProviderReady, setProductionProviderReady] = useState(false);
@@ -150,7 +149,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
 
   useEffect(() => {
     const activeRequest = activeCartRequestRef.current;
-    if (activeRequest && activeRequest.stateSnapshot !== state) {
+    if (activeRequest && activeRequest.sourceStateIdentity !== state) {
       cancelActiveCartRequest();
     }
   }, [state]);
@@ -181,17 +180,12 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         product,
         selected: structuredClone(selected),
         state: stateSnapshot,
-        variantId: shopifyContext?.variantId ?? null,
+        variantId: getCurrentVariantId(shopifyContext, stateSnapshot),
       });
       if (!isCurrentRequest()) return;
-      const receipt = shouldPrepareBottomPatternAsset(stateSnapshot)
-        ? createReceiptFromProductionPackage({ artifact, state: stateSnapshot })
-        : null;
-      setLocalProductionReceipt(null);
       setPreparedDownload({
         ...createBrowserDownload(artifact),
         label: 'Download production ZIP',
-        receipt,
       });
     } catch (error) {
       if (!isCurrentRequest()) return;
@@ -213,31 +207,51 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       personalizationSidePendingRef.current
       || hasPendingMutation()
       || cartPendingRef.current
+      || productionPendingRef.current
+      || !productionProviderRef.current
+      || !shopifyContext?.shop
     ) return;
     const controller = new AbortController();
     const id = cartRequestIdRef.current + 1;
-    const stateSnapshot = latestStateRef.current;
+    const sourceStateIdentity = latestStateRef.current;
+    const stateSnapshot = structuredClone(sourceStateIdentity);
+    const selectedSnapshot = structuredClone(selected);
     cartRequestIdRef.current = id;
-    activeCartRequestRef.current = { controller, id, stateSnapshot };
+    activeCartRequestRef.current = { controller, id, sourceStateIdentity };
     cartPendingRef.current = true;
     setCartPending(true);
     try {
       setCartError('');
-      let productionFiles;
-      if (shouldPrepareBottomPatternAsset(stateSnapshot)) {
-        productionFiles = getCurrentLocalProductionFiles({ state: stateSnapshot, receipt: localProductionReceipt });
-      }
-      const result = await createSecureCartHandoff({
-        context: shopifyContext,
+      const uploadId = createProductionUploadId();
+      const artifact = await waitForCartStage(createProductionPackage({
+        artifactProvider: productionProviderRef.current,
+        product,
+        selected: selectedSnapshot,
         state: stateSnapshot,
-        productionFiles,
+        variantId: getCurrentVariantId(shopifyContext, stateSnapshot),
+      }), controller.signal);
+      const turnstileToken = await waitForCartStage(
+        getDesignUploadTurnstileToken(),
+        controller.signal,
+      );
+      const draft = await waitForCartStage(uploadProductionDraft({
+        artifact,
+        shop: shopifyContext.shop,
         signal: controller.signal,
-      });
+        turnstileToken,
+        uploadId,
+      }), controller.signal);
+      const result = await waitForCartStage(createSecureCartHandoff({
+        context: shopifyContext,
+        designId: draft.designId,
+        state: stateSnapshot,
+        signal: controller.signal,
+      }), controller.signal);
       if (
         !mountedRef.current
         || activeCartRequestRef.current?.id !== id
         || !reviewOpenRef.current
-        || latestStateRef.current !== stateSnapshot
+        || latestStateRef.current !== sourceStateIdentity
       ) return;
       navigateToCart(result.handoffUrl);
     } catch (error) {
@@ -246,7 +260,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         && activeCartRequestRef.current?.id === id
         && !isAbortError(error)
       ) {
-        setCartError(error instanceof Error ? error.message : 'Cart preparation failed.');
+        setCartError(CART_PREPARATION_ERROR);
       }
     } finally {
       if (activeCartRequestRef.current?.id === id) {
@@ -301,10 +315,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
             )}
             {preparedDownload && !reviewOpen && (
               <div className="prepared-download">
-                <PreparedDownloadLink
-                  download={preparedDownload}
-                  onDownload={() => setLocalProductionReceipt(preparedDownload.receipt)}
-                />
+                <PreparedDownloadLink download={preparedDownload} />
               </div>
             )}
           </section>
@@ -352,10 +363,9 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       <DesignReviewDialog
         cartError={cartError}
         cartPending={cartPending}
-        mutationPending={snapshotMutationPending || productionPending}
+        mutationPending={snapshotMutationPending || productionPending || !productionProviderReady}
         onClose={handleCloseReview}
         onAddToCart={handleAddToCart}
-        onDownload={() => setLocalProductionReceipt(preparedDownload?.receipt ?? null)}
         onSave={handleSaveDesign}
         open={reviewOpen}
         preparedDownload={preparedDownload}
@@ -369,26 +379,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   );
 }
 
-export function shouldPrepareBottomPatternAsset(state) {
-  return state?.overrides?.bottomPattern?.enabled === true;
-}
-
-function createReceiptFromProductionPackage({ artifact, state }) {
-  const atlas = artifact.manifest?.files?.find((file) => file.name === 'uv-atlas.png');
-  if (!atlas?.sha256) {
-    throw new Error('生产文件清单缺少 uv-atlas.png。');
-  }
-  return createLocalProductionReceipt({
-    state,
-    productionFiles: {
-      atlasFilename: 'uv-atlas.png',
-      atlasSha256: `sha256:${atlas.sha256}`,
-      bundleFilename: artifact.filename,
-      designFilename: 'design.json',
-    },
-  });
-}
-
 function defaultNavigateToCart(url) {
   window.location.assign(url);
 }
@@ -397,9 +387,34 @@ function isAbortError(error) {
   return error !== null && typeof error === 'object' && error.name === 'AbortError';
 }
 
-function PreparedDownloadLink({ download, onDownload }) {
+function getCurrentVariantId(shopifyContext, stateSnapshot) {
+  return shopifyContext?.variantMap?.[stateSnapshot.layout]
+    ?? shopifyContext?.variantId
+    ?? null;
+}
+
+function createProductionUploadId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const randomHex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `upl_${randomHex}`;
+}
+
+function waitForCartStage(value, signal) {
+  const getAbortReason = () => signal.reason
+    ?? new DOMException('Cart preparation was cancelled.', 'AbortError');
+  if (signal.aborted) return Promise.reject(getAbortReason());
+  return new Promise((resolve, reject) => {
+    const handleAbort = () => reject(getAbortReason());
+    signal.addEventListener('abort', handleAbort, { once: true });
+    Promise.resolve(value).then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', handleAbort);
+    });
+  });
+}
+
+function PreparedDownloadLink({ download }) {
   return (
-    <a className="soft-button" download={download.filename} href={download.url} onClick={onDownload}>
+    <a className="soft-button" download={download.filename} href={download.url}>
       <Save size={17} />
       {download.label}
     </a>

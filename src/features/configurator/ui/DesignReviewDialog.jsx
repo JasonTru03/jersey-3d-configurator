@@ -13,7 +13,7 @@ const APPEARANCE_SUMMARY_ROWS = [
   ['number', 'Name and number'],
 ];
 
-export function DesignReviewDialog({ cartError, cartPending = false, mutationPending = false, onAddToCart, onClose, onDownload, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
+export function DesignReviewDialog({ cartError, cartPending = false, mutationPending = false, onAddToCart, onClose, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -120,9 +120,6 @@ export function DesignReviewDialog({ cartError, cartPending = false, mutationPen
         </dl>
         <div className="review-total"><span>Total</span><strong>${quote.total}</strong></div>
         <p className="review-note">Shopify cart total: ${quote.total}</p>
-        {state.overrides?.bottomPattern?.enabled && (
-          <p className="review-note">Prepare the production ZIP, then use its download link before adding this design to the cart.</p>
-        )}
         {!shopifyContext && (
           <p className="review-note">Open the configurator from a connected Shopify product page to add this design to your cart.</p>
         )}
@@ -135,7 +132,6 @@ export function DesignReviewDialog({ cartError, cartPending = false, mutationPen
               className="soft-button"
               download={preparedDownload.filename}
               href={preparedDownload.url}
-              onClick={onDownload}
             >
               {preparedDownload.label}
             </a>

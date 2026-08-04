@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConfiguratorPage, shouldPrepareBottomPatternAsset } from './ConfiguratorPage.jsx';
+import { ConfiguratorPage } from './ConfiguratorPage.jsx';
 import { productApi } from '../api/productApi.js';
 
 const rendererHarness = vi.hoisted(() => ({
@@ -18,18 +18,48 @@ const rendererHarness = vi.hoisted(() => ({
   viewCalls: [],
 }));
 const productionPackageHarness = vi.hoisted(() => ({
+  events: [],
   requests: [],
   result: null,
+}));
+const cloudDraftHarness = vi.hoisted(() => ({
+  tokenRequests: [],
+  tokenResult: null,
+  uploadRequests: [],
+  uploadResult: null,
 }));
 let downloadClick;
 
 vi.mock('../designs/productionPackage.js', () => ({
   createProductionPackage: vi.fn(async (request) => {
+    productionPackageHarness.events.push('package');
     productionPackageHarness.requests.push(request);
     if (typeof productionPackageHarness.result === 'function') {
       return productionPackageHarness.result(request);
     }
     return productionPackageHarness.result;
+  }),
+}));
+
+vi.mock('../api/turnstile.js', () => ({
+  getDesignUploadTurnstileToken: vi.fn(async (request) => {
+    productionPackageHarness.events.push('turnstile');
+    cloudDraftHarness.tokenRequests.push(request);
+    if (typeof cloudDraftHarness.tokenResult === 'function') {
+      return cloudDraftHarness.tokenResult(request);
+    }
+    return cloudDraftHarness.tokenResult;
+  }),
+}));
+
+vi.mock('../api/productionDraftApi.js', () => ({
+  uploadProductionDraft: vi.fn(async (request) => {
+    productionPackageHarness.events.push('upload');
+    cloudDraftHarness.uploadRequests.push(request);
+    if (typeof cloudDraftHarness.uploadResult === 'function') {
+      return cloudDraftHarness.uploadResult(request);
+    }
+    return cloudDraftHarness.uploadResult;
   }),
 }));
 
@@ -137,7 +167,12 @@ beforeEach(() => {
   rendererHarness.configurationError = '';
   rendererHarness.viewCalls = [];
   productionPackageHarness.requests = [];
+  productionPackageHarness.events = [];
   productionPackageHarness.result = createProductionResult();
+  cloudDraftHarness.tokenRequests = [];
+  cloudDraftHarness.tokenResult = 'verified-turnstile-token';
+  cloudDraftHarness.uploadRequests = [];
+  cloudDraftHarness.uploadResult = createProductionDraftResult();
   downloadClick.mockClear();
   URL.createObjectURL.mockClear();
   URL.revokeObjectURL.mockClear();
@@ -762,11 +797,6 @@ describe('ConfiguratorPage', () => {
     consoleError.mockRestore();
   });
 
-  it('only requires a baked asset when the bottom pattern is enabled', () => {
-    expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: false } } })).toBe(false);
-    expect(shouldPrepareBottomPatternAsset({ overrides: { bottomPattern: { enabled: true } } })).toBe(true);
-  });
-
   it('initializes the layout from the Shopify-selected XL variant', async () => {
     window.history.replaceState(
       null,
@@ -779,6 +809,29 @@ describe('ConfiguratorPage', () => {
     expect(await screen.findByText('Chelsea Match Jersey')).toBeInTheDocument();
     expect(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'))
       .toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('saves the production package with the variant for the current selected size', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%2C%22xl%22%3A%2248039101989015%22%7D&variantId=48039101923479',
+    );
+    render(<ConfiguratorPage />);
+    await screen.findByText('Chelsea Match Jersey');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+    fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
+    await waitFor(() => expect(
+      document.querySelector('[data-option-group="layout"][data-option-id="xl"]'),
+    ).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(await getReadySaveButton());
+
+    await waitFor(() => expect(productionPackageHarness.requests).toHaveLength(1));
+    expect(productionPackageHarness.requests[0]).toEqual(expect.objectContaining({
+      state: expect.objectContaining({ layout: 'xl' }),
+      variantId: '48039101989015',
+    }));
   });
 
   it('loads the jersey product and updates the quote when an extra is toggled', async () => {
@@ -955,136 +1008,68 @@ describe('ConfiguratorPage', () => {
     quoteSpy.mockRestore();
   });
 
-  it('blocks a patterned cart handoff until the production files are saved', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    const navigateToCart = vi.fn();
-    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-
-    await enableHiddenBottomPattern();
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Save the current design before adding it to the Shopify cart.',
+  it('packages, verifies, uploads, quotes, and navigates one current immutable snapshot in order', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%2C%22xl%22%3A%2248039101989015%22%7D&variantId=48039101923479',
     );
-    expect(navigateToCart).not.toHaveBeenCalled();
-  });
-
-  it('allows the saved patterned design to enter the cart with its production references', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    const navigateToCart = vi.fn();
-    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-
-    await enableHiddenBottomPattern();
-    fireEvent.click(await getReadySaveButton());
-    const productionDownload = await screen.findByRole('link', { name: 'Download production ZIP' });
-    expect(productionDownload).toHaveAttribute('download', 'fn8788-jersey-design-12ab34cd.zip');
-    expect(downloadClick).not.toHaveBeenCalled();
-    fireEvent.click(productionDownload);
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-
-    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
-    expect(navigateToCart).toHaveBeenCalledWith(
-      'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=test-token',
-    );
-    expect(JSON.parse(fetch.mock.calls[0][1].body).productionFiles).toEqual({
-      atlasFilename: 'uv-atlas.png',
-      atlasSha256: 'sha256:7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9',
-      bundleFilename: 'fn8788-jersey-design-12ab34cd.zip',
-      designFilename: 'design.json',
+    fetch.mockImplementationOnce(async () => {
+      productionPackageHarness.events.push('quote');
+      return secureCartResponse();
     });
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('requests a secure handoff without sending browser-computed pricing or variant maps', async () => {
-    window.history.replaceState(
-      null,
-      '',
-      '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2249000000000018%22%7D&variantId=48039101923479',
-    );
-    const navigateToCart = vi.fn();
+    const navigateToCart = vi.fn(() => productionPackageHarness.events.push('navigate'));
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
-    await waitFor(() => expect(screen.getAllByText('$107').length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-
-    expect(screen.getByText('Shopify cart total: $107')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-
-    await waitFor(() => expect(navigateToCart).toHaveBeenCalledWith(
-      'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=test-token',
-    ));
-    const requestBody = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(requestBody.productionFiles).toBeNull();
-    expect(Object.keys(requestBody).sort()).toEqual(['productionFiles', 'shop', 'state']);
-    expect(JSON.stringify(requestBody)).not.toMatch(/quote|customizationTotal|variantMap|surchargeVariantMap/i);
-  });
-
-  it('keeps Review open with a finite Worker error and allows a retry', async () => {
-    window.history.replaceState(
-      null,
-      '',
-      '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2210%22%3A%2249000000000010%22%7D&variantId=48039101923479',
-    );
-    fetch
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ error: 'Pricing changed. Reopen the Shopify product page.' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } },
-      ))
-      .mockResolvedValueOnce(secureCartResponse());
-    const navigateToCart = vi.fn();
-    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
-    await waitFor(() => expect(screen.getAllByText('$107').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+    fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
+    await waitFor(() => expect(
+      document.querySelector('[data-option-group="layout"][data-option-id="xl"]'),
+    ).toHaveAttribute('aria-pressed', 'true'));
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Pricing changed. Reopen the Shopify product page.');
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
-    expect(navigateToCart).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not navigate when secure handoff response validation fails', async () => {
-    window.history.replaceState(
-      null,
-      '',
-      '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&surchargeVariantMap=%7B%2218%22%3A%2248039101923479%22%7D&variantId=48039101923479',
-    );
-    fetch.mockResolvedValueOnce(secureCartResponse({
-      handoffUrl: 'https://TARGET/apps/jersey-configurator/cart-handoff?token=stolen',
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledOnce());
+    expect(productionPackageHarness.events).toEqual([
+      'package',
+      'turnstile',
+      'upload',
+      'quote',
+      'navigate',
+    ]);
+    const packageRequest = productionPackageHarness.requests[0];
+    expect(packageRequest).toEqual(expect.objectContaining({
+      artifactProvider: expect.any(Function),
+      state: expect.objectContaining({ layout: 'xl' }),
+      variantId: '48039101989015',
     }));
-    const navigateToCart = vi.fn();
-    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Personalize' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add player set' }));
-    await waitFor(() => expect(screen.getAllByText('$107').length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Secure cart preparation failed.');
-    expect(navigateToCart).not.toHaveBeenCalled();
+    expect(cloudDraftHarness.uploadRequests[0]).toEqual(expect.objectContaining({
+      artifact: productionPackageHarness.result,
+      shop: 'testcsj.myshopify.com',
+      signal: expect.any(AbortSignal),
+      turnstileToken: 'verified-turnstile-token',
+      uploadId: expect.stringMatching(/^upl_[a-f0-9]{32}$/u),
+    }));
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      shop: 'testcsj.myshopify.com',
+      designId: 'dsg_1234567890abcdef',
+      state: packageRequest.state,
+    });
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(downloadClick).not.toHaveBeenCalled();
   });
 
-  it('allows only one cart quote request while the handoff is pending', async () => {
+  it('keeps the cart action disabled through package, verification, upload, and quote stages', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    let resolveRequest;
-    fetch.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve; }));
+    const packageDeferred = createDeferred();
+    const tokenDeferred = createDeferred();
+    const uploadDeferred = createDeferred();
+    const quoteDeferred = createDeferred();
+    productionPackageHarness.result = packageDeferred.promise;
+    cloudDraftHarness.tokenResult = tokenDeferred.promise;
+    cloudDraftHarness.uploadResult = uploadDeferred.promise;
+    fetch.mockImplementationOnce(() => quoteDeferred.promise);
     const navigateToCart = vi.fn();
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
@@ -1093,202 +1078,161 @@ describe('ConfiguratorPage', () => {
 
     fireEvent.click(add);
     fireEvent.click(add);
-
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(productionPackageHarness.requests).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
-    expect(navigateToCart).not.toHaveBeenCalled();
 
-    resolveRequest(secureCartResponse());
-    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
+    await act(async () => packageDeferred.resolve(createProductionResult()));
+    await waitFor(() => expect(cloudDraftHarness.tokenRequests).toHaveLength(1));
+    expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+
+    await act(async () => tokenDeferred.resolve('verified-turnstile-token'));
+    await waitFor(() => expect(cloudDraftHarness.uploadRequests).toHaveLength(1));
+    expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+
+    await act(async () => uploadDeferred.resolve(createProductionDraftResult()));
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+
+    await act(async () => quoteDeferred.resolve(secureCartResponse()));
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledOnce());
     expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
   });
 
-  it('cancels a pending handoff when Review closes and ignores its late response', async () => {
+  it('cancels before upload when Review closes during Turnstile verification', async () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    let resolveRequest;
-    let requestSignal;
-    fetch.mockImplementationOnce((_endpoint, options) => {
-      requestSignal = options.signal;
-      return new Promise((resolve) => { resolveRequest = resolve; });
-    });
+    const tokenDeferred = createDeferred();
+    cloudDraftHarness.tokenResult = tokenDeferred.promise;
     const navigateToCart = vi.fn();
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    await waitFor(() => expect(cloudDraftHarness.tokenRequests).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: 'Close review' }));
+    await act(async () => tokenDeferred.resolve('late-token'));
 
-    expect(requestSignal).toHaveProperty('aborted', true);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    resolveRequest(secureCartResponse());
-    await act(async () => { await Promise.resolve(); });
+    expect(cloudDraftHarness.uploadRequests).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(0);
     expect(navigateToCart).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
   });
 
-  it('cancels a pending handoff as soon as a configuration mutation is queued', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    let resolveRequest;
-    let requestSignal;
-    fetch.mockImplementationOnce((_endpoint, options) => {
-      requestSignal = options.signal;
-      return new Promise((resolve) => { resolveRequest = resolve; });
-    });
+  it('cancels the immutable cart snapshot as soon as a design mutation is queued', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%2C%22xl%22%3A%2248039101989015%22%7D&variantId=48039101923479');
+    const packageDeferred = createDeferred();
+    productionPackageHarness.result = packageDeferred.promise;
     const navigateToCart = vi.fn();
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-    const quoteDeferred = createDeferred();
-    const quoteSpy = vi.spyOn(productApi, 'quoteConfiguration')
-      .mockReturnValueOnce(quoteDeferred.promise);
-    let update;
+    expect(productionPackageHarness.requests[0].state.layout).toBe('m');
 
-    try {
-      act(() => {
-        update = rendererHarness.options.onStatePatch({
-          overrides: { activeDecorationId: 'changed' },
-        });
-        expect(requestSignal).toHaveProperty('aborted', true);
-        resolveRequest(secureCartResponse());
-      });
-      await act(async () => { await Promise.resolve(); });
-      expect(navigateToCart).not.toHaveBeenCalled();
-    } finally {
-      await act(async () => {
-        quoteDeferred.resolve({
-          basePrice: 89,
-          merchandisePrice: 89,
-          customizationTotal: 0,
-          optionAdjustments: [],
-          total: 89,
-          currency: 'USD',
-        });
-        await update;
-      });
-      quoteSpy.mockRestore();
-    }
-
-    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
-    expect(navigateToCart).not.toHaveBeenCalled();
-  });
-
-  it('lets a new request supersede a cancelled request id without stale navigation', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    let resolveFirst;
-    let resolveSecond;
-    fetch
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
-    const navigateToCart = vi.fn();
-    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Continue editing' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-    expect(fetch).toHaveBeenCalledTimes(2);
-
-    resolveFirst(secureCartResponse({ handoffUrl: 'https://testcsj.myshopify.com/apps/jersey-configurator/cart-handoff?token=stale' }));
-    await act(async () => { await Promise.resolve(); });
-    expect(navigateToCart).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
-
-    resolveSecond(secureCartResponse());
-    await waitFor(() => expect(navigateToCart).toHaveBeenCalledTimes(1));
-  });
-
-  it('restores the cart action with a retryable error after request timeout', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    fetch.mockImplementationOnce((_endpoint, { signal }) => new Promise((_resolve, reject) => {
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-    }));
-    const navigateToCart = vi.fn();
-    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-
-    expect(screen.getByRole('alert')).toHaveTextContent('Secure cart request timed out. Try again.');
-    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
-    expect(navigateToCart).not.toHaveBeenCalled();
-    vi.useRealTimers();
-  });
-
-  it('does not navigate or update state when a pending handoff resolves after unmount', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    let resolveRequest;
-    fetch.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve; }));
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const navigateToCart = vi.fn();
-    const { unmount } = render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-    expect(fetch).toHaveBeenCalledTimes(1);
-
-    unmount();
-    await act(async () => {
-      resolveRequest(secureCartResponse());
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(navigateToCart).not.toHaveBeenCalled();
-    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/state update.*unmounted|unmounted component/i);
-    consoleError.mockRestore();
-  });
-
-  it('does not update state when a pending handoff rejects after unmount', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    let rejectRequest;
-    fetch.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRequest = reject; }));
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const navigateToCart = vi.fn();
-    const { unmount } = render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
-    expect(fetch).toHaveBeenCalledTimes(1);
-
-    unmount();
-    await act(async () => {
-      rejectRequest(new Error('late network failure'));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(navigateToCart).not.toHaveBeenCalled();
-    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/state update.*unmounted|unmounted component/i);
-    consoleError.mockRestore();
-  });
-
-  it('blocks the cart after the saved patterned design changes', async () => {
-    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
-    const navigateToCart = vi.fn();
-    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
-    await screen.findByText('Chelsea Match Jersey');
-
-    await enableHiddenBottomPattern();
-    fireEvent.click(await getReadySaveButton());
-    fireEvent.click(await screen.findByRole('link', { name: 'Download production ZIP' }));
     fireEvent.click(screen.getByRole('button', { name: 'Size' }));
     fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
-    await waitFor(() => expect(document.querySelector('[data-option-group="layout"][data-option-id="xl"]')).toHaveAttribute('aria-pressed', 'true'));
+    await act(async () => packageDeferred.resolve(createProductionResult()));
+    await waitFor(() => expect(
+      document.querySelector('[data-option-group="layout"][data-option-id="xl"]'),
+    ).toHaveAttribute('aria-pressed', 'true'));
+
+    expect(productionPackageHarness.requests[0].state.layout).toBe('m');
+    expect(cloudDraftHarness.tokenRequests).toHaveLength(0);
+    expect(cloudDraftHarness.uploadRequests).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(0);
+    expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
+  it('aborts an in-flight upload when Review closes and ignores its late result', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    const uploadDeferred = createDeferred();
+    cloudDraftHarness.uploadResult = uploadDeferred.promise;
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    await waitFor(() => expect(cloudDraftHarness.uploadRequests).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue editing' }));
+    expect(cloudDraftHarness.uploadRequests[0].signal).toHaveProperty('aborted', true);
+    await act(async () => uploadDeferred.resolve(createProductionDraftResult()));
+
+    expect(fetch).toHaveBeenCalledTimes(0);
+    expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
+  it('aborts an in-flight upload when the page unmounts and ignores its late result', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    const uploadDeferred = createDeferred();
+    cloudDraftHarness.uploadResult = uploadDeferred.promise;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const navigateToCart = vi.fn();
+    const { unmount } = render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    await waitFor(() => expect(cloudDraftHarness.uploadRequests).toHaveLength(1));
+
+    unmount();
+    expect(cloudDraftHarness.uploadRequests[0].signal).toHaveProperty('aborted', true);
+    await act(async () => uploadDeferred.resolve(createProductionDraftResult()));
+
+    expect(fetch).toHaveBeenCalledTimes(0);
+    expect(navigateToCart).not.toHaveBeenCalled();
+    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(
+      /state update.*unmounted|unmounted component/i,
+    );
+    consoleError.mockRestore();
+  });
+
+  it('does not quote after upload failure and keeps one stable retryable error in Review', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    cloudDraftHarness.uploadResult = () => Promise.reject(new Error('private upload detail'));
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The design changed after the production files were saved. Save the design again.',
+      "We couldn't prepare your Shopify cart. Please try again.",
     );
+    expect(fetch).toHaveBeenCalledTimes(0);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
     expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
+  it('keeps an uploaded cloud draft retryable when quote creation fails', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'private quote detail' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(secureCartResponse());
+    const navigateToCart = vi.fn();
+    render(<ConfiguratorPage navigateToCart={navigateToCart} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "We couldn't prepare your Shopify cart. Please try again.",
+    );
+    expect(cloudDraftHarness.uploadRequests).toHaveLength(1);
+    expect(JSON.parse(fetch.mock.calls[0][1].body).designId).toBe('dsg_1234567890abcdef');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(downloadClick).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    await waitFor(() => expect(navigateToCart).toHaveBeenCalledOnce());
+    expect(cloudDraftHarness.uploadRequests).toHaveLength(2);
+    expect(cloudDraftHarness.uploadRequests[1].uploadId)
+      .not.toBe(cloudDraftHarness.uploadRequests[0].uploadId);
+    expect(JSON.parse(fetch.mock.calls[1][1].body).designId).toBe('dsg_1234567890abcdef');
   });
 
   it('preserves the selected template when a sleeves color change is undone', async () => {
@@ -1366,22 +1310,6 @@ function secureCartResponse(overrides = {}) {
   });
 }
 
-async function enableHiddenBottomPattern() {
-  await waitFor(() => expect(rendererHarness.options).not.toBeNull());
-  let statePatch;
-  act(() => {
-    statePatch = rendererHarness.options.onStatePatch({
-      overrides: { bottomPattern: { enabled: true } },
-    });
-  });
-  await act(async () => {
-    await statePatch;
-  });
-  await waitFor(() => expect(
-    rendererHarness.updateStates.at(-1).overrides.bottomPattern.enabled,
-  ).toBe(true));
-}
-
 async function getReadySaveButton() {
   const save = screen.getByRole('button', { name: 'Save design' });
   await waitFor(() => expect(save).toBeEnabled());
@@ -1427,5 +1355,14 @@ function createProductionResult() {
         },
       ],
     },
+  };
+}
+
+function createProductionDraftResult() {
+  return {
+    designId: 'dsg_1234567890abcdef',
+    designFingerprint: '12ab34cd',
+    bundleFilename: 'fn8788-jersey-design-12ab34cd.zip',
+    expiresAt: Date.now() + 60_000,
   };
 }

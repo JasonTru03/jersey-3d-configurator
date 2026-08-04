@@ -5,10 +5,14 @@ application_url = "https://TARGET_WORKER_DOMAIN"
 embedded = false
 
 [access_scopes]
-scopes = "read_cart_transforms,write_cart_transforms,read_validations,write_validations,write_app_proxy"
+scopes = "read_orders,read_cart_transforms,write_cart_transforms,read_validations,write_validations,write_app_proxy"
 
 [webhooks]
 api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = ["orders/paid", "orders/cancelled", "refunds/create"]
+uri = "/webhooks/shopify/orders"
 
 [auth]
 redirect_urls = [

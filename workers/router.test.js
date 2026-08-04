@@ -5,6 +5,7 @@ function createInjectedRouter(overrides = {}) {
   const handlers = {
     cartQuotes: vi.fn(() => new Response('cart quotes')),
     appProxy: vi.fn(() => new Response('app proxy')),
+    orderLifecycleWebhooks: vi.fn(() => new Response('order lifecycle webhooks')),
     productionDrafts: vi.fn(() => new Response('production drafts')),
     designAssets: vi.fn(() => new Response('design assets')),
     ...overrides,
@@ -12,6 +13,7 @@ function createInjectedRouter(overrides = {}) {
   const factories = {
     createCartQuotesHandler: vi.fn(() => handlers.cartQuotes),
     createAppProxyHandler: vi.fn(() => handlers.appProxy),
+    createOrderLifecycleWebhooksHandler: vi.fn(() => handlers.orderLifecycleWebhooks),
     createProductionDraftsHandler: vi.fn(() => handlers.productionDrafts),
     createDesignAssetsHandler: vi.fn(() => handlers.designAssets),
   };
@@ -28,6 +30,7 @@ describe('Worker router', () => {
   it.each([
     ['POST', '/api/cart-quotes', 'cartQuotes'],
     ['GET', '/apps/jersey-configurator/cart-handoff', 'appProxy'],
+    ['POST', '/webhooks/shopify/orders', 'orderLifecycleWebhooks'],
     ['GET', '/api/production-drafts/config', 'productionDrafts'],
     ['POST', '/api/production-drafts', 'productionDrafts'],
     ['PUT', '/api/production-drafts', 'productionDrafts'],
@@ -58,6 +61,8 @@ describe('Worker router', () => {
     ['DELETE', '/api/cart-quotes'],
     ['POST', '/apps/jersey-configurator/cart-handoff'],
     ['PUT', '/apps/jersey-configurator/cart-handoff'],
+    ['GET', '/webhooks/shopify/orders'],
+    ['PUT', '/webhooks/shopify/orders'],
   ])('falls back for unmatched method %s %s', async (method, pathname) => {
     const runtime = createInjectedRouter();
     const request = new Request(`https://example.workers.dev${pathname}`, { method });
@@ -74,6 +79,8 @@ describe('Worker router', () => {
     '/api/cart-quotes/',
     '/apps/jersey-configurator/cart-handoff/extra',
     '/apps/jersey-configurator/cart-handoff/',
+    '/webhooks/shopify/orders/',
+    '/webhooks/shopify/orders/extra',
     '/api/production-drafts-extra',
     '/api/production-drafts/',
     '/api/production-drafts/config/',
@@ -104,22 +111,26 @@ describe('Worker router', () => {
   it('accepts already-created handler dependencies', async () => {
     const cartQuotesHandler = vi.fn(() => new Response('direct cart'));
     const appProxyHandler = vi.fn(() => new Response('direct proxy'));
+    const orderLifecycleWebhooksHandler = vi.fn(() => new Response('direct order webhook'));
     const designAssetsHandler = vi.fn(() => new Response('direct fallback'));
     const productionDraftsHandler = vi.fn(() => new Response('direct production drafts'));
     const handler = createWorkerHandler({}, {
       cartQuotesHandler,
       appProxyHandler,
+      orderLifecycleWebhooksHandler,
       productionDraftsHandler,
       designAssetsHandler,
     });
 
     await handler(new Request('https://example.workers.dev/api/cart-quotes', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/apps/jersey-configurator/cart-handoff'));
+    await handler(new Request('https://example.workers.dev/webhooks/shopify/orders', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/api/production-drafts', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/'));
 
     expect(cartQuotesHandler).toHaveBeenCalledOnce();
     expect(appProxyHandler).toHaveBeenCalledOnce();
+    expect(orderLifecycleWebhooksHandler).toHaveBeenCalledOnce();
     expect(productionDraftsHandler).toHaveBeenCalledOnce();
     expect(designAssetsHandler).toHaveBeenCalledOnce();
   });
@@ -147,6 +158,7 @@ describe('Worker router', () => {
     const handler = createWorkerHandler(env, {
       cartQuotesHandler: vi.fn(),
       appProxyHandler: vi.fn(),
+      orderLifecycleWebhooksHandler: vi.fn(),
     });
 
     const configResponse = await handler(new Request('https://example.workers.dev/api/production-drafts/config'));
@@ -162,6 +174,7 @@ describe('Worker router', () => {
     const localHandler = createWorkerHandler({ LOCAL_PRODUCTION_FILES: 'true' }, {
       cartQuotesHandler: vi.fn(),
       appProxyHandler: vi.fn(),
+      orderLifecycleWebhooksHandler: vi.fn(),
     });
     const defaultHandler = createWorkerHandler({}, {
       cartQuotesHandler: vi.fn(),

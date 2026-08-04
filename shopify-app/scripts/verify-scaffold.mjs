@@ -88,7 +88,13 @@ const appConfig = parse(appConfigText);
 assertEqual(appConfig.client_id, "TARGET_SHOPIFY_CLIENT_ID", "client_id");
 assertEqual(appConfig.application_url, "https://TARGET_WORKER_DOMAIN", "application_url");
 assertEqual(appConfig.embedded, false, "embedded");
-assertEqual(appConfig.webhooks, {api_version: "2026-07"}, "webhooks section");
+assertEqual(appConfig.webhooks, {
+  api_version: "2026-07",
+  subscriptions: [{
+    topics: ["orders/paid", "orders/cancelled", "refunds/create"],
+    uri: "/webhooks/shopify/orders",
+  }],
+}, "webhooks section");
 assertEqual(
   appConfig.auth,
   {redirect_urls: ["https://TARGET_WORKER_DOMAIN/auth/callback"]},
@@ -106,6 +112,7 @@ assertEqual(
 
 const expectedScopes = [
   "read_cart_transforms",
+  "read_orders",
   "read_validations",
   "write_app_proxy",
   "write_cart_transforms",
@@ -142,7 +149,7 @@ for (const traceabilityValue of [sourceCommit, ...sourcePaths, ...sourceDocs, "M
 }
 
 const licenseHash = createHash("sha256")
-  .update(contents.get("LICENSE.shopify-function-examples.md"))
+  .update(contents.get("LICENSE.shopify-function-examples.md").replace(/\r\n/g, "\n"))
   .digest("hex");
 if (licenseHash !== "03fde3ca1c31000b50d86635cc982c2957a44c95f153901d538830224a024125") {
   throw new Error("Shopify function-examples license must match the exact upstream LICENSE.md");

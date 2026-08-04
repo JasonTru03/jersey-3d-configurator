@@ -124,6 +124,13 @@ export function DesignReviewDialog({ cartError, cartPending = false, cartUnavail
           <p className="review-note">Open the configurator from a connected Shopify product page to add this design to your cart.</p>
         )}
         {cartError && <p className="review-note" role="alert">{cartError}</p>}
+        <div
+          aria-label="Security verification"
+          className="review-turnstile"
+          data-turnstile-production-draft=""
+          ref={turnstileContainerRef}
+          role="group"
+        />
         <div className="review-actions">
           <button className="soft-button" onClick={onClose} type="button">Continue editing</button>
           <button className="soft-button" disabled={cartPending || mutationPending} onClick={onSave} type="button">Save design file</button>
@@ -146,13 +153,6 @@ export function DesignReviewDialog({ cartError, cartPending = false, cartUnavail
             {cartPending ? 'Preparing secure cart…' : 'Add to Shopify cart'}
           </button>
         </div>
-        <div
-          aria-label="Security verification"
-          className="review-turnstile"
-          data-turnstile-production-draft=""
-          ref={turnstileContainerRef}
-          role="group"
-        />
       </section>
     </div>
   );

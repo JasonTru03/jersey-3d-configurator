@@ -116,10 +116,12 @@ describe('getDesignUploadTurnstileToken', () => {
     const container = createTurnstileContainer();
     const execute = vi.fn();
     const remove = vi.fn();
+    let removedBeforeRenderReturned = false;
     const turnstile = {
       ready: (callback) => callback(),
       render: (_container, options) => {
         options.callback('synchronous-token');
+        removedBeforeRenderReturned = remove.mock.calls.length > 0;
         return 'widget-synchronous';
       },
       execute,
@@ -127,10 +129,36 @@ describe('getDesignUploadTurnstileToken', () => {
     };
 
     await expect(getDesignUploadTurnstileToken({ container, turnstile })).resolves.toBe('synchronous-token');
+    expect(removedBeforeRenderReturned).toBe(false);
     expect(execute).not.toHaveBeenCalled();
     expect(remove).toHaveBeenCalledWith('widget-synchronous');
     expect(container.isConnected).toBe(true);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('removes and clears synchronously when an asynchronous callback settles a rendered widget', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
+    let options;
+    const remove = vi.fn();
+    const turnstile = {
+      ready: (callback) => callback(),
+      render: (_container, nextOptions) => {
+        options = nextOptions;
+        container.append(document.createElement('iframe'));
+        return 'widget-async-callback';
+      },
+      execute: vi.fn(),
+      remove,
+    };
+
+    const request = getDesignUploadTurnstileToken({ container, turnstile });
+    await vi.waitFor(() => expect(turnstile.execute).toHaveBeenCalledWith('widget-async-callback'));
+    options.callback('async-token');
+
+    expect(remove).toHaveBeenCalledWith('widget-async-callback');
+    expect(container).toBeEmptyDOMElement();
+    await expect(request).resolves.toBe('async-token');
   });
 
   it.each([
@@ -176,14 +204,16 @@ describe('getDesignUploadTurnstileToken', () => {
     };
 
     const request = getDesignUploadTurnstileToken({ container, signal: controller.signal, turnstile });
+    const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' });
     await vi.waitFor(() => expect(turnstile.execute).toHaveBeenCalledWith('widget-abort'));
     controller.abort();
 
-    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
-    options.callback('late-token');
     expect(remove).toHaveBeenCalledTimes(1);
     expect(container.isConnected).toBe(true);
     expect(container).toBeEmptyDOMElement();
+    await rejection;
+    options.callback('late-token');
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 
   it('times out a pending widget and cleans it up', async () => {

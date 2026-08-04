@@ -73,11 +73,13 @@ export async function getDesignUploadTurnstileToken({
 function executeWidget({ action, container, signal, siteKey, turnstile }) {
   return new Promise((resolve, reject) => {
     let widgetId = null;
+    let renderComplete = false;
     let settled = false;
+    const hasWidgetId = () => typeof widgetId === 'string' && widgetId.length > 0;
 
     const cleanup = () => {
       signal.removeEventListener('abort', handleAbort);
-      if (widgetId !== null) {
+      if (hasWidgetId()) {
         try {
           turnstile.remove(widgetId);
         } catch {
@@ -89,10 +91,15 @@ function executeWidget({ action, container, signal, siteKey, turnstile }) {
     const settle = (handler, value) => {
       if (settled) return;
       settled = true;
-      queueMicrotask(() => {
+      const complete = () => {
         cleanup();
         handler(value);
-      });
+      };
+      if (renderComplete && hasWidgetId()) {
+        complete();
+      } else {
+        queueMicrotask(complete);
+      }
     };
     const fail = () => settle(reject, new StableTurnstileError(VERIFICATION_FAILED));
     const handleAbort = () => settle(reject, signal.reason ?? toAbortError());
@@ -120,6 +127,7 @@ function executeWidget({ action, container, signal, siteKey, turnstile }) {
         'expired-callback': fail,
         'timeout-callback': fail,
       });
+      renderComplete = true;
       if (typeof widgetId !== 'string' || widgetId.length === 0) {
         fail();
         return;

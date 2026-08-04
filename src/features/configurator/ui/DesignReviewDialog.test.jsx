@@ -27,25 +27,23 @@ describe('DesignReviewDialog', () => {
     expect(close).toHaveFocus();
   });
 
-  it('keeps an interactive Turnstile iframe inside the dialog focus loop', async () => {
+  it('places Turnstile before ordinary review actions and keeps the ordinary button focus trap', async () => {
     render(<ReviewFocusHarness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const dialog = await screen.findByRole('dialog');
     const container = screen.getByRole('group', { name: 'Security verification' });
-    const iframe = document.createElement('iframe');
-    iframe.title = 'Cloudflare security verification';
-    iframe.tabIndex = 0;
-    container.append(iframe);
+    const actions = screen.getByRole('button', { name: 'Continue editing' }).closest('.review-actions');
 
     expect(dialog).toContainElement(container);
-    expect(container).toContainElement(iframe);
-    iframe.focus();
+    expect(container.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const close = screen.getByRole('button', { name: 'Close review' });
+    const add = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    add.focus();
     fireEvent.keyDown(document, { key: 'Tab' });
-    expect(screen.getByRole('button', { name: 'Close review' })).toHaveFocus();
-
-    screen.getByRole('button', { name: 'Close review' }).focus();
+    expect(close).toHaveFocus();
+    close.focus();
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
-    expect(iframe).toHaveFocus();
+    expect(add).toHaveFocus();
   });
 
   it('closes on Escape and restores focus to the trigger', async () => {

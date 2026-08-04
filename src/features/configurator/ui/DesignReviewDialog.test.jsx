@@ -116,7 +116,9 @@ describe('DesignReviewDialog', () => {
     const { rerender } = render(<DesignReviewDialog {...props} />);
 
     const pending = screen.getByRole('button', { name: 'Preparing secure cart…' });
+    const save = screen.getByRole('button', { name: 'Save design file' });
     expect(pending).toBeDisabled();
+    expect(save).toBeDisabled();
     expect(pending).toHaveAttribute('aria-busy', 'true');
     fireEvent.click(pending);
     expect(props.onAddToCart).not.toHaveBeenCalled();
@@ -124,6 +126,7 @@ describe('DesignReviewDialog', () => {
     rerender(<DesignReviewDialog {...props} cartPending={false} />);
     const ready = screen.getByRole('button', { name: 'Add to Shopify cart' });
     expect(ready).toBeEnabled();
+    expect(save).toBeEnabled();
     expect(ready).toHaveAttribute('aria-busy', 'false');
   });
 
@@ -153,6 +156,31 @@ describe('DesignReviewDialog', () => {
     fireEvent.click(save);
     fireEvent.click(addToCart);
     expect(onSave).not.toHaveBeenCalled();
+    expect(onAddToCart).not.toHaveBeenCalled();
+  });
+
+  it('disables cart when the selected size has no Shopify variant', () => {
+    const onAddToCart = vi.fn();
+    render(
+      <DesignReviewDialog
+        cartError="The selected size is unavailable in Shopify. Choose another size."
+        cartUnavailable
+        onAddToCart={onAddToCart}
+        onClose={() => {}}
+        onSave={() => {}}
+        open
+        product={{ name: 'FN8788 Match Jersey', options: { templates: [] } }}
+        quote={{ total: 107 }}
+        selected={{}}
+        shopifyContext={{ shop: 'testcsj.myshopify.com', variantMap: { m: '48039101923479' } }}
+        state={{ overrides: {} }}
+      />,
+    );
+
+    const add = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    expect(add).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('The selected size is unavailable in Shopify.');
+    fireEvent.click(add);
     expect(onAddToCart).not.toHaveBeenCalled();
   });
 

@@ -44,6 +44,7 @@ const sectionDefaults = [
 ];
 
 const CART_PREPARATION_ERROR = "We couldn't prepare your Shopify cart. Please try again.";
+const SHOPIFY_VARIANT_UNAVAILABLE_ERROR = 'The selected size is unavailable in Shopify. Choose another size.';
 
 export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}) {
   const [shopifyContext] = useState(() => parseShopifyLaunch(window.location.search));
@@ -132,7 +133,25 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   function handleMutationStart() {
     saveRequestIdRef.current += 1;
     setPreparedDownload(null);
+    setCartError('');
     cancelActiveCartRequest();
+  }
+
+  function createLeasedProductionPackage(request) {
+    productionPendingRef.current = true;
+    setProductionPending(true);
+    let packagePromise;
+    try {
+      packagePromise = Promise.resolve(createProductionPackage(request));
+    } catch (error) {
+      packagePromise = Promise.reject(error);
+    }
+    const releaseLease = () => {
+      productionPendingRef.current = false;
+      if (mountedRef.current) setProductionPending(false);
+    };
+    packagePromise.then(releaseLease, releaseLease);
+    return packagePromise;
   }
 
   useEffect(() => {
@@ -162,20 +181,19 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     if (
       personalizationSidePendingRef.current
       || hasPendingMutation()
+      || cartPendingRef.current
       || productionPendingRef.current
       || !productionProviderRef.current
     ) return;
     const requestId = saveRequestIdRef.current + 1;
     const stateSnapshot = structuredClone(latestStateRef.current);
     saveRequestIdRef.current = requestId;
-    productionPendingRef.current = true;
-    setProductionPending(true);
     const isCurrentRequest = () => (
       mountedRef.current && saveRequestIdRef.current === requestId
     );
     try {
       setFileError('');
-      const artifact = await createProductionPackage({
+      const artifact = await createLeasedProductionPackage({
         artifactProvider: productionProviderRef.current,
         product,
         selected: structuredClone(selected),
@@ -190,9 +208,6 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     } catch (error) {
       if (!isCurrentRequest()) return;
       setFileError(error instanceof Error ? error.message : 'Design file preparation failed.');
-    } finally {
-      productionPendingRef.current = false;
-      if (mountedRef.current) setProductionPending(false);
     }
   };
 
@@ -203,6 +218,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   };
 
   const handleAddToCart = async () => {
+    const variantId = getCurrentVariantId(shopifyContext, latestStateRef.current);
     if (
       personalizationSidePendingRef.current
       || hasPendingMutation()
@@ -211,6 +227,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       || !productionProviderRef.current
       || !shopifyContext?.shop
     ) return;
+    if (!variantId) {
+      setCartError(SHOPIFY_VARIANT_UNAVAILABLE_ERROR);
+      return;
+    }
     const controller = new AbortController();
     const id = cartRequestIdRef.current + 1;
     const sourceStateIdentity = latestStateRef.current;
@@ -220,20 +240,23 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
     activeCartRequestRef.current = { controller, id, sourceStateIdentity };
     cartPendingRef.current = true;
     setCartPending(true);
+    let cartStage = 'package';
     try {
       setCartError('');
       const uploadId = createProductionUploadId();
-      const artifact = await waitForCartStage(createProductionPackage({
+      const artifact = await waitForCartStage(createLeasedProductionPackage({
         artifactProvider: productionProviderRef.current,
         product,
         selected: selectedSnapshot,
         state: stateSnapshot,
-        variantId: getCurrentVariantId(shopifyContext, stateSnapshot),
+        variantId,
       }), controller.signal);
+      cartStage = 'turnstile';
       const turnstileToken = await waitForCartStage(
-        getDesignUploadTurnstileToken(),
+        getDesignUploadTurnstileToken({ signal: controller.signal }),
         controller.signal,
       );
+      cartStage = 'upload';
       const draft = await waitForCartStage(uploadProductionDraft({
         artifact,
         shop: shopifyContext.shop,
@@ -241,6 +264,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         turnstileToken,
         uploadId,
       }), controller.signal);
+      cartStage = 'quote';
       const result = await waitForCartStage(createSecureCartHandoff({
         context: shopifyContext,
         designId: draft.designId,
@@ -260,6 +284,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         && activeCartRequestRef.current?.id === id
         && !isAbortError(error)
       ) {
+        console.error(`Cart preparation failed at stage: ${cartStage}.`);
         setCartError(CART_PREPARATION_ERROR);
       }
     } finally {
@@ -274,11 +299,16 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const handleCloseReview = () => {
     reviewOpenRef.current = false;
     cancelActiveCartRequest();
+    setCartError('');
     setReviewOpen(false);
   };
 
   const handleOpenReview = () => {
     if (personalizationSidePendingRef.current || hasPendingMutation()) return;
+    const variantUnavailable = Boolean(
+      shopifyContext?.shop && !getCurrentVariantId(shopifyContext, latestStateRef.current),
+    );
+    setCartError(variantUnavailable ? SHOPIFY_VARIANT_UNAVAILABLE_ERROR : '');
     reviewOpenRef.current = true;
     setReviewOpen(true);
   };
@@ -304,7 +334,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
           onThemeToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')}
           onUndo={undo}
           product={product}
-          saveDisabled={snapshotMutationPending || productionPending || !productionProviderReady}
+          saveDisabled={snapshotMutationPending || cartPending || productionPending || !productionProviderReady}
           theme={theme}
         />
         <input accept="application/json" hidden onChange={handleLoadDesign} ref={fileInputRef} type="file" />
@@ -363,6 +393,9 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       <DesignReviewDialog
         cartError={cartError}
         cartPending={cartPending}
+        cartUnavailable={Boolean(
+          shopifyContext?.shop && !getCurrentVariantId(shopifyContext, state),
+        )}
         mutationPending={snapshotMutationPending || productionPending || !productionProviderReady}
         onClose={handleCloseReview}
         onAddToCart={handleAddToCart}
@@ -388,9 +421,7 @@ function isAbortError(error) {
 }
 
 function getCurrentVariantId(shopifyContext, stateSnapshot) {
-  return shopifyContext?.variantMap?.[stateSnapshot.layout]
-    ?? shopifyContext?.variantId
-    ?? null;
+  return shopifyContext?.variantMap?.[stateSnapshot.layout] ?? null;
 }
 
 function createProductionUploadId() {

@@ -13,7 +13,7 @@ const APPEARANCE_SUMMARY_ROWS = [
   ['number', 'Name and number'],
 ];
 
-export function DesignReviewDialog({ cartError, cartPending = false, mutationPending = false, onAddToCart, onClose, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
+export function DesignReviewDialog({ cartError, cartPending = false, cartUnavailable = false, mutationPending = false, onAddToCart, onClose, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -126,7 +126,7 @@ export function DesignReviewDialog({ cartError, cartPending = false, mutationPen
         {cartError && <p className="review-note" role="alert">{cartError}</p>}
         <div className="review-actions">
           <button className="soft-button" onClick={onClose} type="button">Continue editing</button>
-          <button className="soft-button" disabled={mutationPending} onClick={onSave} type="button">Save design file</button>
+          <button className="soft-button" disabled={cartPending || mutationPending} onClick={onSave} type="button">Save design file</button>
           {preparedDownload && (
             <a
               className="soft-button"
@@ -139,7 +139,7 @@ export function DesignReviewDialog({ cartError, cartPending = false, mutationPen
           <button
             aria-busy={cartPending}
             className="primary-button"
-            disabled={cartPending || mutationPending || !shopifyContext}
+            disabled={cartPending || cartUnavailable || mutationPending || !shopifyContext}
             onClick={() => onAddToCart?.()}
             type="button"
           >

@@ -1038,6 +1038,9 @@ describe('ConfiguratorPage', () => {
       'quote',
       'navigate',
     ]);
+    expect(cloudDraftHarness.tokenRequests[0]).toEqual({
+      signal: expect.any(AbortSignal),
+    });
     const packageRequest = productionPackageHarness.requests[0];
     expect(packageRequest).toEqual(expect.objectContaining({
       artifactProvider: expect.any(Function),
@@ -1080,22 +1083,59 @@ describe('ConfiguratorPage', () => {
     fireEvent.click(add);
     expect(productionPackageHarness.requests).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save design file' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
 
     await act(async () => packageDeferred.resolve(createProductionResult()));
     await waitFor(() => expect(cloudDraftHarness.tokenRequests).toHaveLength(1));
     expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save design file' })).toBeDisabled();
 
     await act(async () => tokenDeferred.resolve('verified-turnstile-token'));
     await waitFor(() => expect(cloudDraftHarness.uploadRequests).toHaveLength(1));
     expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save design file' })).toBeDisabled();
 
     await act(async () => uploadDeferred.resolve(createProductionDraftResult()));
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     expect(screen.getByRole('button', { name: 'Preparing secure cart…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save design file' })).toBeDisabled();
 
     await act(async () => quoteDeferred.resolve(secureCartResponse()));
     await waitFor(() => expect(navigateToCart).toHaveBeenCalledOnce());
     expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save design file' })).toBeEnabled();
+  });
+
+  it('fails closed when the selected size has no exact Shopify variant mapping', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    render(<ConfiguratorPage navigateToCart={vi.fn()} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Size' }));
+    fireEvent.click(document.querySelector('[data-option-group="layout"][data-option-id="xl"]'));
+    await waitFor(() => expect(
+      document.querySelector('[data-option-group="layout"][data-option-id="xl"]'),
+    ).toHaveAttribute('aria-pressed', 'true'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'The selected size is unavailable in Shopify. Choose another size.',
+    );
+    const add = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    expect(add).toBeDisabled();
+    fireEvent.click(add);
+    expect(productionPackageHarness.requests).toHaveLength(0);
+    expect(cloudDraftHarness.tokenRequests).toHaveLength(0);
+    expect(cloudDraftHarness.uploadRequests).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save design file' }));
+    await waitFor(() => expect(productionPackageHarness.requests).toHaveLength(1));
+    expect(productionPackageHarness.requests[0]).toEqual(expect.objectContaining({
+      state: expect.objectContaining({ layout: 'xl' }),
+      variantId: null,
+    }));
   });
 
   it('cancels before upload when Review closes during Turnstile verification', async () => {
@@ -1116,6 +1156,37 @@ describe('ConfiguratorPage', () => {
     expect(cloudDraftHarness.uploadRequests).toHaveLength(0);
     expect(fetch).toHaveBeenCalledTimes(0);
     expect(navigateToCart).not.toHaveBeenCalled();
+  });
+
+  it('keeps the shared production lease until a cancelled cart package settles', async () => {
+    window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
+    const packageDeferred = createDeferred();
+    productionPackageHarness.result = packageDeferred.promise;
+    render(<ConfiguratorPage navigateToCart={vi.fn()} />);
+    await screen.findByText('Chelsea Match Jersey');
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Shopify cart' }));
+    expect(productionPackageHarness.requests).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    const save = screen.getByRole('button', { name: 'Save design file' });
+    const add = screen.getByRole('button', { name: 'Add to Shopify cart' });
+    expect(screen.getByRole('button', { name: 'Save design' })).toBeDisabled();
+    expect(save).toBeDisabled();
+    expect(add).toBeDisabled();
+    fireEvent.click(save);
+    fireEvent.click(add);
+    expect(productionPackageHarness.requests).toHaveLength(1);
+
+    await act(async () => packageDeferred.resolve(createProductionResult()));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save design' })).toBeEnabled());
+    expect(save).toBeEnabled();
+    expect(add).toBeEnabled();
+    expect(cloudDraftHarness.tokenRequests).toHaveLength(0);
+    expect(cloudDraftHarness.uploadRequests).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(0);
   });
 
   it('cancels the immutable cart snapshot as soon as a design mutation is queued', async () => {
@@ -1190,6 +1261,7 @@ describe('ConfiguratorPage', () => {
     window.history.replaceState(null, '', '/?shop=testcsj.myshopify.com&variantMap=%7B%22m%22%3A%2248039101923479%22%7D&variantId=48039101923479');
     cloudDraftHarness.uploadResult = () => Promise.reject(new Error('private upload detail'));
     const navigateToCart = vi.fn();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<ConfiguratorPage navigateToCart={navigateToCart} />);
     await screen.findByText('Chelsea Match Jersey');
     fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
@@ -1202,6 +1274,13 @@ describe('ConfiguratorPage', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add to Shopify cart' })).toBeEnabled();
     expect(navigateToCart).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith('Cart preparation failed at stage: upload.');
+    expect(consoleError.mock.calls.flat().join(' ')).not.toContain('private upload detail');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review design' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('keeps an uploaded cloud draft retryable when quote creation fails', async () => {

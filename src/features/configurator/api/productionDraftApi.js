@@ -147,6 +147,7 @@ function assertSameOriginEndpoint(endpoint) {
   if (typeof endpoint !== 'string' || endpoint.length === 0 || endpoint.startsWith('//')) {
     throw new TypeError('Production draft endpoint must be same-origin.');
   }
+  const pageProtocol = window.location.protocol;
   let url;
   try {
     url = new URL(endpoint, window.location.href);
@@ -154,7 +155,9 @@ function assertSameOriginEndpoint(endpoint) {
     throw new TypeError('Production draft endpoint must be same-origin.');
   }
   if (
-    url.origin !== window.location.origin
+    (pageProtocol !== 'http:' && pageProtocol !== 'https:')
+    || url.protocol !== pageProtocol
+    || url.origin !== window.location.origin
     || url.username
     || url.password
     || url.hash

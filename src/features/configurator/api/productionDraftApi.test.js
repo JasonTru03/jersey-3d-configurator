@@ -98,6 +98,20 @@ describe('uploadProductionDraft', () => {
   });
 
   it.each([
+    ['blob', `blob:${window.location.origin}/production-draft`],
+    ['data', 'data:application/json,{}'],
+    ['file', 'file:///production-draft'],
+  ])('rejects a non-http(s) %s endpoint before fetch', async (_protocol, endpoint) => {
+    const fetchImpl = vi.fn().mockResolvedValue(json());
+    const request = uploadProductionDraft({
+      artifact: artifact(), endpoint, fetchImpl, shop: SHOP, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(request).rejects.toThrow('Production draft endpoint must be same-origin.');
+  });
+
+  it.each([
     undefined,
     '',
     'TESTCSJ.myshopify.com',

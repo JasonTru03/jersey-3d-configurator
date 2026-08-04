@@ -19,13 +19,26 @@ const FILES = [
   ['preview-back.png', 'image/png'],
   ['manifest.json', 'application/json'],
 ];
+const MEBIBYTE = 1024 * 1024;
+const FILE_SIZE_LIMITS = Object.freeze({
+  'design.json': 8 * MEBIBYTE,
+  'uv-atlas.png': 16 * MEBIBYTE,
+  'uv-pattern-pieces.png': 16 * MEBIBYTE,
+  'uv-reference.pdf': 8 * MEBIBYTE,
+  'preview-front.png': 8 * MEBIBYTE,
+  'preview-back.png': 8 * MEBIBYTE,
+  'manifest.json': MEBIBYTE,
+});
 
-function artifact() {
+function artifact(sizes = {}) {
   return {
-    files: FILES.map(([filename, type]) => ({
-      blob: new Blob([filename], { type }),
-      filename,
-    })),
+    files: FILES.map(([filename, type]) => {
+      const blob = new Blob([filename], { type });
+      if (sizes[filename] !== undefined) {
+        Object.defineProperty(blob, 'size', { value: sizes[filename] });
+      }
+      return { blob, filename };
+    }),
   };
 }
 
@@ -144,6 +157,47 @@ describe('uploadProductionDraft', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it.each(Object.entries(FILE_SIZE_LIMITS))('accepts the exact %s size limit', async (filename, maxBytes) => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW - 1);
+    const fetchImpl = vi.fn().mockResolvedValue(json());
+
+    await uploadProductionDraft({
+      artifact: artifact({ [filename]: maxBytes }), fetchImpl, shop: SHOP, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each(Object.entries(FILE_SIZE_LIMITS))('rejects a %s file above its size limit before fetch', async (filename, maxBytes) => {
+    const fetchImpl = vi.fn().mockResolvedValue(json());
+    const request = uploadProductionDraft({
+      artifact: artifact({ [filename]: maxBytes + 1 }), fetchImpl, shop: SHOP, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(request).rejects.toThrow('Production draft files are invalid.');
+  });
+
+  it('rejects an artifact above the aggregate size limit before fetch', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(json());
+    const sizes = {
+      'design.json': FILE_SIZE_LIMITS['design.json'],
+      'uv-atlas.png': FILE_SIZE_LIMITS['uv-atlas.png'],
+      'uv-pattern-pieces.png': FILE_SIZE_LIMITS['uv-pattern-pieces.png'],
+      'uv-reference.pdf': FILE_SIZE_LIMITS['uv-reference.pdf'],
+      'preview-front.png': FILE_SIZE_LIMITS['preview-front.png'],
+      'preview-back.png': FILE_SIZE_LIMITS['preview-back.png'],
+      'manifest.json': 1,
+    };
+
+    const request = uploadProductionDraft({
+      artifact: artifact(sizes), fetchImpl, shop: SHOP, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
+    });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(request).rejects.toThrow('Production draft files are invalid.');
+  });
+
   it.each([undefined, '', '   '])('requires a Turnstile token before fetch', async (turnstileToken) => {
     const fetchImpl = vi.fn();
 
@@ -211,6 +265,7 @@ describe('uploadProductionDraft', () => {
 
   it('propagates caller cancellation as an AbortError', async () => {
     const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
     const fetchImpl = vi.fn(() => new Promise(() => {}));
     const result = uploadProductionDraft({
       artifact: artifact(), fetchImpl, shop: SHOP, signal: controller.signal, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
@@ -220,6 +275,18 @@ describe('uploadProductionDraft', () => {
 
     await expect(result).rejects.toMatchObject({ name: 'AbortError' });
     expect(fetchImpl.mock.calls[0][1].signal).toHaveProperty('aborted', true);
+    expect(removeListener).toHaveBeenCalled();
+  });
+
+  it('clears the timeout after a successful response', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Date, 'now').mockReturnValue(NOW - 1);
+
+    await uploadProductionDraft({
+      artifact: artifact(), fetchImpl: vi.fn().mockResolvedValue(json()), shop: SHOP, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
+    });
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('aborts a stalled request at its timeout and reports a finite error', async () => {
@@ -231,6 +298,23 @@ describe('uploadProductionDraft', () => {
     const rejection = expect(result).rejects.toThrow('Production draft upload timed out. Try again.');
 
     expect(fetchImpl.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(fetchImpl.mock.calls[0][1].signal).toHaveProperty('aborted', true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('aborts a stalled response body read at its timeout and clears the timer', async () => {
+    vi.useFakeTimers();
+    const response = { ok: true, json: vi.fn(() => new Promise(() => {})) };
+    const fetchImpl = vi.fn().mockResolvedValue(response);
+    const result = uploadProductionDraft({
+      artifact: artifact(), fetchImpl, shop: SHOP, timeoutMs: 25, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
+    });
+    const rejection = expect(result).rejects.toThrow('Production draft upload timed out. Try again.');
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(response.json).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
     expect(fetchImpl.mock.calls[0][1].signal).toHaveProperty('aborted', true);

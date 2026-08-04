@@ -6,16 +6,18 @@ const BUNDLE_FILENAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,100}-design-([a-f0-9]{8})\
 const MAX_TOKEN_LENGTH = 4_096;
 const MAX_SERVER_ERROR_LENGTH = 200;
 const DEFAULT_TIMEOUT_MS = 120_000;
+const MEBIBYTE = 1024 * 1024;
+const MAX_PRODUCTION_FILES_BYTES = 64 * MEBIBYTE;
 const GENERIC_ERROR = 'Production draft upload failed.';
 const TIMEOUT_ERROR = 'Production draft upload timed out. Try again.';
 const PRODUCTION_FILES = Object.freeze([
-  ['design.json', 'application/json'],
-  ['uv-atlas.png', 'image/png'],
-  ['uv-pattern-pieces.png', 'image/png'],
-  ['uv-reference.pdf', 'application/pdf'],
-  ['preview-front.png', 'image/png'],
-  ['preview-back.png', 'image/png'],
-  ['manifest.json', 'application/json'],
+  Object.freeze(['design.json', 'application/json', 8 * MEBIBYTE]),
+  Object.freeze(['uv-atlas.png', 'image/png', 16 * MEBIBYTE]),
+  Object.freeze(['uv-pattern-pieces.png', 'image/png', 16 * MEBIBYTE]),
+  Object.freeze(['uv-reference.pdf', 'application/pdf', 8 * MEBIBYTE]),
+  Object.freeze(['preview-front.png', 'image/png', 8 * MEBIBYTE]),
+  Object.freeze(['preview-back.png', 'image/png', 8 * MEBIBYTE]),
+  Object.freeze(['manifest.json', 'application/json', MEBIBYTE]),
 ]);
 
 export async function uploadProductionDraft({
@@ -125,12 +127,18 @@ function snapshotFiles(artifact) {
   ) {
     throw new TypeError('Production draft files are invalid.');
   }
+  let totalBytes = 0;
   return artifact.files.map((file, index) => {
-    const [filename, mediaType] = PRODUCTION_FILES[index];
-    if (!(file?.blob instanceof Blob) || file.blob.size === 0 || file.blob.type !== mediaType) {
+    const [filename, mediaType, maxBytes] = PRODUCTION_FILES[index];
+    const blob = file?.blob;
+    if (!(blob instanceof Blob) || blob.size === 0 || blob.type !== mediaType || blob.size > maxBytes) {
       throw new TypeError('Production draft files are invalid.');
     }
-    return { blob: file.blob, filename };
+    totalBytes += blob.size;
+    if (totalBytes > MAX_PRODUCTION_FILES_BYTES) {
+      throw new TypeError('Production draft files are invalid.');
+    }
+    return { blob, filename };
   });
 }
 

@@ -21,7 +21,6 @@ const PRODUCT_ID = 'fn8788-jersey';
 const VARIANT_ID = '48039101989015';
 const SIZE = 'xl';
 const BUNDLE_FILENAME = `${PRODUCT_ID}-design-${FINGERPRINT}.zip`;
-const UPLOAD_LEASE_MS = 15 * 60 * 1000;
 const EXISTING_UPLOAD_TOKEN = 'upt_22222222-2222-4222-8222-222222222222';
 const MAX_MULTIPART_BYTES = MAX_PRODUCTION_PACKAGE_BYTES + 64 * 1024;
 const ARTIFACT_HASHES = Object.freeze([
@@ -360,119 +359,103 @@ describe('production draft idempotency', () => {
     expect(current.env.PRODUCTION_ASSETS.put).not.toHaveBeenCalled();
   });
 
-  it('rejects an active upload_pending owner without validation or R2 writes', async () => {
-    const form = validFormData();
-    const pending = await matchingPendingDraft(form, { uploadStartedAt: NOW });
-    const current = createRuntime({ existing: pending, form });
+  it('rejects even a very old upload_pending row before validation or R2 writes', async () => {
+    const pending = existingDraft({
+      status: 'upload_pending',
+      uploadToken: EXISTING_UPLOAD_TOKEN,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const current = createRuntime({ existing: pending });
 
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(409);
     expect(current.dependencies.validateAndRebuildUploadedProductionPackage).not.toHaveBeenCalled();
     expect(current.repository.createUploadPending).not.toHaveBeenCalled();
-    expect(current.repository.takeOverStaleUpload).not.toHaveBeenCalled();
     expect(current.env.PRODUCTION_ASSETS.put).not.toHaveBeenCalled();
   });
 
-  it('takes over a strictly matching stale upload_pending row and reuses its design ID and keys', async () => {
-    const form = validFormData();
-    const pending = await matchingPendingDraft(form);
-    const current = createRuntime({ existing: pending, form });
-
-    const response = await current.handler(current.request());
-
-    expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toEqual(successPayload({ ...pending, status: 'cart_draft' }));
-    expect(current.dependencies.validateAndRebuildUploadedProductionPackage).toHaveBeenCalledOnce();
-    expect(current.repository.createUploadPending).not.toHaveBeenCalled();
-    expect(current.repository.takeOverStaleUpload).toHaveBeenCalledWith(expect.objectContaining({
-      designId: pending.designId,
-      previousUploadToken: pending.uploadToken,
-      staleBefore: NOW - UPLOAD_LEASE_MS,
-    }));
-    expect(current.repository.finalizeCartDraft).toHaveBeenCalledWith({
-      shop: SHOP,
-      designId: pending.designId,
-      uploadId: UPLOAD_ID,
-      uploadToken: expect.stringMatching(/^upt_/u),
-      updatedAt: NOW,
+  it('never grants a second same-upload owner that could interleave with a delayed old R2 writer', async () => {
+    const row = existingDraft({
+      status: 'upload_pending',
+      uploadToken: EXISTING_UPLOAD_TOKEN,
+      createdAt: 1,
+      updatedAt: 1,
     });
-    expect(current.env.PRODUCTION_ASSETS.put.mock.calls.every(([key]) => (
-      key.startsWith(`shops/shop_abcdefghijkl/designs/${pending.designId}/`)
-    ))).toBe(true);
-  });
-
-  it.each([
-    ['manifest hash', { manifestSha256: 'f'.repeat(64) }],
-    ['model identity', { modelId: 'other-model' }],
-    ['manifest object key', { manifestKey: 'shops/shop_abcdefghijkl/designs/dsg_bad/manifest.json' }],
-    ['bundle object key', { bundleKey: 'shops/shop_abcdefghijkl/designs/dsg_bad/bundle.zip' }],
-  ])('rejects a pending resume with mismatched %s after authoritative validation', async (_label, override) => {
-    const form = validFormData();
-    const pending = await matchingPendingDraft(form, override);
-    const current = createRuntime({ existing: pending, form });
+    const sharedRepository = {
+      getCartDraftByUpload: vi.fn(async () => row),
+      createUploadPending: vi.fn(),
+      finalizeCartDraft: vi.fn(),
+      claimOwnedUploadCleanup: vi.fn(),
+      deleteClaimedDraft: vi.fn(),
+    };
+    const current = createRuntime({
+      repository: sharedRepository,
+    });
 
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(409);
-    expect(current.dependencies.validateAndRebuildUploadedProductionPackage).toHaveBeenCalledOnce();
+    expect(sharedRepository.getCartDraftByUpload).toHaveBeenCalledOnce();
+    expect(sharedRepository.createUploadPending).not.toHaveBeenCalled();
+    expect(sharedRepository.finalizeCartDraft).not.toHaveBeenCalled();
+    expect(current.dependencies.validateAndRebuildUploadedProductionPackage).not.toHaveBeenCalled();
     expect(current.env.PRODUCTION_ASSETS.put).not.toHaveBeenCalled();
-    expect(current.repository.finalizeCartDraft).not.toHaveBeenCalled();
+    expect(current.env.PRODUCTION_ASSETS.delete).not.toHaveBeenCalled();
   });
 
-  it('lets only one of two concurrent identical stale takeovers write and finalize', async () => {
-    const form = validFormData();
-    let row = await matchingPendingDraft(form);
-    let takeoverCount = 0;
-    let releaseTakeovers;
-    const takeoversReady = new Promise((resolve) => { releaseTakeovers = resolve; });
+  it('retries the same upload ID only after owned cleanup and uses a new random key prefix', async () => {
+    let row = null;
     const sharedRepository = {
       getCartDraftByUpload: vi.fn(async () => row),
-      createUploadPending: vi.fn(),
-      takeOverStaleUpload: vi.fn(async (input) => {
-        takeoverCount += 1;
-        if (takeoverCount === 2) releaseTakeovers();
-        await takeoversReady;
-        if (row.status !== 'upload_pending' || row.uploadToken !== input.previousUploadToken) {
-          throw Object.assign(new Error('lost takeover'), { code: 'production-repository-conflict' });
-        }
-        row = existingDraft({
-          ...row,
-          uploadToken: input.newUploadToken,
-          uploadStartedAt: input.startedAt,
-        });
+      createUploadPending: vi.fn(async (draft) => {
+        if (row !== null) return row;
+        row = existingDraft({ ...draft, status: 'upload_pending' });
         return row;
       }),
       finalizeCartDraft: vi.fn(async (input) => {
-        if (row.uploadToken !== input.uploadToken) throw new Error('wrong owner');
+        if (row?.uploadToken !== input.uploadToken) throw new Error('wrong owner');
+        row = existingDraft({ ...row, status: 'cart_draft', uploadToken: null });
+        return row;
+      }),
+      claimOwnedUploadCleanup: vi.fn(async (input) => {
+        if (row?.uploadToken !== input.uploadToken) throw new Error('lost owner');
         row = existingDraft({
-          ...row, status: 'cart_draft', uploadToken: null, uploadStartedAt: null,
+          ...row,
+          status: 'cleanup_pending',
+          uploadToken: null,
+          cleanupToken: input.cleanupToken,
+          cleanupStartedAt: input.claimedAt,
         });
         return row;
       }),
-      claimOwnedUploadCleanup: vi.fn(),
-      deleteClaimedDraft: vi.fn(),
+      deleteClaimedDraft: vi.fn(async ({ claimToken }) => {
+        if (row?.cleanupToken !== claimToken) return false;
+        row = null;
+        return true;
+      }),
     };
-    const first = createRuntime({ form, repository: sharedRepository });
-    const second = createRuntime({
-      form: validFormData(),
+    const failed = createRuntime({ putFailureIndex: 0, repository: sharedRepository });
+    const retried = createRuntime({
       randomUUID: () => '33333333-3333-4333-8333-333333333333',
       repository: sharedRepository,
     });
 
-    const responses = await Promise.all([
-      first.handler(first.request()),
-      second.handler(second.request()),
-    ]);
-    const bodies = await Promise.all(responses.map((response) => response.json()));
+    const failedResponse = await failed.handler(failed.request());
+    const retriedResponse = await retried.handler(retried.request());
 
-    expect(responses.map(({ status }) => status).sort()).toEqual([201, 409]);
-    expect(bodies.find((body) => body.designId)?.designId).toBe(row.designId);
-    expect(sharedRepository.takeOverStaleUpload).toHaveBeenCalledTimes(2);
-    expect(first.env.PRODUCTION_ASSETS.put.mock.calls.length
-      + second.env.PRODUCTION_ASSETS.put.mock.calls.length).toBe(8);
-    expect(first.env.PRODUCTION_ASSETS.delete).not.toHaveBeenCalled();
-    expect(second.env.PRODUCTION_ASSETS.delete).not.toHaveBeenCalled();
+    expect(failedResponse.status).toBe(503);
+    expect(retriedResponse.status).toBe(201);
+    expect(sharedRepository.claimOwnedUploadCleanup).toHaveBeenCalledOnce();
+    expect(sharedRepository.deleteClaimedDraft).toHaveBeenCalledOnce();
+    const failedKeys = failed.env.PRODUCTION_ASSETS.put.mock.calls.map(([key]) => key);
+    const retriedKeys = retried.env.PRODUCTION_ASSETS.put.mock.calls.map(([key]) => key);
+    expect(failedKeys.every((key) => key.includes(`/designs/${DESIGN_ID}/`))).toBe(true);
+    expect(retriedKeys.every((key) => (
+      key.includes('/designs/dsg_33333333-3333-4333-8333-333333333333/')
+    ))).toBe(true);
+    expect(retriedKeys.some((key) => failedKeys.includes(key))).toBe(false);
   });
 
   it('does not delete objects when finalization returns another matching owner row', async () => {
@@ -602,7 +585,6 @@ describe('production draft private storage', () => {
       createdAt: NOW,
       expiresAt: EXPIRES_AT,
       uploadToken: expect.stringMatching(/^upt_/u),
-      uploadStartedAt: NOW,
       updatedAt: NOW,
     }));
     expect(runtime.repository.finalizeCartDraft).toHaveBeenCalledWith({
@@ -749,7 +731,35 @@ describe('production draft private storage', () => {
     expect(current.env.PRODUCTION_ASSETS.delete).not.toHaveBeenCalled();
   });
 
-  it('cleans all keys for a D1 failure and keeps a stable response when cleanup also fails', async () => {
+  it('directly deletes unique unindexed keys when finalization removes the shared row before failing', async () => {
+    let row = null;
+    const sharedRepository = {
+      getCartDraftByUpload: vi.fn(async () => row),
+      createUploadPending: vi.fn(async (draft) => {
+        row = existingDraft({ ...draft, status: 'upload_pending' });
+        return row;
+      }),
+      finalizeCartDraft: vi.fn(async (input) => {
+        if (row?.uploadToken !== input.uploadToken) throw new Error('wrong owner');
+        row = null;
+        throw new Error('ambiguous D1 failure after row removal');
+      }),
+      claimOwnedUploadCleanup: vi.fn(),
+      deleteClaimedDraft: vi.fn(),
+    };
+    const current = createRuntime({ repository: sharedRepository });
+
+    const response = await current.handler(current.request());
+
+    expect(response.status).toBe(503);
+    expect(row).toBeNull();
+    expect(sharedRepository.getCartDraftByUpload).toHaveBeenCalledTimes(2);
+    expect(sharedRepository.claimOwnedUploadCleanup).not.toHaveBeenCalled();
+    expect(current.env.PRODUCTION_ASSETS.delete).toHaveBeenCalledOnce();
+    expect(current.env.PRODUCTION_ASSETS.delete.mock.calls[0][0]).toHaveLength(8);
+  });
+
+  it('keeps a stable response when direct cleanup of confirmed-unindexed keys fails', async () => {
     const current = createRuntime({
       finalizeFailure: new Error('d1 details'),
       existingSequence: [null, null],
@@ -758,6 +768,7 @@ describe('production draft private storage', () => {
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(503);
+    expect(current.repository.claimOwnedUploadCleanup).not.toHaveBeenCalled();
     expect(current.env.PRODUCTION_ASSETS.delete).toHaveBeenCalledOnce();
     await expect(response.json()).resolves.toEqual({ error: 'Production draft uploads are temporarily unavailable.' });
     expect(current.dependencies.logger.error).toHaveBeenCalledWith('PRODUCTION_DRAFT_CLEANUP_FAILED');
@@ -802,8 +813,6 @@ function createRuntime({
   storeConfig = {},
   turnstile = { success: true, action: 'production_draft' },
   turnstileTimeoutMs,
-  takeoverFailure,
-  takeoverResult,
   validateAndRebuild,
   validated: validatedOverride,
 } = {}) {
@@ -859,18 +868,6 @@ function createRuntime({
       reservedDraft = existingDraft({ ...draft, status: 'upload_pending' });
       return reserveResult ?? reservedDraft;
     }),
-    takeOverStaleUpload: vi.fn(async (input) => {
-      events.push('d1:takeover');
-      if (takeoverFailure) throw takeoverFailure;
-      reservedDraft = existingDraft({
-        ...(existing ?? {}),
-        status: 'upload_pending',
-        uploadToken: input.newUploadToken,
-        uploadStartedAt: input.startedAt,
-        updatedAt: input.startedAt,
-      });
-      return takeoverResult ?? reservedDraft;
-    }),
     finalizeCartDraft: vi.fn(async (input) => {
       events.push('d1:finalize');
       if (finalizeFailure) throw finalizeFailure;
@@ -879,7 +876,6 @@ function createRuntime({
         ...input,
         status: 'cart_draft',
         uploadToken: null,
-        uploadStartedAt: null,
       });
     }),
     claimOwnedUploadCleanup: vi.fn(async (input) => {
@@ -889,7 +885,6 @@ function createRuntime({
         ...reservedDraft,
         status: 'cleanup_pending',
         uploadToken: null,
-        uploadStartedAt: null,
         cleanupToken: input.cleanupToken,
         cleanupStartedAt: input.claimedAt,
         updatedAt: input.claimedAt,
@@ -1180,27 +1175,11 @@ function existingDraft(overrides = {}) {
     createdAt: NOW,
     expiresAt: EXPIRES_AT,
     uploadToken: null,
-    uploadStartedAt: null,
     cleanupToken: null,
     cleanupStartedAt: null,
     updatedAt: NOW,
     ...overrides,
   };
-}
-
-async function matchingPendingDraft(form, overrides = {}) {
-  const designId = overrides.designId ?? DESIGN_ID;
-  const prefix = `shops/shop_abcdefghijkl/designs/${designId}/`;
-  return existingDraft({
-    status: 'upload_pending',
-    designId,
-    uploadToken: EXISTING_UPLOAD_TOKEN,
-    uploadStartedAt: NOW - UPLOAD_LEASE_MS - 1,
-    manifestSha256: await sha256Hex(form.get('manifest.json')),
-    manifestKey: `${prefix}manifest.json`,
-    bundleKey: `${prefix}${BUNDLE_FILENAME}`,
-    ...overrides,
-  });
 }
 
 function successPayload(draft) {

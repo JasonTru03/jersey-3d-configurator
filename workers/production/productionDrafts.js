@@ -31,7 +31,6 @@ import { createProductionRepository } from './productionRepository.js';
 import { sha256ReadableStreamHex } from './incrementalSha256.js';
 
 const CART_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const UPLOAD_LEASE_MS = 15 * 60 * 1000;
 const MAX_BUNDLE_BYTES = MAX_PRODUCTION_PACKAGE_BYTES + 64 * 1024;
 const DESIGN_ID_PATTERN = /^dsg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const UPLOAD_TOKEN_PATTERN = /^upt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -96,11 +95,7 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
         if (matchesReusableProductionDraft(existing, form.manifest, currentTime)) {
           return successResponse(existing);
         }
-        if (existing.status !== 'upload_pending'
-          || !Number.isSafeInteger(existing.uploadStartedAt)
-          || existing.uploadStartedAt > currentTime - UPLOAD_LEASE_MS) {
-          throw new HttpError(409, CONFLICT_MESSAGE);
-        }
+        throw new HttpError(409, CONFLICT_MESSAGE);
       }
 
       const packageSnapshot = await validatePackage(validateAndRebuild, form);
@@ -110,9 +105,9 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
         hashBlob,
         packageSnapshot.validated.files[6].blob,
       );
-      const designId = existing?.designId ?? createDesignId(randomUUID);
+      const designId = createDesignId(randomUUID);
       const uploadToken = createLeaseToken(randomUUID, 'upt', UPLOAD_TOKEN_PATTERN);
-      const expiresAt = existing?.expiresAt ?? currentTime + CART_DRAFT_TTL_MS;
+      const expiresAt = currentTime + CART_DRAFT_TTL_MS;
       if (!Number.isSafeInteger(expiresAt)) throw new ServiceError('PRODUCTION_DRAFT_EXPIRY_INVALID');
       const prefix = `shops/${shopFingerprint}/designs/${designId}/`;
       const keys = [
@@ -130,37 +125,14 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
         uploadToken,
       });
 
-      let reservation;
-      if (existing) {
-        if (!matchesStrictPendingDraft(existing, draft, currentTime)) {
-          throw new HttpError(409, CONFLICT_MESSAGE);
-        }
-        try {
-          reservation = await bindings.repository.takeOverStaleUpload({
-            shop: form.shop,
-            designId,
-            uploadId: form.uploadId,
-            previousUploadToken: existing.uploadToken,
-            newUploadToken: uploadToken,
-            startedAt: currentTime,
-            staleBefore: currentTime - UPLOAD_LEASE_MS,
-          });
-        } catch (error) {
-          if (error?.code === 'production-repository-conflict') {
-            throw new HttpError(409, CONFLICT_MESSAGE);
-          }
-          throw new ServiceError('PRODUCTION_DRAFT_D1_TAKEOVER_FAILED');
-        }
-      } else {
-        reservation = await reservePendingDraft(
-          bindings.repository,
-          draft,
-          form.manifest,
-          currentTime,
-        );
-        if (matchesReusableProductionDraft(reservation, form.manifest, currentTime)) {
-          return successResponse(reservation);
-        }
+      const reservation = await reservePendingDraft(
+        bindings.repository,
+        draft,
+        form.manifest,
+        currentTime,
+      );
+      if (matchesReusableProductionDraft(reservation, form.manifest, currentTime)) {
+        return successResponse(reservation);
       }
       if (!matchesOwnedPendingDraft(reservation, draft, currentTime)) {
         throw new HttpError(409, CONFLICT_MESSAGE);
@@ -207,6 +179,10 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
           && recovery.draft.designId === designId
           && matchesReusableProductionDraft(recovery.draft, form.manifest, currentTime)) {
           return successResponse(recovery.draft);
+        }
+        if (recovery.kind === 'missing') {
+          await deleteUnindexedKeys(bindings.assets, keys, logger);
+          throw new ServiceError('PRODUCTION_DRAFT_D1_WRITE_FAILED');
         }
         await cleanupOwnedUpload({
           assets: bindings.assets,
@@ -418,7 +394,6 @@ function createDraftRecord({
     createdAt: currentTime,
     expiresAt,
     uploadToken,
-    uploadStartedAt: currentTime,
     updatedAt: currentTime,
   };
 }
@@ -463,16 +438,7 @@ async function reservePendingDraft(repository, draft, manifest, currentTime) {
 function matchesOwnedPendingDraft(value, draft, currentTime) {
   return matchesPendingPayload(value, draft, currentTime)
     && value.status === 'upload_pending'
-    && value.uploadToken === draft.uploadToken
-    && value.uploadStartedAt === draft.uploadStartedAt;
-}
-
-function matchesStrictPendingDraft(value, draft, currentTime) {
-  return matchesPendingPayload(value, draft, currentTime)
-    && value.status === 'upload_pending'
-    && matches(value.uploadToken, UPLOAD_TOKEN_PATTERN)
-    && Number.isSafeInteger(value.uploadStartedAt)
-    && value.uploadStartedAt <= currentTime - UPLOAD_LEASE_MS;
+    && value.uploadToken === draft.uploadToken;
 }
 
 function matchesPendingPayload(value, draft, currentTime) {
@@ -616,8 +582,17 @@ function matchesCleanupClaim(value, draft, cleanupToken, claimedAt) {
     && value.bundleKey === draft.bundleKey
     && value.cleanupToken === cleanupToken
     && value.cleanupStartedAt === claimedAt
-    && value.uploadToken === null
-    && value.uploadStartedAt === null;
+    && value.uploadToken === null;
+}
+
+async function deleteUnindexedKeys(assets, keys, logger) {
+  try {
+    await assets.delete(keys);
+    return true;
+  } catch {
+    logCode(logger, 'PRODUCTION_DRAFT_CLEANUP_FAILED');
+    return false;
+  }
 }
 
 function successResponse(draft) {

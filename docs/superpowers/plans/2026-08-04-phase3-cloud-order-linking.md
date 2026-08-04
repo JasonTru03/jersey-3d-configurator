@@ -233,12 +233,17 @@ paid_at INTEGER,
 shopify_order_gid TEXT,
 shopify_order_name TEXT,
 error_code TEXT,
+upload_token TEXT,
 cleanup_token TEXT,
 cleanup_started_at INTEGER,
 updated_at INTEGER NOT NULL,
 CHECK (
-  (status = 'cleanup_pending' AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL)
-  OR (status <> 'cleanup_pending' AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
+  (status = 'upload_pending' AND upload_token IS NOT NULL
+    AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
+  OR (status = 'cleanup_pending' AND upload_token IS NULL
+    AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL)
+  OR (status NOT IN ('upload_pending', 'cleanup_pending') AND upload_token IS NULL
+    AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
 ),
 UNIQUE (shop, upload_id),
 UNIQUE (shop, shopify_order_gid, design_id)
@@ -264,15 +269,12 @@ git commit -m "feat: add production design d1 index"
 
 **Files:**
 - Modify: `migrations/0001_production_designs.sql`
-- Modify: `src/features/configurator/api/productionDraftApi.js`
 - Modify: `src/features/configurator/api/productionDraftApi.test.js`
 - Modify: `src/features/configurator/designs/productionManifest.js`
-- Modify: `src/features/configurator/designs/productionManifest.test.js`
 - Modify: `src/features/configurator/designs/productionBundle.js`
 - Modify: `src/features/configurator/designs/productionBundle.test.js`
 - Create: `workers/production/incrementalSha256.js`
 - Create: `workers/production/incrementalSha256.test.js`
-- Modify: `workers/production/productionPackageValidator.js`
 - Modify: `workers/production/productionPackageValidator.test.js`
 - Create: `workers/production/productionDraftRequest.js`
 - Create: `workers/production/productionDrafts.js`
@@ -296,8 +298,9 @@ Cover these observable behaviors:
 - The rebuilt ZIP is deterministic across repeated stream creation. Hash the first stream incrementally, pass a fresh second stream directly to R2, and store the trusted SHA-256 both as R2 integrity input and `customMetadata.sha256`.
 - An R2 write, source-stream or D1 failure removes every key written by that request when ownership is certain and returns a stable 503 without leaking an internal key, stream error or exception. A failed D1 recovery read must preserve indexed R2 objects rather than guessing that no row exists. If compensating R2 deletion fails, return 503 rather than reporting an existing draft or conflict as successful.
 - Before writing R2, `getCartDraftByUpload(shop, uploadId)` checks for an existing authoritative row. Repeating the same `(shop, uploadId)` returns the existing matching draft without writing a second package; a different fingerprint for the same upload ID is rejected.
-- Every `upload_pending` row owns a 15-minute upload lease (`upload_token`, `upload_started_at`). An active lease rejects concurrent writes; a stale lease can be replaced only by an atomic token CAS after the authoritative manifest hash, model metadata and exact R2 keys all match.
-- Finalization is guarded by the current upload token. Failure cleanup must first atomically replace that upload lease with a `cleanup_pending` token; only the cleanup-token winner may delete R2 and then delete the claimed D1 row. A CAS loser and an ambiguous recovery read never delete objects.
+- Every `upload_pending` row has an immutable owner token and is never taken over. Any pending row for the same upload ID returns 409 before package validation or R2 access, regardless of age, so a delayed old writer can never overlap a new owner writing the same private keys.
+- Finalization is guarded by the current upload token. A captured failure first atomically changes the owned row to `cleanup_pending`; only the cleanup-token winner may delete R2 and then delete the claimed D1 row. After normal cleanup the same operation can retry. If the process is interrupted, the client starts a new attempt with a new upload ID and the old pending row is reclaimed by the 30-day expiry cron.
+- A finalization recovery read of `missing` directly deletes this request's unindexed random-design keys; `read_failed` preserves the objects because ownership is ambiguous.
 
 - [ ] **Step 2: Run RED**
 
@@ -320,7 +323,7 @@ TURNSTILE_SECRET_KEY
 SHOPIFY_STORE_CONFIG_JSON
 ```
 
-Use the atomic `validateAndRebuildUploadedProductionPackage()` entry point from Task 2. Use `crypto.randomUUID()` for the server `designId`, SHA-256 for object metadata, and the existing Web Crypto HMAC/fingerprint helpers. Verify Turnstile before expensive package hashing. Reserve an owner-token-guarded `upload_pending` lease before R2, pass a fresh rebuilt ZIP stream directly to R2, and finalize the reservation with the same token only after all writes succeed. Await every R2 write and compensating delete. Treat D1 recovery as three states (`found`, `missing`, `read_failed`) so an ambiguous committed row never loses its files. Before compensating deletion, CAS the owned upload row to `cleanup_pending`; delete the D1 row only after R2 deletion succeeds. Store only private keys in D1 and return:
+Use the atomic `validateAndRebuildUploadedProductionPackage()` entry point from Task 2. Use `crypto.randomUUID()` for the server `designId`, SHA-256 for object metadata, and the existing Web Crypto HMAC/fingerprint helpers. Verify Turnstile before expensive package hashing. Reserve an owner-token-guarded `upload_pending` row before R2, never replace its owner, pass a fresh rebuilt ZIP stream directly to R2, and finalize the reservation with the same token only after all writes succeed. Await every R2 write and compensating delete. Treat D1 recovery as three states (`found`, `missing`, `read_failed`) so an ambiguous committed row never loses its files. Before normal compensating deletion, CAS the owned upload row to `cleanup_pending`; delete the D1 row only after R2 deletion succeeds. A confirmed missing row has no published owner and its random-design keys can be deleted directly. Store only private keys in D1 and return:
 
 ```json
 {
@@ -337,7 +340,7 @@ Keep the checked-in `LOCAL_PRODUCTION_FILES=true` behavior returning 503 until t
 
 ```powershell
 npx vitest run src/features/configurator/designs/productionBundle.test.js src/features/configurator/designs/productionManifest.test.js src/features/configurator/api/productionDraftApi.test.js workers/production/incrementalSha256.test.js workers/production/productionPackageValidator.test.js workers/production/productionRepository.test.js workers/production/productionRepository.integration.test.js workers/production/productionDrafts.test.js workers/router.test.js workers/designAssets.test.js
-git add migrations/0001_production_designs.sql src/features/configurator/api/productionDraftApi.js src/features/configurator/api/productionDraftApi.test.js src/features/configurator/designs/productionManifest.js src/features/configurator/designs/productionManifest.test.js src/features/configurator/designs/productionBundle.js src/features/configurator/designs/productionBundle.test.js workers/production/incrementalSha256.js workers/production/incrementalSha256.test.js workers/production/productionPackageValidator.js workers/production/productionPackageValidator.test.js workers/production/productionDraftRequest.js workers/production/productionDrafts.js workers/production/productionDrafts.test.js workers/production/productionRepository.js workers/production/productionRepository.test.js workers/production/productionRepository.integration.test.js workers/router.js workers/router.test.js workers/designAssets.js workers/designAssets.test.js docs/superpowers/plans/2026-08-04-phase3-cloud-order-linking.md
+git add migrations/0001_production_designs.sql src/features/configurator/api/productionDraftApi.test.js src/features/configurator/designs/productionManifest.js src/features/configurator/designs/productionBundle.js src/features/configurator/designs/productionBundle.test.js workers/production/incrementalSha256.js workers/production/incrementalSha256.test.js workers/production/productionPackageValidator.test.js workers/production/productionDraftRequest.js workers/production/productionDrafts.js workers/production/productionDrafts.test.js workers/production/productionRepository.js workers/production/productionRepository.test.js workers/production/productionRepository.integration.test.js workers/router.js workers/router.test.js workers/designAssets.js workers/designAssets.test.js docs/superpowers/plans/2026-08-04-phase3-cloud-order-linking.md
 git commit -m "feat: store verified production drafts in r2"
 ```
 

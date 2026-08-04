@@ -15,7 +15,6 @@ describe('production repository against node:sqlite', () => {
       const pending = await repository.createUploadPending({
         ...draft(0),
         uploadToken: 'upt_1111111111111111',
-        uploadStartedAt: 1_700_000_000_000,
       });
 
       expect(pending.status).toBe('upload_pending');

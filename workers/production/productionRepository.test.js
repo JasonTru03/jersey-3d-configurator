@@ -12,6 +12,8 @@ const UPLOAD_ID = 'upl_1234567890abcdef';
 const BUNDLE_ID = 'bun_1234567890abcdef';
 const ORDER_GID = 'gid://shopify/Order/1234567890';
 const CLEANUP_TOKEN = 'cln_1234567890abcdef';
+const UPLOAD_TOKEN = 'upt_1234567890abcdef';
+const NEXT_UPLOAD_TOKEN = 'upt_fedcba0987654321';
 
 describe('0001_production_designs migration', () => {
   it('defines the required production records, lifecycle guard and uniqueness rules', async () => {
@@ -27,6 +29,7 @@ describe('0001_production_designs migration', () => {
       'created_at INTEGER NOT NULL', 'expires_at INTEGER NOT NULL', 'paid_at INTEGER',
       'shopify_order_gid TEXT', 'shopify_order_name TEXT', 'error_code TEXT',
       'cleanup_token TEXT', 'cleanup_started_at INTEGER', 'updated_at INTEGER NOT NULL',
+      'upload_token TEXT', 'upload_started_at INTEGER',
     ]) expect(normalizeSql(sql)).toContain(normalizeSql(column));
     for (const status of [
       'upload_pending', 'cart_draft', 'paid_pending_production', 'file_error',
@@ -49,10 +52,16 @@ describe('0001_production_designs migration', () => {
     expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*expires_at\s*\)/iu);
     expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]+shopify_webhook_deliveries\s*\(\s*shop\s*,\s*topic\s*,\s*event_id\s*\)[^;]+WHERE\s+event_id\s+IS\s+NOT\s+NULL/iu);
     expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*cleanup_started_at\s*\)[^;]+WHERE\s+status\s*=\s*'cleanup_pending'/iu);
-    expect(normalizeSql(sql)).toContain(normalizeSql(`CHECK (
-      (status = 'cleanup_pending' AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL)
-      OR (status <> 'cleanup_pending' AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
-    )`));
+    const normalized = normalizeSql(sql);
+    expect(normalized).toContain(normalizeSql(
+      "status = 'upload_pending' AND upload_token IS NOT NULL AND upload_started_at IS NOT NULL",
+    ));
+    expect(normalized).toContain(normalizeSql(
+      "status = 'cleanup_pending' AND upload_token IS NULL AND upload_started_at IS NULL",
+    ));
+    expect(normalized).toContain(normalizeSql(
+      'cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL',
+    ));
   });
 });
 
@@ -156,18 +165,25 @@ describe('createCartDraft', () => {
 
 describe('upload pending reservation and finalization', () => {
   it('atomically reserves an upload_pending row before R2 writes', async () => {
-    const pending = databaseRow({ status: 'upload_pending' });
+    const pending = databaseRow({
+      status: 'upload_pending', upload_token: UPLOAD_TOKEN, upload_started_at: 1_700_000_000_000,
+    });
     const db = createFakeD1({
       batchResults: [d1Result({ changes: 1 }), d1Result({ results: [pending] })],
     });
 
-    const result = await createProductionRepository(db).createUploadPending(draft());
+    const result = await createProductionRepository(db).createUploadPending({
+      ...draft(), uploadToken: UPLOAD_TOKEN, uploadStartedAt: 1_700_000_000_000,
+    });
 
     const [insert, select] = db.batches[0];
     expect(insert.sql).toMatch(/^\s*INSERT OR IGNORE INTO production_designs/iu);
     expect(insert.values).toContain('upload_pending');
+    expect(insert.values).toContain(UPLOAD_TOKEN);
     expect(select.values).toEqual([SHOP, UPLOAD_ID]);
-    expect(result).toEqual(authoritativeRow({ status: 'upload_pending' }));
+    expect(result).toEqual(authoritativeRow({
+      status: 'upload_pending', upload_token: UPLOAD_TOKEN, upload_started_at: 1_700_000_000_000,
+    }));
   });
 
   it('atomically finalizes only the owning upload_pending row as cart_draft', async () => {
@@ -180,6 +196,7 @@ describe('upload pending reservation and finalization', () => {
       shop: SHOP,
       designId: DESIGN_ID,
       uploadId: UPLOAD_ID,
+      uploadToken: UPLOAD_TOKEN,
       updatedAt: 1_700_000_000_100,
     });
 
@@ -188,14 +205,19 @@ describe('upload pending reservation and finalization', () => {
     expect(update.sql).toMatch(/SET\s+status\s*=\s*'cart_draft'/iu);
     expect(update.sql).toMatch(/status\s*=\s*'upload_pending'/iu);
     expect(update.values).toEqual([
-      1_700_000_000_100, SHOP, DESIGN_ID, UPLOAD_ID,
+      1_700_000_000_100, SHOP, DESIGN_ID, UPLOAD_ID, UPLOAD_TOKEN,
     ]);
     expect(select.values).toEqual([SHOP, UPLOAD_ID]);
     expect(result).toEqual(authoritativeRow({ updated_at: 1_700_000_000_100 }));
   });
 
   it('conflicts when finalization does not produce the owning cart draft', async () => {
-    const other = databaseRow({ status: 'upload_pending', design_id: 'dsg_fedcba0987654321' });
+    const other = databaseRow({
+      status: 'upload_pending',
+      design_id: 'dsg_fedcba0987654321',
+      upload_token: UPLOAD_TOKEN,
+      upload_started_at: 1_700_000_000_000,
+    });
     const db = createFakeD1({
       batchResults: [d1Result(), d1Result({ results: [other] })],
     });
@@ -204,7 +226,126 @@ describe('upload pending reservation and finalization', () => {
       shop: SHOP,
       designId: DESIGN_ID,
       uploadId: UPLOAD_ID,
+      uploadToken: UPLOAD_TOKEN,
       updatedAt: 1_700_000_000_100,
+    })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+  });
+
+  it('rejects a wrong-token finalization even when SELECT sees an already finalized cart row', async () => {
+    const cart = databaseRow({ status: 'cart_draft', updated_at: 1_700_000_000_100 });
+    const db = createFakeD1({
+      batchResults: [d1Result({ changes: 0 }), d1Result({ results: [cart] })],
+    });
+
+    await expect(createProductionRepository(db).finalizeCartDraft({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      uploadId: UPLOAD_ID,
+      uploadToken: NEXT_UPLOAD_TOKEN,
+      updatedAt: 1_700_000_000_100,
+    })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+  });
+
+  it('atomically lets only the matching stale upload token take over', async () => {
+    const taken = databaseRow({
+      status: 'upload_pending',
+      upload_token: NEXT_UPLOAD_TOKEN,
+      upload_started_at: 1_700_000_001_000,
+      updated_at: 1_700_000_001_000,
+    });
+    const db = createFakeD1({
+      batchResults: [d1Result({ changes: 1 }), d1Result({ results: [taken] })],
+    });
+
+    const result = await createProductionRepository(db).takeOverStaleUpload({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      uploadId: UPLOAD_ID,
+      previousUploadToken: UPLOAD_TOKEN,
+      newUploadToken: NEXT_UPLOAD_TOKEN,
+      startedAt: 1_700_000_001_000,
+      staleBefore: 1_700_000_000_000,
+    });
+
+    const [update] = db.batches[0];
+    expect(update.sql).toMatch(/status\s*=\s*'upload_pending'/iu);
+    expect(update.sql).toMatch(/upload_token\s*=\s*\?/iu);
+    expect(update.sql).toMatch(/upload_started_at\s*<=\s*\?/iu);
+    expect(update.values).toEqual([
+      NEXT_UPLOAD_TOKEN, 1_700_000_001_000, 1_700_000_001_000,
+      SHOP, DESIGN_ID, UPLOAD_ID, UPLOAD_TOKEN, 1_700_000_000_000,
+    ]);
+    expect(result.uploadToken).toBe(NEXT_UPLOAD_TOKEN);
+  });
+
+  it('rejects a stale takeover when its UPDATE changed no row', async () => {
+    const taken = databaseRow({
+      status: 'upload_pending',
+      upload_token: NEXT_UPLOAD_TOKEN,
+      upload_started_at: 1_700_000_001_000,
+      updated_at: 1_700_000_001_000,
+    });
+    const db = createFakeD1({
+      batchResults: [d1Result({ changes: 0 }), d1Result({ results: [taken] })],
+    });
+
+    await expect(createProductionRepository(db).takeOverStaleUpload({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      uploadId: UPLOAD_ID,
+      previousUploadToken: UPLOAD_TOKEN,
+      newUploadToken: NEXT_UPLOAD_TOKEN,
+      startedAt: 1_700_000_001_000,
+      staleBefore: 1_700_000_000_000,
+    })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+  });
+
+  it('claims only its owned upload token for cleanup before R2 deletion', async () => {
+    const claimed = databaseRow({
+      status: 'cleanup_pending',
+      cleanup_token: CLEANUP_TOKEN,
+      cleanup_started_at: 1_700_000_000_200,
+      updated_at: 1_700_000_000_200,
+    });
+    const db = createFakeD1({
+      batchResults: [d1Result({ changes: 1 }), d1Result({ results: [claimed] })],
+    });
+
+    const result = await createProductionRepository(db).claimOwnedUploadCleanup({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      expiresAt: 1_700_000_001_000,
+      uploadToken: UPLOAD_TOKEN,
+      cleanupToken: CLEANUP_TOKEN,
+      claimedAt: 1_700_000_000_200,
+    });
+
+    const [claim] = db.batches[0];
+    expect(claim.sql).toMatch(/status\s*=\s*'upload_pending'/iu);
+    expect(claim.sql).toMatch(/upload_token\s*=\s*\?/iu);
+    expect(claim.sql).toMatch(/upload_token\s*=\s*NULL/iu);
+    expect(claim.sql).toMatch(/upload_started_at\s*=\s*NULL/iu);
+    expect(result).toMatchObject({ status: 'cleanup_pending', cleanupToken: CLEANUP_TOKEN });
+  });
+
+  it('rejects cleanup ownership when its claim UPDATE changed no row', async () => {
+    const claimed = databaseRow({
+      status: 'cleanup_pending',
+      cleanup_token: CLEANUP_TOKEN,
+      cleanup_started_at: 1_700_000_000_200,
+      updated_at: 1_700_000_000_200,
+    });
+    const db = createFakeD1({
+      batchResults: [d1Result({ changes: 0 }), d1Result({ results: [claimed] })],
+    });
+
+    await expect(createProductionRepository(db).claimOwnedUploadCleanup({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      expiresAt: 1_700_000_001_000,
+      uploadToken: UPLOAD_TOKEN,
+      cleanupToken: CLEANUP_TOKEN,
+      claimedAt: 1_700_000_000_200,
     })).rejects.toMatchObject({ code: 'production-repository-conflict' });
   });
 });
@@ -654,6 +795,8 @@ describe('expired draft cleanup', () => {
     const [claim, select] = db.batches[0];
     expect(claim.sql).toMatch(/^\s*UPDATE production_designs/iu);
     expect(claim.sql).toMatch(/SET\s+status\s*=\s*'cleanup_pending'/iu);
+    expect(claim.sql).toMatch(/upload_token\s*=\s*NULL/iu);
+    expect(claim.sql).toMatch(/upload_started_at\s*=\s*NULL/iu);
     expect(claim.sql).toMatch(/status\s+IN\s*\(\s*'upload_pending'\s*,\s*'cart_draft'\s*\)[^;]+expires_at\s*</isu);
     expect(claim.sql).toMatch(/status\s*=\s*'cleanup_pending'[^;]+cleanup_started_at\s*<=/isu);
     expect(claim.values).toContain(CLEANUP_TOKEN);
@@ -798,6 +941,8 @@ function databaseRow(overrides = {}) {
     error_code: null,
     cleanup_token: null,
     cleanup_started_at: null,
+    upload_token: null,
+    upload_started_at: null,
     updated_at: value.updatedAt,
     ...overrides,
   };
@@ -830,6 +975,8 @@ function authoritativeRow(overrides = {}) {
     errorCode: row.error_code,
     cleanupToken: row.cleanup_token,
     cleanupStartedAt: row.cleanup_started_at,
+    uploadToken: row.upload_token,
+    uploadStartedAt: row.upload_started_at,
     updatedAt: row.updated_at,
   };
 }

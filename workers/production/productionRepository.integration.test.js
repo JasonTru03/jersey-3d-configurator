@@ -12,7 +12,11 @@ describe('production repository against node:sqlite', () => {
   it('persists upload_pending before atomically finalizing the same upload', async () => {
     await withDatabase(async (db) => {
       const repository = createProductionRepository(createD1Adapter(db));
-      const pending = await repository.createUploadPending(draft(0));
+      const pending = await repository.createUploadPending({
+        ...draft(0),
+        uploadToken: 'upt_1111111111111111',
+        uploadStartedAt: 1_700_000_000_000,
+      });
 
       expect(pending.status).toBe('upload_pending');
       expect(statuses(db, 0, 1)).toEqual(['upload_pending']);
@@ -21,6 +25,7 @@ describe('production repository against node:sqlite', () => {
         shop: SHOP,
         designId: indexedDesignId(0),
         uploadId: 'upl_0000000000000000',
+        uploadToken: 'upt_1111111111111111',
         updatedAt: 1_700_000_000_100,
       });
       expect(finalized.status).toBe('cart_draft');

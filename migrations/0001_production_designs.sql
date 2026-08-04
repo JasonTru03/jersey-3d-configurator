@@ -30,12 +30,27 @@ CREATE TABLE production_designs (
   shopify_order_gid TEXT,
   shopify_order_name TEXT,
   error_code TEXT,
+  upload_token TEXT,
+  upload_started_at INTEGER,
   cleanup_token TEXT,
   cleanup_started_at INTEGER,
   updated_at INTEGER NOT NULL,
   CHECK (
-    (status = 'cleanup_pending' AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL)
-    OR (status <> 'cleanup_pending' AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
+    (
+      status = 'upload_pending'
+      AND upload_token IS NOT NULL AND upload_started_at IS NOT NULL
+      AND cleanup_token IS NULL AND cleanup_started_at IS NULL
+    )
+    OR (
+      status = 'cleanup_pending'
+      AND upload_token IS NULL AND upload_started_at IS NULL
+      AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL
+    )
+    OR (
+      status NOT IN ('upload_pending', 'cleanup_pending')
+      AND upload_token IS NULL AND upload_started_at IS NULL
+      AND cleanup_token IS NULL AND cleanup_started_at IS NULL
+    )
   ),
   UNIQUE (shop, upload_id),
   UNIQUE (shop, shopify_order_gid, design_id)

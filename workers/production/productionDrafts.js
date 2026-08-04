@@ -31,8 +31,11 @@ import { createProductionRepository } from './productionRepository.js';
 import { sha256ReadableStreamHex } from './incrementalSha256.js';
 
 const CART_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const UPLOAD_LEASE_MS = 15 * 60 * 1000;
 const MAX_BUNDLE_BYTES = MAX_PRODUCTION_PACKAGE_BYTES + 64 * 1024;
 const DESIGN_ID_PATTERN = /^dsg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const UPLOAD_TOKEN_PATTERN = /^upt_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const CLEANUP_TOKEN_PATTERN = /^cln_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PRODUCT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,100}$/u;
 const VARIANT_ID_PATTERN = /^[1-9][0-9]{0,31}$/u;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/u;
@@ -90,23 +93,27 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
       const currentTime = readClock(now);
       const existing = await getProductionDraft(bindings.repository, form.shop, form.uploadId);
       if (existing) {
-        if (!matchesReusableProductionDraft(existing, form.manifest, currentTime)) {
+        if (matchesReusableProductionDraft(existing, form.manifest, currentTime)) {
+          return successResponse(existing);
+        }
+        if (existing.status !== 'upload_pending'
+          || !Number.isSafeInteger(existing.uploadStartedAt)
+          || existing.uploadStartedAt > currentTime - UPLOAD_LEASE_MS) {
           throw new HttpError(409, CONFLICT_MESSAGE);
         }
-        return successResponse(existing);
       }
 
       const packageSnapshot = await validatePackage(validateAndRebuild, form);
       assertValidatedIdentity(packageSnapshot.validated, form.manifest, storeConfig);
-      const designId = createDesignId(randomUUID);
       const shopFingerprint = await createFingerprint(fingerprintShop, form.shop);
-      const expiresAt = currentTime + CART_DRAFT_TTL_MS;
-      if (!Number.isSafeInteger(expiresAt)) throw new ServiceError('PRODUCTION_DRAFT_EXPIRY_INVALID');
       const manifestSha256 = await createManifestHash(
         hashBlob,
         packageSnapshot.validated.files[6].blob,
       );
-
+      const designId = existing?.designId ?? createDesignId(randomUUID);
+      const uploadToken = createLeaseToken(randomUUID, 'upt', UPLOAD_TOKEN_PATTERN);
+      const expiresAt = existing?.expiresAt ?? currentTime + CART_DRAFT_TTL_MS;
+      if (!Number.isSafeInteger(expiresAt)) throw new ServiceError('PRODUCTION_DRAFT_EXPIRY_INVALID');
       const prefix = `shops/${shopFingerprint}/designs/${designId}/`;
       const keys = [
         ...PRODUCTION_PACKAGE_FILE_CONTRACT.map(({ filename }) => `${prefix}${filename}`),
@@ -120,30 +127,47 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
         keys,
         manifestSha256,
         packageSnapshot,
+        uploadToken,
       });
 
-      const reservation = await reservePendingDraft(
-        bindings.repository,
-        draft,
-        form.manifest,
-        currentTime,
-      );
-      if (reservation.designId !== designId) {
+      let reservation;
+      if (existing) {
+        if (!matchesStrictPendingDraft(existing, draft, currentTime)) {
+          throw new HttpError(409, CONFLICT_MESSAGE);
+        }
+        try {
+          reservation = await bindings.repository.takeOverStaleUpload({
+            shop: form.shop,
+            designId,
+            uploadId: form.uploadId,
+            previousUploadToken: existing.uploadToken,
+            newUploadToken: uploadToken,
+            startedAt: currentTime,
+            staleBefore: currentTime - UPLOAD_LEASE_MS,
+          });
+        } catch (error) {
+          if (error?.code === 'production-repository-conflict') {
+            throw new HttpError(409, CONFLICT_MESSAGE);
+          }
+          throw new ServiceError('PRODUCTION_DRAFT_D1_TAKEOVER_FAILED');
+        }
+      } else {
+        reservation = await reservePendingDraft(
+          bindings.repository,
+          draft,
+          form.manifest,
+          currentTime,
+        );
         if (matchesReusableProductionDraft(reservation, form.manifest, currentTime)) {
           return successResponse(reservation);
         }
-        throw new HttpError(409, CONFLICT_MESSAGE);
       }
       if (!matchesOwnedPendingDraft(reservation, draft, currentTime)) {
-        if (matchesReusableProductionDraft(reservation, form.manifest, currentTime)) {
-          return successResponse(reservation);
-        }
         throw new HttpError(409, CONFLICT_MESSAGE);
       }
 
-      const bundleSha256 = await createBundleHash(hashStream, packageSnapshot.bundle.stream);
-
       try {
+        const bundleSha256 = await createBundleHash(hashStream, packageSnapshot.bundle.stream);
         await storePackage(
           bindings.assets,
           keys,
@@ -153,7 +177,15 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
           bundleSha256,
         );
       } catch {
-        await cleanupKeys(bindings.assets, keys, logger);
+        await cleanupOwnedUpload({
+          assets: bindings.assets,
+          draft,
+          keys,
+          logger,
+          now: currentTime,
+          randomUUID,
+          repository: bindings.repository,
+        });
         throw new ServiceError('PRODUCTION_DRAFT_R2_WRITE_FAILED');
       }
 
@@ -163,6 +195,7 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
           shop: form.shop,
           designId,
           uploadId: form.uploadId,
+          uploadToken,
           updatedAt: currentTime,
         });
       } catch {
@@ -170,28 +203,37 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
         if (recovery.kind === 'read_failed') {
           throw new ServiceError('PRODUCTION_DRAFT_D1_RECOVERY_READ_FAILED');
         }
-        if (recovery.kind === 'missing') {
-          await cleanupKeys(bindings.assets, keys, logger);
-          throw new ServiceError('PRODUCTION_DRAFT_D1_WRITE_FAILED');
+        if (recovery.kind === 'found'
+          && recovery.draft.designId === designId
+          && matchesReusableProductionDraft(recovery.draft, form.manifest, currentTime)) {
+          return successResponse(recovery.draft);
         }
-        authoritative = recovery.draft;
+        await cleanupOwnedUpload({
+          assets: bindings.assets,
+          draft,
+          keys,
+          logger,
+          now: currentTime,
+          randomUUID,
+          repository: bindings.repository,
+        });
+        throw new ServiceError('PRODUCTION_DRAFT_D1_WRITE_FAILED');
       }
 
-      if (authoritative.designId === designId) {
-        if (matchesReusableProductionDraft(authoritative, form.manifest, currentTime)) {
-          return successResponse(authoritative);
-        }
-        if (matchesOwnedPendingDraft(authoritative, draft, currentTime)) {
-          throw new ServiceError('PRODUCTION_DRAFT_FINALIZE_UNCONFIRMED');
-        }
-      }
-      if (!await cleanupKeys(bindings.assets, keys, logger)) {
-        throw new ServiceError('PRODUCTION_DRAFT_CLEANUP_FAILED');
-      }
-      if (matchesReusableProductionDraft(authoritative, form.manifest, currentTime)) {
+      if (authoritative.designId === designId
+        && matchesReusableProductionDraft(authoritative, form.manifest, currentTime)) {
         return successResponse(authoritative);
       }
-      throw new HttpError(409, CONFLICT_MESSAGE);
+      await cleanupOwnedUpload({
+        assets: bindings.assets,
+        draft,
+        keys,
+        logger,
+        now: currentTime,
+        randomUUID,
+        repository: bindings.repository,
+      });
+      throw new ServiceError('PRODUCTION_DRAFT_FINALIZE_UNCONFIRMED');
     } catch (error) {
       if (error instanceof HttpError) {
         return errorResponse(error.status, error.message, error.headers);
@@ -310,6 +352,18 @@ function createDesignId(randomUUID) {
   return designId;
 }
 
+function createLeaseToken(randomUUID, prefix, pattern) {
+  let uuid;
+  try {
+    uuid = randomUUID();
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_RANDOM_FAILED');
+  }
+  const token = `${prefix}_${uuid}`;
+  if (!pattern.test(token)) throw new ServiceError('PRODUCTION_DRAFT_RANDOM_INVALID');
+  return token;
+}
+
 async function createFingerprint(fingerprintShop, shop) {
   let fingerprint;
   try {
@@ -344,6 +398,7 @@ function createDraftRecord({
   keys,
   manifestSha256,
   packageSnapshot,
+  uploadToken,
 }) {
   return {
     designId,
@@ -362,6 +417,8 @@ function createDraftRecord({
     bundleFilename: packageSnapshot.bundle.filename,
     createdAt: currentTime,
     expiresAt,
+    uploadToken,
+    uploadStartedAt: currentTime,
     updatedAt: currentTime,
   };
 }
@@ -404,18 +461,37 @@ async function reservePendingDraft(repository, draft, manifest, currentTime) {
 }
 
 function matchesOwnedPendingDraft(value, draft, currentTime) {
-  return isPlainObject(value)
+  return matchesPendingPayload(value, draft, currentTime)
     && value.status === 'upload_pending'
+    && value.uploadToken === draft.uploadToken
+    && value.uploadStartedAt === draft.uploadStartedAt;
+}
+
+function matchesStrictPendingDraft(value, draft, currentTime) {
+  return matchesPendingPayload(value, draft, currentTime)
+    && value.status === 'upload_pending'
+    && matches(value.uploadToken, UPLOAD_TOKEN_PATTERN)
+    && Number.isSafeInteger(value.uploadStartedAt)
+    && value.uploadStartedAt <= currentTime - UPLOAD_LEASE_MS;
+}
+
+function matchesPendingPayload(value, draft, currentTime) {
+  return isPlainObject(value)
     && value.designId === draft.designId
     && value.shop === draft.shop
     && value.uploadId === draft.uploadId
     && value.productId === draft.productId
     && value.variantId === draft.variantId
     && value.size === draft.size
+    && value.modelId === draft.modelId
+    && value.modelVersion === draft.modelVersion
+    && value.uvExportVersion === draft.uvExportVersion
     && value.designFingerprint === draft.designFingerprint
+    && value.manifestSha256 === draft.manifestSha256
     && value.manifestKey === draft.manifestKey
     && value.bundleKey === draft.bundleKey
-    && Number.isSafeInteger(value.expiresAt)
+    && value.bundleFilename === draft.bundleFilename
+    && value.expiresAt === draft.expiresAt
     && value.expiresAt > currentTime;
 }
 
@@ -479,14 +555,69 @@ async function recoverDraft(repository, shop, uploadId) {
   }
 }
 
-async function cleanupKeys(assets, keys, logger) {
+async function cleanupOwnedUpload({
+  assets,
+  draft,
+  keys,
+  logger,
+  now,
+  randomUUID,
+  repository,
+}) {
+  let cleanupToken;
+  let claimed;
+  try {
+    cleanupToken = createLeaseToken(randomUUID, 'cln', CLEANUP_TOKEN_PATTERN);
+    claimed = await repository.claimOwnedUploadCleanup({
+      shop: draft.shop,
+      designId: draft.designId,
+      expiresAt: draft.expiresAt,
+      uploadToken: draft.uploadToken,
+      cleanupToken,
+      claimedAt: now,
+    });
+  } catch {
+    logCode(logger, 'PRODUCTION_DRAFT_CLEANUP_CLAIM_FAILED');
+    return false;
+  }
+  if (!matchesCleanupClaim(claimed, draft, cleanupToken, now)) {
+    logCode(logger, 'PRODUCTION_DRAFT_CLEANUP_CLAIM_INVALID');
+    return false;
+  }
   try {
     await assets.delete(keys);
-    return true;
   } catch {
     logCode(logger, 'PRODUCTION_DRAFT_CLEANUP_FAILED');
     return false;
   }
+  try {
+    const deleted = await repository.deleteClaimedDraft({
+      shop: draft.shop,
+      designId: draft.designId,
+      expiresAt: draft.expiresAt,
+      claimToken: cleanupToken,
+    });
+    if (deleted !== true) throw new Error('Claimed draft was not deleted.');
+    return true;
+  } catch {
+    logCode(logger, 'PRODUCTION_DRAFT_CLEANUP_ROW_DELETE_FAILED');
+    return false;
+  }
+}
+
+function matchesCleanupClaim(value, draft, cleanupToken, claimedAt) {
+  return isPlainObject(value)
+    && value.status === 'cleanup_pending'
+    && value.designId === draft.designId
+    && value.shop === draft.shop
+    && value.uploadId === draft.uploadId
+    && value.expiresAt === draft.expiresAt
+    && value.manifestKey === draft.manifestKey
+    && value.bundleKey === draft.bundleKey
+    && value.cleanupToken === cleanupToken
+    && value.cleanupStartedAt === claimedAt
+    && value.uploadToken === null
+    && value.uploadStartedAt === null;
 }
 
 function successResponse(draft) {

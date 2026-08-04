@@ -69,7 +69,10 @@ export function validateProductionDraftBindings(env, createRepository) {
   if (!repository
     || typeof repository.getCartDraftByUpload !== 'function'
     || typeof repository.createUploadPending !== 'function'
-    || typeof repository.finalizeCartDraft !== 'function') {
+    || typeof repository.finalizeCartDraft !== 'function'
+    || typeof repository.takeOverStaleUpload !== 'function'
+    || typeof repository.claimOwnedUploadCleanup !== 'function'
+    || typeof repository.deleteClaimedDraft !== 'function') {
     throw new ServiceError('PRODUCTION_DRAFT_REPOSITORY_INVALID');
   }
   return {

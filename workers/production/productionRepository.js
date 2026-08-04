@@ -20,6 +20,7 @@ const BUNDLE_FILENAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,100}-design-[a-f0-9]{8}\.z
 const ORDER_NAME_PATTERN = /^.{1,128}$/u;
 const ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{2,63}$/u;
 const CLEANUP_TOKEN_PATTERN = /^cln_[A-Za-z0-9_-]{16,124}$/u;
+const UPLOAD_TOKEN_PATTERN = /^upt_[A-Za-z0-9_-]{16,124}$/u;
 const LIFECYCLE_STATUSES = new Set([
   'paid_pending_production',
   'file_error',
@@ -58,21 +59,26 @@ const DRAFT_INPUT_KEYS = Object.freeze([
   'expiresAt',
   'updatedAt',
 ]);
+const UPLOAD_PENDING_INPUT_KEYS = Object.freeze([
+  ...DRAFT_INPUT_KEYS,
+  'uploadToken',
+  'uploadStartedAt',
+]);
 
 const ROW_COLUMNS = `
   design_id, shop, upload_id, bundle_id, status, product_id, variant_id, size,
   model_id, model_version, uv_export_version, design_fingerprint,
   manifest_sha256, manifest_key, bundle_key, bundle_filename, created_at,
   expires_at, paid_at, shopify_order_gid, shopify_order_name, error_code,
-  cleanup_token, cleanup_started_at, updated_at
+  upload_token, upload_started_at, cleanup_token, cleanup_started_at, updated_at
 `;
 const ROW_COLUMN_KEYS = Object.freeze([
   'design_id', 'shop', 'upload_id', 'bundle_id', 'status', 'product_id',
   'variant_id', 'size', 'model_id', 'model_version', 'uv_export_version',
   'design_fingerprint', 'manifest_sha256', 'manifest_key', 'bundle_key',
   'bundle_filename', 'created_at', 'expires_at', 'paid_at', 'shopify_order_gid',
-  'shopify_order_name', 'error_code', 'cleanup_token', 'cleanup_started_at',
-  'updated_at',
+  'shopify_order_name', 'error_code', 'upload_token', 'upload_started_at',
+  'cleanup_token', 'cleanup_started_at', 'updated_at',
 ]);
 
 export class ProductionRepositoryError extends Error {
@@ -93,9 +99,11 @@ export function createProductionRepository(db) {
   assertDatabase(db);
 
   return Object.freeze({
-    createUploadPending: (draft) => createDraftWithStatus(db, draft, 'upload_pending'),
+    createUploadPending: (draft) => createUploadPending(db, draft),
     createCartDraft: (draft) => createCartDraft(db, draft),
     finalizeCartDraft: (input) => finalizeCartDraft(db, input),
+    takeOverStaleUpload: (input) => takeOverStaleUpload(db, input),
+    claimOwnedUploadCleanup: (input) => claimOwnedUploadCleanup(db, input),
     getDesign: (shop, designId) => getDesign(db, shop, designId),
     getCartDraftByUpload: (shop, uploadId) => getCartDraftByUpload(db, shop, uploadId),
     bindCartQuote: (input) => bindCartQuote(db, input),
@@ -109,21 +117,25 @@ export function createProductionRepository(db) {
 }
 
 async function createCartDraft(db, input) {
-  return createDraftWithStatus(db, input, 'cart_draft');
+  return createDraftWithStatus(db, validateDraft(input), 'cart_draft', null);
 }
 
-async function createDraftWithStatus(db, input, status) {
-  const draft = validateDraft(input);
+async function createUploadPending(db, input) {
+  const pending = validateUploadPending(input);
+  return createDraftWithStatus(db, pending, 'upload_pending', pending);
+}
+
+async function createDraftWithStatus(db, draft, status, uploadLease) {
   const insert = prepareBound(db, `
     INSERT OR IGNORE INTO production_designs (
       design_id, shop, upload_id, bundle_id, status, product_id, variant_id,
       size, model_id, model_version, uv_export_version, design_fingerprint,
       manifest_sha256, manifest_key, bundle_key, bundle_filename, created_at,
       expires_at, paid_at, shopify_order_gid, shopify_order_name, error_code,
-      cleanup_token, cleanup_started_at, updated_at
+      upload_token, upload_started_at, cleanup_token, cleanup_started_at, updated_at
     ) VALUES (
       ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      NULL, NULL, NULL, NULL, NULL, NULL, ?
+      NULL, NULL, NULL, NULL, ?, ?, NULL, NULL, ?
     )
   `, [
     draft.designId,
@@ -143,6 +155,8 @@ async function createDraftWithStatus(db, input, status) {
     draft.bundleFilename,
     draft.createdAt,
     draft.expiresAt,
+    uploadLease?.uploadToken ?? null,
+    uploadLease?.uploadStartedAt ?? null,
     draft.updatedAt,
   ]);
   const select = prepareBound(db, `
@@ -159,18 +173,22 @@ async function createDraftWithStatus(db, input, status) {
 }
 
 async function finalizeCartDraft(db, input) {
-  const value = readExactDataProperties(input, ['shop', 'designId', 'uploadId', 'updatedAt']);
+  const value = readExactDataProperties(input, [
+    'shop', 'designId', 'uploadId', 'uploadToken', 'updatedAt',
+  ]);
   if (!value) throw invalidInput();
   const shop = requirePattern(value.shop, SHOP_PATTERN);
   const designId = requirePattern(value.designId, DESIGN_ID_PATTERN);
   const uploadId = requirePattern(value.uploadId, UPLOAD_ID_PATTERN);
+  const uploadToken = requirePattern(value.uploadToken, UPLOAD_TOKEN_PATTERN);
   const updatedAt = requireTimestamp(value.updatedAt);
   const update = prepareBound(db, `
     UPDATE production_designs
-    SET status = 'cart_draft', updated_at = ?
+    SET status = 'cart_draft', upload_token = NULL, upload_started_at = NULL,
+      updated_at = ?
     WHERE shop = ? AND design_id = ? AND upload_id = ?
-      AND status = 'upload_pending'
-  `, [updatedAt, shop, designId, uploadId]);
+      AND status = 'upload_pending' AND upload_token = ?
+  `, [updatedAt, shop, designId, uploadId, uploadToken]);
   const select = prepareBound(db, `
     SELECT ${ROW_COLUMNS}
     FROM production_designs
@@ -178,10 +196,100 @@ async function finalizeCartDraft(db, input) {
     LIMIT 1
   `, [shop, uploadId]);
   const results = await executeBatch(db, [update, select]);
+  if (!batchChangedExactlyOneRow(results, 0)) {
+    throw new ProductionRepositoryError('production-repository-conflict');
+  }
   const row = firstBatchRow(results, 1);
   if (!row) throw new ProductionRepositoryError('production-repository-conflict');
   const normalized = normalizeRow(row);
   if (normalized.designId !== designId || normalized.status !== 'cart_draft') {
+    throw new ProductionRepositoryError('production-repository-conflict');
+  }
+  return normalized;
+}
+
+async function takeOverStaleUpload(db, input) {
+  const value = readExactDataProperties(input, [
+    'shop', 'designId', 'uploadId', 'previousUploadToken', 'newUploadToken',
+    'startedAt', 'staleBefore',
+  ]);
+  if (!value) throw invalidInput();
+  const shop = requirePattern(value.shop, SHOP_PATTERN);
+  const designId = requirePattern(value.designId, DESIGN_ID_PATTERN);
+  const uploadId = requirePattern(value.uploadId, UPLOAD_ID_PATTERN);
+  const previousUploadToken = requirePattern(value.previousUploadToken, UPLOAD_TOKEN_PATTERN);
+  const newUploadToken = requirePattern(value.newUploadToken, UPLOAD_TOKEN_PATTERN);
+  const startedAt = requireTimestamp(value.startedAt);
+  const staleBefore = requireTimestamp(value.staleBefore);
+  if (staleBefore >= startedAt || previousUploadToken === newUploadToken) throw invalidInput();
+
+  const update = prepareBound(db, `
+    UPDATE production_designs
+    SET upload_token = ?, upload_started_at = ?, updated_at = ?
+    WHERE shop = ? AND design_id = ? AND upload_id = ?
+      AND status = 'upload_pending' AND upload_token = ?
+      AND upload_started_at <= ?
+  `, [
+    newUploadToken, startedAt, startedAt, shop, designId, uploadId,
+    previousUploadToken, staleBefore,
+  ]);
+  const select = prepareBound(db, `
+    SELECT ${ROW_COLUMNS}
+    FROM production_designs
+    WHERE shop = ? AND upload_id = ?
+    LIMIT 1
+  `, [shop, uploadId]);
+  const results = await executeBatch(db, [update, select]);
+  if (!batchChangedExactlyOneRow(results, 0)) {
+    throw new ProductionRepositoryError('production-repository-conflict');
+  }
+  const row = firstBatchRow(results, 1);
+  if (!row) throw new ProductionRepositoryError('production-repository-conflict');
+  const normalized = normalizeRow(row);
+  if (normalized.designId !== designId
+    || normalized.status !== 'upload_pending'
+    || normalized.uploadToken !== newUploadToken
+    || normalized.uploadStartedAt !== startedAt) {
+    throw new ProductionRepositoryError('production-repository-conflict');
+  }
+  return normalized;
+}
+
+async function claimOwnedUploadCleanup(db, input) {
+  const value = readExactDataProperties(input, [
+    'shop', 'designId', 'expiresAt', 'uploadToken', 'cleanupToken', 'claimedAt',
+  ]);
+  if (!value) throw invalidInput();
+  const shop = requirePattern(value.shop, SHOP_PATTERN);
+  const designId = requirePattern(value.designId, DESIGN_ID_PATTERN);
+  const expiresAt = requireTimestamp(value.expiresAt);
+  const uploadToken = requirePattern(value.uploadToken, UPLOAD_TOKEN_PATTERN);
+  const cleanupToken = requirePattern(value.cleanupToken, CLEANUP_TOKEN_PATTERN);
+  const claimedAt = requireTimestamp(value.claimedAt);
+  const claim = prepareBound(db, `
+    UPDATE production_designs
+    SET status = 'cleanup_pending', upload_token = NULL, upload_started_at = NULL,
+      cleanup_token = ?, cleanup_started_at = ?, updated_at = ?
+    WHERE shop = ? AND design_id = ? AND expires_at = ?
+      AND status = 'upload_pending' AND upload_token = ?
+  `, [cleanupToken, claimedAt, claimedAt, shop, designId, expiresAt, uploadToken]);
+  const select = prepareBound(db, `
+    SELECT ${ROW_COLUMNS}
+    FROM production_designs
+    WHERE shop = ? AND design_id = ?
+    LIMIT 1
+  `, [shop, designId]);
+  const results = await executeBatch(db, [claim, select]);
+  if (!batchChangedExactlyOneRow(results, 0)) {
+    throw new ProductionRepositoryError('production-repository-conflict');
+  }
+  const row = firstBatchRow(results, 1);
+  if (!row) throw new ProductionRepositoryError('production-repository-conflict');
+  const normalized = normalizeRow(row);
+  if (normalized.status !== 'cleanup_pending'
+    || normalized.expiresAt !== expiresAt
+    || normalized.cleanupToken !== cleanupToken
+    || normalized.cleanupStartedAt !== claimedAt) {
     throw new ProductionRepositoryError('production-repository-conflict');
   }
   return normalized;
@@ -348,7 +456,8 @@ async function claimExpiredDraft(db, input) {
 
   const claim = prepareBound(db, `
     UPDATE production_designs
-    SET status = 'cleanup_pending', cleanup_token = ?, cleanup_started_at = ?, updated_at = ?
+    SET status = 'cleanup_pending', upload_token = NULL, upload_started_at = NULL,
+      cleanup_token = ?, cleanup_started_at = ?, updated_at = ?
     WHERE shop = ? AND design_id = ? AND expires_at = ?
       AND (
         (status IN ('upload_pending', 'cart_draft') AND expires_at < ?)
@@ -460,6 +569,19 @@ function validateDraft(input) {
   return Object.freeze(value);
 }
 
+function validateUploadPending(input) {
+  const value = readExactDataProperties(input, UPLOAD_PENDING_INPUT_KEYS);
+  if (!value) throw invalidInput();
+  const draft = validateDraft(Object.fromEntries(
+    DRAFT_INPUT_KEYS.map((key) => [key, value[key]]),
+  ));
+  return Object.freeze({
+    ...draft,
+    uploadToken: requirePattern(value.uploadToken, UPLOAD_TOKEN_PATTERN),
+    uploadStartedAt: requireTimestamp(value.uploadStartedAt),
+  });
+}
+
 function validateDelivery(input) {
   const value = readExactDataProperties(input, [
     'webhookId', 'eventId', 'shop', 'topic', 'orderGid', 'receivedAt',
@@ -510,6 +632,8 @@ function normalizeRow(row) {
       shopifyOrderGid: requireNullablePattern(value.shopify_order_gid, ORDER_GID_PATTERN),
       shopifyOrderName: requireNullablePattern(value.shopify_order_name, ORDER_NAME_PATTERN),
       errorCode: requireNullablePattern(value.error_code, ERROR_CODE_PATTERN),
+      uploadToken: requireNullablePattern(value.upload_token, UPLOAD_TOKEN_PATTERN),
+      uploadStartedAt: requireNullableTimestamp(value.upload_started_at),
       cleanupToken: requireNullablePattern(value.cleanup_token, CLEANUP_TOKEN_PATTERN),
       cleanupStartedAt: requireNullableTimestamp(value.cleanup_started_at),
       updatedAt: requireTimestamp(value.updated_at),
@@ -518,9 +642,20 @@ function normalizeRow(row) {
       normalized.expiresAt <= normalized.createdAt
       || normalized.updatedAt < normalized.createdAt
       || normalized.manifestKey === normalized.bundleKey
-      || (normalized.status === 'cleanup_pending'
-        ? normalized.cleanupToken === null || normalized.cleanupStartedAt === null
-        : normalized.cleanupToken !== null || normalized.cleanupStartedAt !== null)
+      || (normalized.status === 'upload_pending'
+        ? normalized.uploadToken === null
+          || normalized.uploadStartedAt === null
+          || normalized.cleanupToken !== null
+          || normalized.cleanupStartedAt !== null
+        : normalized.status === 'cleanup_pending'
+          ? normalized.uploadToken !== null
+            || normalized.uploadStartedAt !== null
+            || normalized.cleanupToken === null
+            || normalized.cleanupStartedAt === null
+          : normalized.uploadToken !== null
+            || normalized.uploadStartedAt !== null
+            || normalized.cleanupToken !== null
+            || normalized.cleanupStartedAt !== null)
     ) throw invalidInput();
     return Object.freeze(normalized);
   } catch {
@@ -619,6 +754,14 @@ async function executeRun(statement) {
 function firstBatchRow(results, index) {
   const rows = results[index]?.results;
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
+
+function batchChangedExactlyOneRow(results, index) {
+  const entry = safeOwnPropertyDescriptors(results[index]);
+  const meta = entry?.meta?.value;
+  const metaDescriptors = safeOwnPropertyDescriptors(meta);
+  const changes = metaDescriptors?.changes;
+  return Boolean(changes && Object.hasOwn(changes, 'value') && changes.value === 1);
 }
 
 function isValidD1Result(value) {

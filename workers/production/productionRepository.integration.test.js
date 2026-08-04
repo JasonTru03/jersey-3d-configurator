@@ -32,6 +32,34 @@ describe('production repository against node:sqlite', () => {
     });
   });
 
+  it('keeps the first quote bundle and issued timestamp across a real SQLite bind race', async () => {
+    await withDatabase(async (db) => {
+      const repository = createProductionRepository(createD1Adapter(db));
+      await repository.createCartDraft(draft(0));
+      const first = await repository.bindCartQuote({
+        shop: SHOP,
+        designId: indexedDesignId(0),
+        bundleId: 'bun_1111111111111111',
+        updatedAt: 1_700_000_000_100,
+      });
+      const raced = await repository.bindCartQuote({
+        shop: SHOP,
+        designId: indexedDesignId(0),
+        bundleId: 'bun_2222222222222222',
+        updatedAt: 1_700_000_000_200,
+      });
+
+      expect(first).toMatchObject({
+        bundleId: 'bun_1111111111111111',
+        updatedAt: 1_700_000_000_100,
+      });
+      expect(raced).toMatchObject({
+        bundleId: first.bundleId,
+        updatedAt: first.updatedAt,
+      });
+    });
+  });
+
   it.each([2, 250])('atomically records %i paid designs from the real migration', async (count) => {
     await withDatabase(async (db) => {
       const repository = createProductionRepository(createD1Adapter(db));

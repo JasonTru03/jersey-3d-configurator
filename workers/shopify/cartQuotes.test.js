@@ -1,29 +1,33 @@
-import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { describe, expect, it, vi } from 'vitest';
 import { jerseyProduct } from '../../src/features/configurator/config/productDefinitions.js';
 import { createDecoration } from '../../src/features/configurator/config/decorations.js';
+import { createDesignFingerprint } from '../../src/features/configurator/designs/productionFingerprint.js';
 import { verifyQuoteContract } from './quoteContract.js';
 import {
   CART_QUOTE_TTL_SECONDS,
   DESIGN_RECORD_TTL_SECONDS,
+  MAX_CART_QUOTE_BODY_BYTES,
   createCartQuotesHandler,
   toMinorUnits,
 } from './cartQuotes.js';
 
 const SHOP = 'fixture-store.myshopify.com';
+const OTHER_SHOP = 'other-store.myshopify.com';
 const SECRET = '0123456789abcdef0123456789abcdef';
 const NOW = Date.UTC(2026, 6, 27, 4, 0, 0);
+const DESIGN_ID = 'dsg_12345678-1234-4123-8123-1234567890ab';
+const BUNDLE_ID = 'bun_1234567890abcdef';
+const MODEL = Object.freeze({ id: 'chelsea-jersey', version: '1', uvExportVersion: '2' });
 const jerseyVariants = { s: '1001', m: '1002', l: '1003', xl: '1004' };
 
 function state(overrides = {}) {
-  return {
-    ...structuredClone(jerseyProduct.defaultState),
-    ...overrides,
-  };
+  return { ...structuredClone(jerseyProduct.defaultState), ...overrides };
 }
 
 function storeConfig(overrides = {}) {
   return {
+    productId: jerseyProduct.id,
     currency: 'USD',
     jerseyVariants,
     surchargeVariants: { 60: '2060', 20: '2020', 12: '2012', 8: '2008', 4: '2004' },
@@ -31,26 +35,175 @@ function storeConfig(overrides = {}) {
   };
 }
 
-function runtime(overrides = {}) {
+async function fixture(overrides = {}) {
+  const designState = overrides.state ?? state();
+  const variantId = overrides.variantId ?? jerseyVariants[designState.layout];
+  const fingerprint = await createDesignFingerprint({
+    model: MODEL,
+    productId: jerseyProduct.id,
+    size: designState.layout,
+    state: designState,
+    variantId,
+  });
+  const atlasSha256 = 'b'.repeat(64);
+  const manifest = {
+    schemaVersion: 2,
+    designFingerprint: fingerprint,
+    productId: jerseyProduct.id,
+    variantId,
+    size: designState.layout,
+    model: { id: MODEL.id, version: MODEL.version },
+    uvExportVersion: MODEL.uvExportVersion,
+    atlas: { colorSpace: 'sRGB', height: 4096, width: 4096 },
+    patternPieces: { fixture: true },
+    generatedAt: '2026-07-27T04:00:00.000Z',
+    files: [
+      ['design.json', 'application/json', 111, 'a'],
+      ['uv-atlas.png', 'image/png', 222, 'b'],
+      ['uv-pattern-pieces.png', 'image/png', 333, 'c'],
+      ['uv-reference.pdf', 'application/pdf', 444, 'd'],
+      ['preview-front.png', 'image/png', 555, 'e'],
+      ['preview-back.png', 'image/png', 666, 'f'],
+    ].map(([name, mediaType, byteLength, hash]) => ({
+      name, mediaType, byteLength, sha256: hash.repeat(64),
+    })),
+  };
+  const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
+  const manifestSha256 = await sha256Hex(manifestBytes);
+  const bundleSha256 = '9'.repeat(64);
+  const bundleFilename = `${jerseyProduct.id}-design-${fingerprint}.zip`;
+  const manifestKey = `shops/shop_fixture/designs/${DESIGN_ID}/manifest.json`;
+  const bundleKey = `shops/shop_fixture/designs/${DESIGN_ID}/${bundleFilename}`;
+  const draft = {
+    designId: DESIGN_ID,
+    shop: SHOP,
+    uploadId: 'upl_1234567890abcdef',
+    bundleId: null,
+    status: 'cart_draft',
+    productId: jerseyProduct.id,
+    variantId,
+    size: designState.layout,
+    modelId: MODEL.id,
+    modelVersion: MODEL.version,
+    uvExportVersion: MODEL.uvExportVersion,
+    designFingerprint: fingerprint,
+    manifestSha256,
+    manifestKey,
+    bundleKey,
+    bundleFilename,
+    createdAt: NOW - 60_000,
+    expiresAt: NOW + 30 * 24 * 60 * 60 * 1000,
+    paidAt: null,
+    shopifyOrderGid: null,
+    shopifyOrderName: null,
+    errorCode: null,
+    cleanupToken: null,
+    cleanupStartedAt: null,
+    uploadToken: null,
+    updatedAt: NOW - 60_000,
+    ...overrides.draft,
+  };
+  const common = {
+    designFingerprint: fingerprint,
+    productId: jerseyProduct.id,
+    variantId,
+    size: designState.layout,
+  };
+  const manifestHead = r2Head({
+    key: manifestKey,
+    size: manifestBytes.byteLength,
+    contentType: 'application/json',
+    customMetadata: { ...common, sha256: manifestSha256 },
+  });
+  const bundleHead = r2Head({
+    key: bundleKey,
+    size: 4096,
+    contentType: 'application/zip',
+    customMetadata: {
+      ...common,
+      contentLength: '4096',
+      sha256: bundleSha256,
+    },
+    sha256: bundleSha256,
+  });
+  const objects = new Map([
+    [manifestKey, { head: manifestHead, bytes: manifestBytes }],
+    [bundleKey, { head: bundleHead, bytes: new Uint8Array(4096) }],
+  ]);
+  return { atlasSha256, bundleSha256, designState, draft, manifest, manifestBytes, objects };
+}
+
+function r2Head({ key, size, contentType, customMetadata, sha256 }) {
+  return {
+    key,
+    size,
+    httpMetadata: { contentType },
+    customMetadata,
+    checksums: sha256 ? { sha256: hexToArrayBuffer(sha256) } : {},
+  };
+}
+
+function runtime(current, overrides = {}) {
   const records = new Map();
-  const limits = new Map();
+  const events = [];
+  let authoritative = structuredClone(current.draft);
+  const repository = {
+    getDesign: vi.fn(async (shop, designId) => (
+      shop === authoritative.shop && designId === authoritative.designId
+        ? structuredClone(authoritative)
+        : null
+    )),
+    bindCartQuote: vi.fn(async ({ shop, designId, bundleId, updatedAt }) => {
+      events.push('bind');
+      if (shop !== authoritative.shop || designId !== authoritative.designId) throw new Error('conflict');
+      if (authoritative.bundleId === null) {
+        authoritative = { ...authoritative, bundleId, updatedAt };
+      }
+      return structuredClone(authoritative);
+    }),
+  };
+  const assets = {
+    head: vi.fn(async (key) => current.objects.get(key)?.head ?? null),
+    get: vi.fn(async (key) => {
+      const object = current.objects.get(key);
+      if (!object) return null;
+      return {
+        ...object.head,
+        arrayBuffer: vi.fn(async () => object.bytes.slice().buffer),
+      };
+    }),
+  };
   const env = {
     DESIGN_QUOTES: {
-      put: vi.fn(async (key, value, options) => records.set(key, { value, options })),
-    },
-    CART_QUOTE_RATE_LIMIT: {
-      limit: vi.fn(async ({ key }) => {
-        const count = limits.get(key) ?? 0;
-        if (count >= 10) return { success: false };
-        limits.set(key, count + 1);
-        return { success: true };
+      put: vi.fn(async (key, value, options) => {
+        events.push('kv');
+        records.set(key, { value, options });
       }),
     },
+    PRODUCTION_ASSETS: assets,
+    PRODUCTION_DB: { prepare: vi.fn(), batch: vi.fn() },
+    CART_QUOTE_RATE_LIMIT: { limit: vi.fn(async () => ({ success: true })) },
     CART_QUOTE_SIGNING_SECRET: SECRET,
     SHOPIFY_STORE_CONFIG_JSON: JSON.stringify({ [SHOP]: storeConfig() }),
-    ...overrides,
+    ...overrides.env,
   };
-  return { env, records, limits };
+  Object.assign(repository, overrides.repository);
+  Object.assign(assets, overrides.assets);
+  const dependencies = {
+    createProductionRepository: vi.fn(() => repository),
+    now: () => NOW,
+    randomBytes: () => new Uint8Array(24).fill(7),
+    ...overrides.dependencies,
+  };
+  return {
+    assets,
+    dependencies,
+    env,
+    events,
+    getAuthoritative: () => authoritative,
+    records,
+    repository,
+  };
 }
 
 function post(body, init = {}) {
@@ -65,17 +218,12 @@ function post(body, init = {}) {
   });
 }
 
-function validBody(overrides = {}) {
-  return { shop: SHOP, state: state(), productionFiles: null, ...overrides };
-}
-
-async function json(response) {
-  return response.json();
+function validBody(current, overrides = {}) {
+  return { shop: SHOP, designId: DESIGN_ID, state: current.designState, ...overrides };
 }
 
 describe('createCartQuotesHandler', () => {
-  it('re-prices a complex design, persists it, then returns a signed same-shop handoff URL', async () => {
-    const { env, records } = runtime();
+  it('re-prices one authoritative cloud draft, verifies private files, binds D1, then stores a signed quote', async () => {
     const complexState = state({
       layout: 'xl',
       material: 'player',
@@ -83,372 +231,335 @@ describe('createCartQuotesHandler', () => {
       extras: { sleeveBadge: true, giftBox: false, matchPatch: true },
       overrides: {
         ...state().overrides,
-        customTextItems: [{ text: 'CAPTAIN' }, { text: '  ' }],
-        bottomPattern: { enabled: true },
-        decorations: [
-          createDecoration({
-            id: 'crest-1', kind: 'preset', source: 'crest-badge', label: 'Crest Badge', region: 'front',
-          }),
-          createDecoration({
-            id: 'upload-1', kind: 'upload', source: 'data:image/png;base64,SECRET', label: 'custom-logo.png', region: 'front',
-          }),
-        ],
+        customTextItems: [{ text: 'CAPTAIN' }],
+        decorations: [createDecoration({
+          id: 'crest-1', kind: 'preset', source: 'crest-badge', label: 'Crest Badge', region: 'front',
+        })],
       },
     });
-    const bytes = [new Uint8Array(24).fill(1), new Uint8Array(24).fill(2)];
-    const handler = createCartQuotesHandler(env, {
-      now: () => NOW,
-      randomBytes: () => bytes.shift(),
-    });
-
-    const response = await handler(post(validBody({
-      shop: SHOP.toUpperCase(),
-      state: complexState,
-      productionFiles: {
-        bundleFilename: 'fn8788-jersey-production.zip',
-        designFilename: 'fn8788-jersey-design.json',
-        atlasFilename: 'fn8788-jersey-uv-atlas.png',
-        atlasSha256: `sha256:${'a'.repeat(64)}`,
-      },
-    })));
-    const payload = await json(response);
+    const current = await fixture({ state: complexState });
+    const app = runtime(current);
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    const payload = await response.json();
 
     expect(response.status).toBe(201);
     expect(payload).toMatchObject({
-      bundleId: expect.stringMatching(/^bun_[A-Za-z0-9_-]{32}$/),
-      designId: expect.stringMatching(/^dsg_[A-Za-z0-9_-]{32}$/),
+      designId: DESIGN_ID,
+      bundleId: expect.stringMatching(/^bun_[A-Za-z0-9_-]{32}$/u),
       expiresAt: NOW + CART_QUOTE_TTL_SECONDS * 1000,
     });
-    expect(Object.keys(payload).sort()).toEqual(['bundleId', 'designId', 'expiresAt', 'handoffUrl']);
-    const url = new URL(payload.handoffUrl);
-    expect(url.origin).toBe(`https://${SHOP}`);
-    expect(url.pathname).toBe('/apps/jersey-configurator/cart-handoff');
-
-    const stored = records.get(payload.designId);
+    expect(app.assets.head.mock.calls.map(([key]) => key)).toEqual([
+      current.draft.manifestKey,
+      current.draft.bundleKey,
+    ]);
+    expect(app.assets.get).toHaveBeenCalledWith(current.draft.manifestKey);
+    expect(app.events).toEqual(['bind', 'kv']);
+    const stored = app.records.get(DESIGN_ID);
     expect(stored.options).toEqual({ expirationTtl: DESIGN_RECORD_TTL_SECONDS });
     const record = JSON.parse(stored.value);
     expect(record).toMatchObject({
-      version: 1,
-      designId: payload.designId,
+      designId: DESIGN_ID,
       bundleId: payload.bundleId,
       shop: SHOP,
       issuedAt: NOW,
       expiresAt: NOW + CART_QUOTE_TTL_SECONDS * 1000,
-      components: [
-        { role: 'base', variantId: '1004', quantity: 1 },
-        { role: 'surcharge', variantId: '2060', quantity: 1 },
-        { role: 'surcharge', variantId: '2012', quantity: 1 },
-      ],
-      quote: { total: 165, currency: 'USD' },
-      normalizedState: { layout: 'xl', material: 'player' },
       productionFiles: {
-        bundleFilename: 'fn8788-jersey-production.zip',
-        designFilename: 'fn8788-jersey-design.json',
-        atlasFilename: 'fn8788-jersey-uv-atlas.png',
+        bundleFilename: current.draft.bundleFilename,
+        designFilename: 'design.json',
+        atlasFilename: 'uv-atlas.png',
+        atlasSha256: `sha256:${current.atlasSha256}`,
+      },
+      summary: {
+        'Production Files': 'Cloud package ready',
+        'Bundle File': current.draft.bundleFilename,
+        'Design File': 'design.json',
+        'Atlas File': 'uv-atlas.png',
+        'UV Atlas SHA-256': `sha256:${current.atlasSha256}`,
       },
     });
-    expect(Object.keys(record.quote)).toEqual(['total', 'currency']);
-    expect(record.summary).toMatchObject({
-      Size: 'xl',
-      Template: 'solid',
-      Colors: expect.any(String),
-      Print: 'PLAYER #16',
-      'Custom Text': 'CAPTAIN',
-      Extras: 'sleeveBadge, matchPatch',
-      Artwork: 'Crest Badge, custom-logo.png',
-      'Production Files': 'Local ZIP download',
-      'Bundle File': 'fn8788-jersey-production.zip',
-      'Design File': 'fn8788-jersey-design.json',
-      'Atlas File': 'fn8788-jersey-uv-atlas.png',
-      'UV Atlas SHA-256': `sha256:${'a'.repeat(64)}`,
-    });
-    expect(stored.value).not.toContain('data:image');
-    expect(record.shopFingerprint).toMatch(/^shop_[A-Za-z0-9_-]{12}$/);
-    await expect(verifyQuoteContract(url.searchParams.get('token'), record.components, SECRET, {
+    expect(stored.value).not.toContain(current.draft.manifestKey);
+    expect(stored.value).not.toContain(current.draft.bundleKey);
+    const token = new URL(payload.handoffUrl).searchParams.get('token');
+    await expect(verifyQuoteContract(token, record.components, SECRET, {
       expectedShopFingerprint: record.shopFingerprint,
       now: NOW,
-    })).resolves.toMatchObject({ totalMinor: 16500, currency: 'USD' });
+    })).resolves.toMatchObject({ designId: DESIGN_ID, bundleId: payload.bundleId });
   });
 
-  it('does not resolve a successful response before durable storage completes', async () => {
-    let release;
-    const pendingPut = new Promise((resolve) => { release = resolve; });
-    const { env } = runtime({ DESIGN_QUOTES: { put: vi.fn(() => pendingPut) } });
-    const handler = createCartQuotesHandler(env, {
-      now: () => NOW,
-      randomBytes: () => new Uint8Array(24).fill(3),
-    });
-    let settled = false;
-    const responsePromise = handler(post(validBody())).then((response) => {
-      settled = true;
-      return response;
-    });
-
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    release();
-    expect((await responsePromise).status).toBe(201);
-  });
-
-  it('rejects browser quote/total fields and never stores raw request or secrets', async () => {
-    for (const extra of [{ quote: { total: 1 } }, { total: 1 }]) {
-      const { env } = runtime();
-      const response = await createCartQuotesHandler(env)(post({ ...validBody(), ...extra }));
+  it('accepts exactly shop, designId and state and rejects caller filenames, hashes, totals or extra fields before D1', async () => {
+    const current = await fixture();
+    for (const extra of [
+      { productionFiles: null },
+      { bundleFilename: current.draft.bundleFilename },
+      { atlasSha256: `sha256:${current.atlasSha256}` },
+      { quote: { total: 1 } },
+      { total: 1 },
+    ]) {
+      const app = runtime(current);
+      const response = await createCartQuotesHandler(app.env, app.dependencies)(
+        post({ ...validBody(current), ...extra }),
+      );
       expect(response.status).toBe(400);
-      expect(env.DESIGN_QUOTES.put).not.toHaveBeenCalled();
+      expect(app.repository.getDesign).not.toHaveBeenCalled();
+      expect(app.env.DESIGN_QUOTES.put).not.toHaveBeenCalled();
     }
-
-    const { env, records } = runtime();
-    const response = await createCartQuotesHandler(env, {
-      now: () => NOW,
-      randomBytes: () => new Uint8Array(24).fill(4),
-    })(post(validBody()));
-    const payload = await json(response);
-    const serialized = records.get(payload.designId).value;
-    expect(serialized).not.toContain(SECRET);
-    expect(serialized).not.toContain('CF-Connecting-IP');
-    expect(JSON.parse(serialized)).not.toHaveProperty('rawRequest');
   });
 
-  it('maps malformed input to 400 and store configuration gaps to 503', async () => {
-    const cases = [
-      [validBody({ shop: 'https://fixture-store.myshopify.com' }), 400],
-      [validBody({ shop: 'unknown.myshopify.com' }), 503],
-      [validBody({ state: state({ material: 'unknown-billable-option' }) }), 400],
-    ];
-    for (const [body, status] of cases) {
-      const { env } = runtime();
-      expect((await createCartQuotesHandler(env)(post(body))).status).toBe(status);
-    }
+  it.each([
+    ['missing draft', null],
+    ['upload pending', { status: 'upload_pending' }],
+    ['cleanup pending', { status: 'cleanup_pending' }],
+    ['paid', { status: 'paid_pending_production', bundleId: BUNDLE_ID }],
+    ['expired', { expiresAt: NOW }],
+  ])('rejects an unavailable %s without reading R2 or writing KV', async (_label, draftOverride) => {
+    const current = await fixture({ draft: draftOverride ?? {} });
+    const app = runtime(current, draftOverride === null ? {
+      repository: { getDesign: vi.fn(async () => null) },
+    } : {});
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    expect(response.status).toBe(400);
+    expect(app.assets.head).not.toHaveBeenCalled();
+    expect(app.env.DESIGN_QUOTES.put).not.toHaveBeenCalled();
+  });
 
-    const { env } = runtime({
-      SHOPIFY_STORE_CONFIG_JSON: JSON.stringify({
-        [SHOP]: storeConfig({ surchargeVariants: { 10: '2010' } }),
-      }),
-    });
-    const response = await createCartQuotesHandler(env)(post(validBody({
-      state: state({ lighting: 'name-number' }),
+  it('scopes the lookup to the normalized shop and does not expose another shop draft', async () => {
+    const current = await fixture();
+    const app = runtime(current);
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current, {
+      shop: OTHER_SHOP,
     })));
     expect(response.status).toBe(503);
+    expect(app.repository.getDesign).not.toHaveBeenCalled();
   });
 
-  it('rate-limits before reading the body and before parsing store configuration', async () => {
-    let pulls = 0;
-    const stream = new ReadableStream({
-      pull(controller) {
-        pulls += 1;
-        controller.enqueue(new TextEncoder().encode(JSON.stringify(validBody())));
-        controller.close();
-      },
-    }, { highWaterMark: 0 });
-    const { env } = runtime({
-      CART_QUOTE_RATE_LIMIT: { limit: vi.fn(async () => ({ success: false })) },
-      SHOPIFY_STORE_CONFIG_JSON: '{broken',
-    });
-    const request = {
-      method: 'POST',
-      headers: new Headers({
-        'content-type': 'application/json',
-        'CF-Connecting-IP': '203.0.113.42',
-      }),
-      body: stream,
-    };
-
-    expect((await createCartQuotesHandler(env)(request)).status).toBe(429);
-    expect(pulls).toBe(0);
-  });
-
-  it('applies the atomic binding decision to repeated unknown-shop requests', async () => {
-    const { env } = runtime();
-    const handler = createCartQuotesHandler(env, { now: () => NOW });
-    const statuses = [];
-    for (let index = 0; index < 11; index += 1) {
-      statuses.push((await handler(post(validBody({ shop: 'unknown.myshopify.com' })))).status);
-    }
-    expect(statuses).toEqual([...Array(10).fill(503), 429]);
-    expect(env.CART_QUOTE_RATE_LIMIT.limit).toHaveBeenCalledTimes(11);
-  });
-
-  it('maps malformed fulfillment summary fields to 400 without storing a record', async () => {
-    const { env } = runtime();
-    const invalid = state({
-      overrides: {
-        ...state().overrides,
-        appearance: { template: 'forged-template', colors: {} },
+  it('compares the draft against normalized trusted store variant IDs', async () => {
+    const current = await fixture();
+    const numericVariants = { ...jerseyVariants, m: 1002 };
+    const app = runtime(current, {
+      env: {
+        SHOPIFY_STORE_CONFIG_JSON: JSON.stringify({
+          [SHOP]: storeConfig({ jerseyVariants: numericVariants }),
+        }),
       },
     });
-    const response = await createCartQuotesHandler(env)(post(validBody({ state: invalid })));
-    expect(response.status).toBe(400);
-    expect(env.DESIGN_QUOTES.put).not.toHaveBeenCalled();
+    expect((await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)))).status)
+      .toBe(201);
   });
 
-  it('enforces method, media type, JSON syntax, object shape, and body byte limits', async () => {
-    const { env } = runtime();
-    const handler = createCartQuotesHandler(env);
-    const getResponse = await handler(new Request('https://worker.example/api/cart-quotes'));
-    expect(getResponse.status).toBe(405);
-    expect(getResponse.headers.get('allow')).toBe('POST');
-    expect(env.CART_QUOTE_RATE_LIMIT.limit).not.toHaveBeenCalled();
-    expect((await handler(post(validBody(), { headers: { 'content-type': 'text/plain' } }))).status).toBe(400);
-    expect((await handler(post('{broken'))).status).toBe(400);
-    expect((await handler(post('[]'))).status).toBe(400);
-    expect((await handler(post(validBody(), { headers: { 'content-length': '256001' } }))).status).toBe(400);
-    expect((await handler(post(validBody(), { headers: { 'content-length': 'garbage' } }))).status).toBe(400);
-    expect((await handler(post(' '.repeat(256001), { headers: { 'content-length': '1' } }))).status).toBe(400);
-  });
-
-  it('accepts an absent Content-Length and exactly 256000 UTF-8 bytes', async () => {
-    const { env } = runtime();
-    const base = JSON.stringify(validBody());
-    const paddingLength = 256000 - new TextEncoder().encode(base).length;
-    const paddedState = validBody();
-    paddedState.state.padding = 'x'.repeat(paddingLength - 13);
-    const serialized = JSON.stringify(paddedState);
-    expect(new TextEncoder().encode(serialized)).toHaveLength(256000);
-    const request = post(serialized);
-    request.headers.delete('content-length');
-    expect((await createCartQuotesHandler(env)(request)).status).toBe(201);
-  });
-
-  it('validates nullable production file references exactly', async () => {
-    const valid = {
-      bundleFilename: 'fn8788-jersey-production.zip',
-      designFilename: 'fn8788-jersey-design.json',
-      atlasFilename: 'fn8788-jersey-uv-atlas.png',
-      atlasSha256: `sha256:${'F'.repeat(64)}`,
-    };
-    for (const productionFiles of [null, valid]) {
-      const { env } = runtime();
-      expect((await createCartQuotesHandler(env)(post(validBody({ productionFiles })))).status).toBe(201);
-    }
-    for (const productionFiles of [
-      { ...valid, bundleFilename: '../bundle.zip' },
-      { ...valid, designFilename: 'dir/design.json' },
-      { ...valid, atlasFilename: '..\\atlas.png' },
-      { ...valid, extra: 'field' },
-      { ...valid, bundleFilename: 'wrong-production.zip' },
-      { ...valid, designFilename: 'fn8788-jersey-design.txt' },
-      { ...valid, atlasFilename: 'fn8788-jersey-atlas.png' },
-      { ...valid, atlasSha256: 'sha256:abc123' },
-    ]) {
-      const { env } = runtime();
-      expect((await createCartQuotesHandler(env)(post(validBody({ productionFiles })))).status).toBe(400);
-    }
-
-    const { env, records } = runtime();
-    const response = await createCartQuotesHandler(env, {
-      now: () => NOW,
-      randomBytes: () => new Uint8Array(24).fill(7),
-    })(post(validBody({ productionFiles: valid })));
-    const payload = await json(response);
-    expect(JSON.parse(records.get(payload.designId).value).productionFiles.atlasSha256)
-      .toBe(`sha256:${'f'.repeat(64)}`);
-  });
-
-  it('uses one external 503 message and logs only stable internal error codes', async () => {
-    const logger = { error: vi.fn() };
-    for (const missing of [
-      'DESIGN_QUOTES',
-      'CART_QUOTE_RATE_LIMIT',
-      'CART_QUOTE_SIGNING_SECRET',
-      'SHOPIFY_STORE_CONFIG_JSON',
-    ]) {
-      const { env } = runtime();
-      delete env[missing];
-      const response = await createCartQuotesHandler(env, { logger })(post(validBody()));
-      expect(response.status).toBe(503);
-      expect(await json(response)).toEqual({
-        error: 'Secure cart service is temporarily unavailable.',
-      });
-    }
-    for (const config of ['{broken', '[]', JSON.stringify({ [SHOP.toUpperCase()]: storeConfig() })]) {
-      const { env } = runtime({ SHOPIFY_STORE_CONFIG_JSON: config });
-      expect((await createCartQuotesHandler(env, { logger })(post(validBody()))).status).toBe(503);
-    }
-    const { env } = runtime({ CART_QUOTE_SIGNING_SECRET: 'too-short' });
-    expect((await createCartQuotesHandler(env, { logger })(post(validBody()))).status).toBe(503);
-    expect(logger.error).toHaveBeenCalled();
-    for (const [code] of logger.error.mock.calls) {
-      expect(code).toMatch(/^CART_QUOTE_[A-Z0-9_]+$/);
-      expect(code).not.toMatch(/fixture-store|203\.0\.113|012345|\{|\}/u);
-    }
-  });
-
-  it('returns 503 for rate-limit and design storage failures', async () => {
-    for (const override of [
-      { CART_QUOTE_RATE_LIMIT: { limit: vi.fn(async () => { throw new Error('limit failed'); }) } },
-      { DESIGN_QUOTES: { put: vi.fn(async () => { throw new Error('storage failed'); }) } },
-    ]) {
-      const { env } = runtime(override);
-      const response = await createCartQuotesHandler(env)(post(validBody()));
-      expect(response.status).toBe(503);
-      const payload = await json(response);
-      expect(JSON.stringify(payload)).not.toMatch(/limit failed|storage failed/);
-    }
-  });
-
-  it('allows ten requests per UTC minute, rejects the eleventh, and hashes the client IP in rate keys', async () => {
-    const { env } = runtime();
-    const handler = createCartQuotesHandler(env, {
-      now: () => NOW,
-      randomBytes: () => crypto.getRandomValues(new Uint8Array(24)),
-    });
-    for (let index = 0; index < 10; index += 1) {
-      expect((await handler(post(validBody()))).status).toBe(201);
-    }
-    expect((await handler(post(validBody()))).status).toBe(429);
-    const keys = env.CART_QUOTE_RATE_LIMIT.limit.mock.calls.map(([{ key }]) => key);
-    expect(keys).toHaveLength(11);
-    expect(new Set(keys).size).toBe(1);
-    expect(keys[0]).not.toContain('203.0.113.42');
-    expect(keys[0]).toContain(String(Math.floor(NOW / 60000)));
-  });
-
-  it('concurrent requests honor atomic binding decisions', async () => {
-    const decisions = [...Array(10).fill(true), ...Array(10).fill(false)];
-    const { env } = runtime({
-      CART_QUOTE_RATE_LIMIT: {
-        limit: vi.fn(async () => ({ success: decisions.shift() })),
-      },
-    });
-    const handler = createCartQuotesHandler(env, {
-      now: () => NOW,
-      randomBytes: () => crypto.getRandomValues(new Uint8Array(24)),
-    });
-    const responses = await Promise.all(
-      Array.from({ length: 20 }, () => handler(post(validBody()))),
+  it.each([
+    ['stored product', { productId: 'other-product' }, {}],
+    ['stored size', { size: 'xl' }, {}],
+    ['stored variant', { variantId: '1004' }, {}],
+    ['changed state', {}, { state: state({ material: 'player' }) }],
+  ])('rejects a mismatched %s before binding or KV', async (_label, draft, body) => {
+    const current = await fixture({ draft });
+    const app = runtime(current);
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(
+      post(validBody(current, body)),
     );
-    expect(responses.filter(({ status }) => status === 201)).toHaveLength(10);
-    expect(responses.filter(({ status }) => status === 429)).toHaveLength(10);
-    expect(env.DESIGN_QUOTES.put).toHaveBeenCalledTimes(10);
+    expect(response.status).toBe(400);
+    expect(app.repository.bindCartQuote).not.toHaveBeenCalled();
+    expect(app.env.DESIGN_QUOTES.put).not.toHaveBeenCalled();
   });
 
-  it('uses a distinct anonymous rate-limit bucket and creates distinct URL-safe IDs', async () => {
-    const { env } = runtime();
-    const handler = createCartQuotesHandler(env, {
-      now: () => NOW,
-      randomBytes: (() => {
-        let value = 0;
-        return () => new Uint8Array(24).fill(value += 1);
-      })(),
+  it.each([
+    ['missing manifest', (current) => current.objects.delete(current.draft.manifestKey)],
+    ['missing bundle', (current) => current.objects.delete(current.draft.bundleKey)],
+    ['manifest key', (current) => { current.objects.get(current.draft.manifestKey).head.key = 'private/other'; }],
+    ['manifest size', (current) => { current.objects.get(current.draft.manifestKey).head.size += 1; }],
+    ['manifest media type', (current) => { current.objects.get(current.draft.manifestKey).head.httpMetadata.contentType = 'text/plain'; }],
+    ['manifest metadata hash', (current) => { current.objects.get(current.draft.manifestKey).head.customMetadata.sha256 = '0'.repeat(64); }],
+    ['bundle media type', (current) => { current.objects.get(current.draft.bundleKey).head.httpMetadata.contentType = 'text/plain'; }],
+    ['bundle length metadata', (current) => { current.objects.get(current.draft.bundleKey).head.customMetadata.contentLength = '1'; }],
+    ['bundle fingerprint', (current) => { current.objects.get(current.draft.bundleKey).head.customMetadata.designFingerprint = 'deadbeef'; }],
+    ['bundle hash', (current) => { current.objects.get(current.draft.bundleKey).head.customMetadata.sha256 = 'bad'; }],
+  ])('fails closed for invalid private R2 %s', async (_label, mutate) => {
+    const current = await fixture();
+    mutate(current);
+    const app = runtime(current);
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    expect(response.status).toBe(503);
+    expect(app.repository.bindCartQuote).not.toHaveBeenCalled();
+    expect(app.env.DESIGN_QUOTES.put).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['actual manifest hash', async (current) => { current.objects.get(current.draft.manifestKey).bytes[0] ^= 1; }],
+    ['manifest identity', async (current) => {
+      current.manifest.productId = 'other-product';
+      await replaceManifest(current);
+    }],
+    ['atlas hash', async (current) => {
+      current.manifest.files[1].sha256 = 'short';
+      await replaceManifest(current);
+    }],
+  ])('fails closed for invalid %s without leaking an R2 key', async (_label, mutate) => {
+    const current = await fixture();
+    await mutate(current);
+    const logger = { error: vi.fn() };
+    const app = runtime(current, { dependencies: { logger } });
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain('shops/');
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('shops/');
+  });
+
+  it('rejects accessor-backed required R2 metadata without invoking the getter', async () => {
+    const current = await fixture();
+    const getter = vi.fn(() => current.draft.manifestKey);
+    Object.defineProperty(current.objects.get(current.draft.manifestKey).head, 'key', { get: getter });
+    const app = runtime(current);
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    expect(response.status).toBe(503);
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it('accepts the native R2ObjectBody prototype arrayBuffer method without trusting accessors', async () => {
+    const current = await fixture();
+    const object = current.objects.get(current.draft.manifestKey);
+    const prototype = {
+      arrayBuffer: async function arrayBuffer() {
+        return object.bytes.slice().buffer;
+      },
+    };
+    const app = runtime(current, {
+      assets: {
+        get: vi.fn(async () => Object.assign(Object.create(prototype), object.head)),
+      },
     });
-    const request = post(validBody());
-    request.headers.delete('CF-Connecting-IP');
-    const first = await json(await handler(request));
-    const secondRequest = post(validBody());
-    secondRequest.headers.delete('CF-Connecting-IP');
-    const second = await json(await handler(secondRequest));
-    expect(first.bundleId).not.toBe(first.designId.replace(/^dsg_/, 'bun_'));
-    expect(first.bundleId).not.toBe(second.bundleId);
-    expect(first.designId).not.toBe(second.designId);
+    expect((await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)))).status)
+      .toBe(201);
+  });
+
+  it('binds D1 before KV and a KV failure retry reuses the first bundle and issued timestamp', async () => {
+    const current = await fixture();
+    let putCount = 0;
+    const app = runtime(current, {
+      env: { DESIGN_QUOTES: { put: vi.fn(async () => {
+        app.events.push('kv');
+        putCount += 1;
+        if (putCount === 1) throw new Error('KV unavailable');
+      }) } },
+      dependencies: {
+        now: (() => {
+          const times = [NOW, NOW + 5_000];
+          return () => times.shift();
+        })(),
+        randomBytes: (() => {
+          let byte = 0;
+          return () => new Uint8Array(24).fill(byte += 1);
+        })(),
+      },
+    });
+    const handler = createCartQuotesHandler(app.env, app.dependencies);
+    const first = await handler(post(validBody(current)));
+    const second = await handler(post(validBody(current)));
+    const payload = await second.json();
+    expect(first.status).toBe(503);
+    expect(second.status).toBe(201);
+    expect(payload.bundleId).toBe(app.getAuthoritative().bundleId);
+    expect(payload.expiresAt).toBe(NOW + CART_QUOTE_TTL_SECONDS * 1000);
+    expect(app.events).toEqual(['bind', 'kv', 'bind', 'kv']);
+  });
+
+  it('recovers an authoritative racing bundle after a bind conflict', async () => {
+    const current = await fixture();
+    const bound = { ...current.draft, bundleId: BUNDLE_ID, updatedAt: NOW - 1_000 };
+    const getDesign = vi.fn()
+      .mockResolvedValueOnce(structuredClone(current.draft))
+      .mockResolvedValueOnce(structuredClone(bound));
+    const app = runtime(current, {
+      repository: {
+        getDesign,
+        bindCartQuote: vi.fn(async () => { throw new Error('race'); }),
+      },
+    });
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      bundleId: BUNDLE_ID,
+      expiresAt: bound.updatedAt + CART_QUOTE_TTL_SECONDS * 1000,
+    });
+  });
+
+  it('makes concurrent different random candidates converge on one bundle, token and KV record', async () => {
+    const current = await fixture();
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const proposals = [];
+    const app = runtime(current, {
+      repository: {
+        bindCartQuote: vi.fn(async ({ bundleId }) => {
+          proposals.push(bundleId);
+          if (proposals.length === 2) release();
+          await gate;
+          return { ...current.draft, bundleId: proposals[0], updatedAt: NOW };
+        }),
+      },
+      dependencies: {
+        randomBytes: (() => {
+          let byte = 0;
+          return () => new Uint8Array(24).fill(byte += 1);
+        })(),
+      },
+    });
+    const stored = [];
+    app.env.DESIGN_QUOTES.put = vi.fn(async (_key, value) => stored.push(value));
+    const handler = createCartQuotesHandler(app.env, app.dependencies);
+    const responses = await Promise.all([
+      handler(post(validBody(current))),
+      handler(post(validBody(current))),
+    ]);
+    const payloads = await Promise.all(responses.map((response) => response.json()));
+    expect(responses.map(({ status }) => status)).toEqual([201, 201]);
+    expect(new Set(payloads.map(({ bundleId }) => bundleId))).toHaveProperty('size', 1);
+    expect(new Set(payloads.map(({ handoffUrl }) => handoffUrl))).toHaveProperty('size', 1);
+    expect(new Set(stored)).toHaveProperty('size', 1);
+  });
+
+  it('maps malformed requests to 400 and D1, R2, signing, KV or binding failures to one stable 503', async () => {
+    const current = await fixture();
+    const malformed = runtime(current);
+    expect((await createCartQuotesHandler(malformed.env, malformed.dependencies)(post('[]'))).status).toBe(400);
+    expect((await createCartQuotesHandler(malformed.env, malformed.dependencies)(
+      post(validBody(current), { headers: { 'content-length': String(MAX_CART_QUOTE_BODY_BYTES + 1) } }),
+    )).status).toBe(400);
+
+    const cases = [
+      { repository: { getDesign: vi.fn(async () => { throw new Error('D1 secret'); }) } },
+      { assets: { head: vi.fn(async () => { throw new Error('R2 secret'); }) } },
+      { repository: { bindCartQuote: vi.fn(async () => { throw new Error('D1 bind secret'); }), getDesign: vi.fn(async () => current.draft) } },
+      { env: { DESIGN_QUOTES: { put: vi.fn(async () => { throw new Error('KV secret'); }) } } },
+      { dependencies: { randomBytes: () => { throw new Error('random secret'); } } },
+    ];
+    for (const override of cases) {
+      const logger = { error: vi.fn() };
+      const app = runtime(current, { ...override, dependencies: { ...override.dependencies, logger } });
+      const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: 'Secure cart service is temporarily unavailable.' });
+      expect(JSON.stringify(logger.error.mock.calls)).not.toMatch(/secret|shops\//u);
+    }
+  });
+
+  it('enforces method and rate limits before body, D1 and R2 access', async () => {
+    const current = await fixture();
+    const app = runtime(current, {
+      env: { CART_QUOTE_RATE_LIMIT: { limit: vi.fn(async () => ({ success: false })) } },
+    });
+    const handler = createCartQuotesHandler(app.env, app.dependencies);
+    const get = await handler(new Request('https://worker.example/api/cart-quotes'));
+    expect(get.status).toBe(405);
+    const response = await handler(post(validBody(current)));
+    expect(response.status).toBe(429);
+    expect(app.repository.getDesign).not.toHaveBeenCalled();
+    expect(app.assets.head).not.toHaveBeenCalled();
   });
 });
 
 describe('toMinorUnits', () => {
   it('converts exact USD decimal values and rejects unsafe or over-precise amounts', () => {
     expect(toMinorUnits(0, 'USD')).toBe(0);
-    expect(toMinorUnits(89, 'USD')).toBe(8900);
     expect(toMinorUnits(89.25, 'USD')).toBe(8925);
     expect(() => toMinorUnits(1.001, 'USD')).toThrow();
     expect(() => toMinorUnits(0.1 + 0.2, 'USD')).toThrow();
@@ -459,27 +570,31 @@ describe('toMinorUnits', () => {
 });
 
 describe('wrangler cart quote configuration', () => {
-  it('keeps local production behavior and declares the secure cart bindings without secrets', () => {
-    const configText = readFileSync('wrangler.jsonc', 'utf8');
-    const config = JSON.parse(configText);
-    const storeConfigs = JSON.parse(config.vars.SHOPIFY_STORE_CONFIG_JSON);
+  it('keeps production cloud resources disabled until the deployment task provisions them', () => {
+    const config = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
     expect(config.vars.LOCAL_PRODUCTION_FILES).toBe('true');
-    expect(storeConfigs).toHaveProperty('testcsj.myshopify.com');
-    expect(config.kv_namespaces).toContainEqual({
-      binding: 'DESIGN_QUOTES',
-      id: expect.stringMatching(/^[0-9a-f]{32}$/u),
-    });
-    expect(config.ratelimits).toContainEqual({
-      name: 'CART_QUOTE_RATE_LIMIT',
-      namespace_id: expect.any(String),
-      simple: { limit: 10, period: 60 },
-    });
-    expect(config.ratelimits).toContainEqual({
-      name: 'CART_HANDOFF_RATE_LIMIT',
-      namespace_id: expect.any(String),
-      simple: { limit: 300, period: 60 },
-    });
+    expect(config).not.toHaveProperty('r2_buckets');
+    expect(config).not.toHaveProperty('d1_databases');
     expect(config.vars).not.toHaveProperty('CART_QUOTE_SIGNING_SECRET');
     expect(config.vars).not.toHaveProperty('SHOPIFY_API_SECRET');
   });
 });
+
+async function replaceManifest(current) {
+  const bytes = new TextEncoder().encode(JSON.stringify(current.manifest));
+  const sha256 = await sha256Hex(bytes);
+  current.objects.get(current.draft.manifestKey).bytes = bytes;
+  const head = current.objects.get(current.draft.manifestKey).head;
+  head.size = bytes.byteLength;
+  head.customMetadata.sha256 = sha256;
+  current.draft.manifestSha256 = sha256;
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToArrayBuffer(value) {
+  return Uint8Array.from(value.match(/../gu), (byte) => Number.parseInt(byte, 16)).buffer;
+}

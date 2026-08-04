@@ -1,5 +1,10 @@
 import { calculateTrustedComponents } from './quotePricing.js';
 import { createDesignSummary } from './designSummary.js';
+import { createProductionRepository } from '../production/productionRepository.js';
+import {
+  CloudDraftUnavailableError,
+  loadAuthoritativeCloudDraft,
+} from './cloudProductionDraft.js';
 import {
   QUOTE_SCHEMA_VERSION,
   createShopFingerprint,
@@ -11,7 +16,8 @@ export const DESIGN_RECORD_TTL_SECONDS = 180 * 24 * 60 * 60;
 export const MAX_CART_QUOTE_BODY_BYTES = 256000;
 
 const SHOP_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
-const ATLAS_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/iu;
+const DESIGN_ID_PATTERN = /^dsg_[A-Za-z0-9_-]{16,64}$/u;
+const BUNDLE_ID_PATTERN = /^bun_[A-Za-z0-9_-]{16,64}$/u;
 const SERVICE_UNAVAILABLE_MESSAGE = 'Secure cart service is temporarily unavailable.';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -28,6 +34,8 @@ export function createCartQuotesHandler(env, dependencies = {}) {
   const now = dependencies.now ?? Date.now;
   const randomBytes = dependencies.randomBytes ?? secureRandomBytes;
   const logger = dependencies.logger ?? console;
+  const createRepository = dependencies.createProductionRepository ?? createProductionRepository;
+  const loadCloudDraft = dependencies.loadAuthoritativeCloudDraft ?? loadAuthoritativeCloudDraft;
 
   return async function handleCartQuote(request) {
     if (request.method !== 'POST') {
@@ -35,17 +43,17 @@ export function createCartQuotesHandler(env, dependencies = {}) {
     }
 
     try {
-      const bindings = validateBindings(env);
-      let issuedAt;
+      const bindings = validateBindings(env, createRepository);
+      let requestedAt;
       try {
-        issuedAt = now();
+        requestedAt = now();
       } catch {
         throw new ServiceError('CART_QUOTE_CLOCK_UNAVAILABLE');
       }
-      if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) {
+      if (!Number.isSafeInteger(requestedAt) || requestedAt < 0) {
         throw new ServiceError('CART_QUOTE_CLOCK_INVALID');
       }
-      await consumeRateLimit(bindings.rateLimit, request, issuedAt);
+      await consumeRateLimit(bindings.rateLimit, request, requestedAt);
 
       const body = await parseRequestBody(request);
       const storeConfigs = parseStoreConfigs(bindings.storeConfigJson);
@@ -64,13 +72,43 @@ export function createCartQuotesHandler(env, dependencies = {}) {
         }
         throw new ClientError('Design state is invalid.');
       }
-      const productionFiles = normalizeProductionFiles(
-        body.productionFiles,
-        priced.normalizedState.productId,
-      );
-
-      const bundleId = `bun_${encodeBase64Url(readRandomBytes(randomBytes))}`;
-      const designId = `dsg_${encodeBase64Url(readRandomBytes(randomBytes))}`;
+      let cloudDraft;
+      try {
+        cloudDraft = await loadCloudDraft({
+          assets: bindings.productionAssets,
+          designId: body.designId,
+          expectedProductId: priced.normalizedState.productId,
+          expectedSize: priced.normalizedState.layout,
+          expectedVariantId: priced.jerseyVariantId,
+          now: requestedAt,
+          repository: bindings.repository,
+          shop,
+          state: body.state,
+        });
+      } catch (error) {
+        if (error instanceof CloudDraftUnavailableError) {
+          throw new ClientError('Cloud production draft is unavailable.');
+        }
+        throw new ServiceError('CART_QUOTE_CLOUD_DRAFT_FAILED');
+      }
+      const designId = cloudDraft.draft.designId;
+      const productionFiles = {
+        bundleFilename: cloudDraft.draft.bundleFilename,
+        designFilename: 'design.json',
+        atlasFilename: 'uv-atlas.png',
+        atlasSha256: `sha256:${cloudDraft.atlasSha256}`,
+      };
+      const candidateBundleId = `bun_${encodeBase64Url(readRandomBytes(randomBytes))}`;
+      const boundDraft = await bindAuthoritativeQuote({
+        candidateBundleId,
+        designId,
+        draft: cloudDraft.draft,
+        repository: bindings.repository,
+        requestedAt,
+        shop,
+      });
+      const bundleId = boundDraft.bundleId;
+      const issuedAt = boundDraft.updatedAt;
       let shopFingerprint;
       try {
         shopFingerprint = await createShopFingerprint(shop);
@@ -85,8 +123,11 @@ export function createCartQuotesHandler(env, dependencies = {}) {
           quantity,
         })),
       ];
-      const expiresAt = issuedAt + CART_QUOTE_TTL_SECONDS * 1000;
-      if (!Number.isSafeInteger(expiresAt)) {
+      const quoteExpiresAt = issuedAt + CART_QUOTE_TTL_SECONDS * 1000;
+      const expiresAt = Math.min(quoteExpiresAt, boundDraft.expiresAt);
+      if (!Number.isSafeInteger(quoteExpiresAt)
+        || !Number.isSafeInteger(expiresAt)
+        || expiresAt <= requestedAt) {
         throw new ServiceError('CART_QUOTE_EXPIRY_INVALID');
       }
       let totalMinor;
@@ -184,12 +225,22 @@ export function toMinorUnits(amount, currency) {
   return Number(minor);
 }
 
-function validateBindings(env) {
+function validateBindings(env, createRepository) {
   if (env === null || typeof env !== 'object') {
     throw new ServiceError('CART_QUOTE_ENV_MISSING');
   }
   if (!env.DESIGN_QUOTES || typeof env.DESIGN_QUOTES.put !== 'function') {
     throw new ServiceError('CART_QUOTE_DESIGN_QUOTES_BINDING_MISSING');
+  }
+  if (!env.PRODUCTION_ASSETS
+    || typeof env.PRODUCTION_ASSETS.head !== 'function'
+    || typeof env.PRODUCTION_ASSETS.get !== 'function') {
+    throw new ServiceError('CART_QUOTE_PRODUCTION_ASSETS_BINDING_MISSING');
+  }
+  if (!env.PRODUCTION_DB
+    || typeof env.PRODUCTION_DB.prepare !== 'function'
+    || typeof env.PRODUCTION_DB.batch !== 'function') {
+    throw new ServiceError('CART_QUOTE_PRODUCTION_DB_BINDING_MISSING');
   }
   if (
     !env.CART_QUOTE_RATE_LIMIT
@@ -206,9 +257,22 @@ function validateBindings(env) {
   if (typeof env.SHOPIFY_STORE_CONFIG_JSON !== 'string' || env.SHOPIFY_STORE_CONFIG_JSON.length === 0) {
     throw new ServiceError('CART_QUOTE_STORE_CONFIG_MISSING');
   }
+  let repository;
+  try {
+    repository = createRepository(env.PRODUCTION_DB);
+  } catch {
+    throw new ServiceError('CART_QUOTE_PRODUCTION_REPOSITORY_INVALID');
+  }
+  if (!repository
+    || typeof repository.getDesign !== 'function'
+    || typeof repository.bindCartQuote !== 'function') {
+    throw new ServiceError('CART_QUOTE_PRODUCTION_REPOSITORY_INVALID');
+  }
   return {
     designQuotes: env.DESIGN_QUOTES,
+    productionAssets: env.PRODUCTION_ASSETS,
     rateLimit: env.CART_QUOTE_RATE_LIMIT,
+    repository,
     signingSecret: env.CART_QUOTE_SIGNING_SECRET,
     storeConfigJson: env.SHOPIFY_STORE_CONFIG_JSON,
   };
@@ -230,6 +294,7 @@ function parseStoreConfigs(serialized) {
     const allowed = new Set(['productId', 'currency', 'jerseyVariants', 'surchargeVariants']);
     if (
       keys.some((key) => !allowed.has(key))
+      || !Object.hasOwn(config, 'productId')
       || !Object.hasOwn(config, 'currency')
       || !Object.hasOwn(config, 'jerseyVariants')
       || !Object.hasOwn(config, 'surchargeVariants')
@@ -268,7 +333,11 @@ async function parseRequestBody(request) {
   } catch {
     throw new ClientError('Request body must contain valid UTF-8 JSON.');
   }
-  return snapshotExactObject(body, ['shop', 'state', 'productionFiles'], 'Request body');
+  const result = snapshotExactObject(body, ['shop', 'designId', 'state'], 'Request body');
+  if (typeof result.designId !== 'string' || !DESIGN_ID_PATTERN.test(result.designId)) {
+    throw new ClientError('Design ID is invalid.');
+  }
+  return result;
 }
 
 async function readLimitedBody(request, maximum) {
@@ -302,27 +371,60 @@ function normalizeShop(value) {
   return normalized;
 }
 
-function normalizeProductionFiles(value, productId) {
-  if (value === null) return null;
-  const files = snapshotExactObject(
-    value,
-    ['bundleFilename', 'designFilename', 'atlasFilename', 'atlasSha256'],
-    'productionFiles',
-  );
-  const expectedFilenames = {
-    bundleFilename: `${productId}-production.zip`,
-    designFilename: `${productId}-design.json`,
-    atlasFilename: `${productId}-uv-atlas.png`,
-  };
-  for (const [key, expected] of Object.entries(expectedFilenames)) {
-    if (files[key] !== expected) {
-      throw new ClientError(`productionFiles.${key} is invalid.`);
+async function bindAuthoritativeQuote({
+  candidateBundleId,
+  designId,
+  draft,
+  repository,
+  requestedAt,
+  shop,
+}) {
+  let authoritative;
+  try {
+    authoritative = await repository.bindCartQuote({
+      shop,
+      designId,
+      bundleId: candidateBundleId,
+      updatedAt: requestedAt,
+    });
+  } catch {
+    try {
+      authoritative = await repository.getDesign(shop, designId);
+    } catch {
+      throw new ServiceError('CART_QUOTE_D1_BIND_RECOVERY_FAILED');
     }
   }
-  if (typeof files.atlasSha256 !== 'string' || !ATLAS_HASH_PATTERN.test(files.atlasSha256)) {
-    throw new ClientError('productionFiles.atlasSha256 is invalid.');
+  if (!matchesBoundDraft(authoritative, draft, requestedAt)) {
+    throw new ServiceError('CART_QUOTE_D1_BIND_FAILED');
   }
-  return { ...files, atlasSha256: files.atlasSha256.toLowerCase() };
+  return authoritative;
+}
+
+function matchesBoundDraft(value, draft, requestedAt) {
+  return isPlainObject(value)
+    && value.designId === draft.designId
+    && value.shop === draft.shop
+    && value.uploadId === draft.uploadId
+    && value.status === 'cart_draft'
+    && value.productId === draft.productId
+    && value.variantId === draft.variantId
+    && value.size === draft.size
+    && value.modelId === draft.modelId
+    && value.modelVersion === draft.modelVersion
+    && value.uvExportVersion === draft.uvExportVersion
+    && value.designFingerprint === draft.designFingerprint
+    && value.manifestSha256 === draft.manifestSha256
+    && value.manifestKey === draft.manifestKey
+    && value.bundleKey === draft.bundleKey
+    && value.bundleFilename === draft.bundleFilename
+    && typeof value.bundleId === 'string'
+    && BUNDLE_ID_PATTERN.test(value.bundleId)
+    && Number.isSafeInteger(value.updatedAt)
+    && value.updatedAt >= 0
+    && value.updatedAt <= requestedAt
+    && Number.isSafeInteger(value.expiresAt)
+    && value.expiresAt === draft.expiresAt
+    && value.expiresAt > requestedAt;
 }
 
 async function consumeRateLimit(rateLimiter, request, issuedAt) {

@@ -11,6 +11,7 @@ const SUCCESS = {
   bundleId: 'bun_1234567890abcdef',
   expiresAt: NOW + 60_000,
 };
+const DESIGN_ID = SUCCESS.designId;
 
 function context() {
   return parseShopifyLaunch(
@@ -32,13 +33,14 @@ afterEach(() => {
 });
 
 describe('createSecureCartHandoff', () => {
-  it('posts only the trusted request fields with a null production receipt', async () => {
+  it('posts exactly the shop, uploaded design ID and immutable design state', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
     const fetchImpl = vi.fn().mockResolvedValue(ok());
     const state = { layout: 'm', overrides: {} };
 
     const result = await createSecureCartHandoff({
       context: context(),
+      designId: DESIGN_ID,
       state,
       fetchImpl,
     });
@@ -50,49 +52,15 @@ describe('createSecureCartHandoff', () => {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ shop: SHOP, state, productionFiles: null }),
+      body: JSON.stringify({ shop: SHOP, designId: DESIGN_ID, state }),
       signal: expect.any(AbortSignal),
     });
     const sent = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(Object.keys(sent).sort()).toEqual(['productionFiles', 'shop', 'state']);
+    expect(Object.keys(sent).sort()).toEqual(['designId', 'shop', 'state']);
     expect(JSON.stringify(sent)).not.toMatch(/quote|customizationTotal|variantMap|surchargeVariantMap|token/i);
     expect(result).toEqual(SUCCESS);
     expect(result).not.toBe(SUCCESS);
     expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
-  });
-
-  it('sends the exact four-field local production receipt', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(NOW);
-    const fetchImpl = vi.fn().mockResolvedValue(ok());
-    const productionFiles = {
-      atlasFilename: 'fn8788-uv-atlas.png',
-      atlasSha256: `sha256:${'a'.repeat(64)}`,
-      bundleFilename: 'fn8788-jersey-production.zip',
-      designFilename: 'fn8788-jersey-design.json',
-    };
-
-    await createSecureCartHandoff({
-      context: context(),
-      state: { layout: 'm' },
-      productionFiles,
-      fetchImpl,
-    });
-
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).productionFiles).toEqual(productionFiles);
-  });
-
-  it('normalizes an explicit null production receipt to body null', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(NOW);
-    const fetchImpl = vi.fn().mockResolvedValue(ok());
-
-    await createSecureCartHandoff({
-      context: context(),
-      state: { layout: 'm' },
-      productionFiles: null,
-      fetchImpl,
-    });
-
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).productionFiles).toBeNull();
   });
 
   it('accepts a context snapshot with only a valid shop and ignores extra ordinary fields', async () => {
@@ -101,6 +69,7 @@ describe('createSecureCartHandoff', () => {
 
     await createSecureCartHandoff({
       context: { shop: SHOP, futureLaunchField: 'ignored' },
+      designId: DESIGN_ID,
       state: { layout: 'm' },
       fetchImpl,
     });
@@ -108,44 +77,16 @@ describe('createSecureCartHandoff', () => {
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).shop).toBe(SHOP);
   });
 
-  it('reads and snapshots each production file field only once', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(NOW);
-    const fetchImpl = vi.fn().mockResolvedValue(ok());
-    const reads = new Map();
-    const values = {
-      atlasFilename: 'fn8788-uv-atlas.png',
-      atlasSha256: `sha256:${'a'.repeat(64)}`,
-      bundleFilename: 'fn8788-jersey-production.zip',
-      designFilename: 'fn8788-jersey-design.json',
-    };
-    const productionFiles = Object.fromEntries(Object.keys(values).map((key) => [key, undefined]));
-    for (const [key, value] of Object.entries(values)) {
-      Object.defineProperty(productionFiles, key, {
-        configurable: true,
-        enumerable: true,
-        get() {
-          reads.set(key, (reads.get(key) ?? 0) + 1);
-          return value;
-        },
-      });
-    }
-
-    await createSecureCartHandoff({ context: { shop: SHOP }, state: {}, productionFiles, fetchImpl });
-
-    expect(Object.fromEntries(reads)).toEqual(Object.fromEntries(
-      Object.keys(values).map((key) => [key, 1]),
-    ));
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).productionFiles).toEqual(values);
-  });
-
   it.each([
     ['missing context', { context: null, state: {} }],
     ['forged shop casing', { context: { shop: 'TESTCSJ.myshopify.com' }, state: {} }],
     ['invalid shop', { context: { shop: 'testcsj.myshopify.com.target' }, state: {} }],
+    ['missing design ID', { context: context(), designId: undefined, state: {} }],
+    ['invalid design ID', { context: context(), designId: 'dsg_short', state: {} }],
     ['missing state', { context: context(), state: undefined }],
   ])('rejects %s before making a request', async (_label, input) => {
     const fetchImpl = vi.fn();
-    await expect(createSecureCartHandoff({ ...input, fetchImpl })).rejects.toThrow();
+    await expect(createSecureCartHandoff({ designId: DESIGN_ID, ...input, fetchImpl })).rejects.toThrow();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -155,7 +96,7 @@ describe('createSecureCartHandoff', () => {
     'http://testcsj.myshopify.com/api/cart-quotes',
   ])('rejects a non-same-origin endpoint: %s', async (endpoint) => {
     const fetchImpl = vi.fn();
-    await expect(createSecureCartHandoff({ endpoint, context: context(), state: {}, fetchImpl }))
+    await expect(createSecureCartHandoff({ endpoint, context: context(), designId: DESIGN_ID, state: {}, fetchImpl }))
       .rejects.toThrow();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -165,7 +106,7 @@ describe('createSecureCartHandoff', () => {
       JSON.stringify({ error: 'Pricing changed. Reopen the product page.' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } },
     ));
-    await expect(createSecureCartHandoff({ context: context(), state: {}, fetchImpl }))
+    await expect(createSecureCartHandoff({ context: context(), designId: DESIGN_ID, state: {}, fetchImpl }))
       .rejects.toThrow('Pricing changed. Reopen the product page.');
   });
 
@@ -176,19 +117,21 @@ describe('createSecureCartHandoff', () => {
     ['control error', new Response(JSON.stringify({ error: 'bad\nmessage' }), { status: 400 })],
   ])('uses the generic failure for a %s error response', async (_label, response) => {
     const fetchImpl = vi.fn().mockResolvedValue(response);
-    await expect(createSecureCartHandoff({ context: context(), state: {}, fetchImpl }))
+    await expect(createSecureCartHandoff({ context: context(), designId: DESIGN_ID, state: {}, fetchImpl }))
       .rejects.toThrow('Secure cart preparation failed.');
   });
 
   it('uses the generic failure for a network error and invalid success JSON', async () => {
     await expect(createSecureCartHandoff({
       context: context(),
+      designId: DESIGN_ID,
       state: {},
       fetchImpl: vi.fn().mockRejectedValue(new Error('private network detail')),
     })).rejects.toThrow('Secure cart preparation failed.');
 
     await expect(createSecureCartHandoff({
       context: context(),
+      designId: DESIGN_ID,
       state: {},
       fetchImpl: vi.fn().mockResolvedValue(new Response('not-json', { status: 201 })),
     })).rejects.toThrow('Secure cart preparation failed.');
@@ -199,6 +142,7 @@ describe('createSecureCartHandoff', () => {
     const fetchImpl = vi.fn(() => new Promise(() => {}));
     const result = createSecureCartHandoff({
       context: { shop: SHOP },
+      designId: DESIGN_ID,
       state: {},
       timeoutMs: 25,
       fetchImpl,
@@ -219,6 +163,7 @@ describe('createSecureCartHandoff', () => {
     const fetchImpl = vi.fn(() => new Promise(() => {}));
     const result = createSecureCartHandoff({
       context: { shop: SHOP },
+      designId: DESIGN_ID,
       state: {},
       signal: controller.signal,
       fetchImpl,
@@ -237,6 +182,7 @@ describe('createSecureCartHandoff', () => {
 
     await createSecureCartHandoff({
       context: { shop: SHOP },
+      designId: DESIGN_ID,
       state: {},
       timeoutMs: 25,
       fetchImpl: vi.fn().mockResolvedValue(ok()),
@@ -251,7 +197,7 @@ describe('createSecureCartHandoff', () => {
     async (timeoutMs) => {
       const fetchImpl = vi.fn();
       await expect(createSecureCartHandoff({
-        context: { shop: SHOP }, state: {}, timeoutMs, fetchImpl,
+        context: { shop: SHOP }, designId: DESIGN_ID, state: {}, timeoutMs, fetchImpl,
       })).rejects.toThrow();
       expect(fetchImpl).not.toHaveBeenCalled();
     },
@@ -269,7 +215,7 @@ describe('createSecureCartHandoff', () => {
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
     const normalized = Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined));
     await expect(createSecureCartHandoff({
-      context: context(), state: {}, fetchImpl: vi.fn().mockResolvedValue(ok(normalized)),
+      context: context(), designId: DESIGN_ID, state: {}, fetchImpl: vi.fn().mockResolvedValue(ok(normalized)),
     })).rejects.toThrow('Secure cart preparation failed.');
   });
 
@@ -289,6 +235,7 @@ describe('createSecureCartHandoff', () => {
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
     await expect(createSecureCartHandoff({
       context: context(),
+      designId: DESIGN_ID,
       state: {},
       fetchImpl: vi.fn().mockResolvedValue(ok({ ...SUCCESS, handoffUrl })),
     })).rejects.toThrow('Secure cart preparation failed.');

@@ -351,9 +351,13 @@ git commit -m "feat: store verified production drafts in r2"
 - Modify: `src/features/configurator/shopify/cartQuoteClient.test.js`
 - Modify: `workers/shopify/cartQuotes.js`
 - Modify: `workers/shopify/cartQuotes.test.js`
+- Create: `workers/shopify/cloudProductionDraft.js`
 - Modify: `workers/shopify/designSummary.js`
 - Modify: `workers/shopify/designSummary.test.js`
 - Modify: `workers/shopify/appProxy.test.js`
+- Modify: `workers/production/productionRepository.js`
+- Modify: `workers/production/productionRepository.test.js`
+- Modify: `workers/production/productionRepository.integration.test.js`
 
 - [ ] **Step 1: Change the request tests first**
 
@@ -393,13 +397,13 @@ Derive this fulfillment summary only from the D1 row and manifest:
 }
 ```
 
-Bind the generated `bundleId` back to D1 before returning the handoff URL. Do not accept a browser-supplied filename or hash.
+Bind the generated `bundleId` back to D1 before writing KV or returning the handoff URL. The first successful bind fixes both `bundleId` and the quote `issuedAt`; retries and concurrent candidates must reuse that authoritative pair so a KV failure can be retried without a D1 conflict or a competing token. Do not accept a browser-supplied filename or hash.
 
 - [ ] **Step 4: Run GREEN and commit**
 
 ```powershell
 npx vitest run src/features/configurator/shopify/cartQuoteClient.test.js workers/shopify/cartQuotes.test.js workers/shopify/designSummary.test.js workers/shopify/appProxy.test.js
-git add src/features/configurator/shopify/cartQuoteClient.js src/features/configurator/shopify/cartQuoteClient.test.js workers/shopify/cartQuotes.js workers/shopify/cartQuotes.test.js workers/shopify/designSummary.js workers/shopify/designSummary.test.js workers/shopify/appProxy.test.js
+git add src/features/configurator/shopify/cartQuoteClient.js src/features/configurator/shopify/cartQuoteClient.test.js workers/shopify/cartQuotes.js workers/shopify/cartQuotes.test.js workers/shopify/cloudProductionDraft.js workers/shopify/designSummary.js workers/shopify/designSummary.test.js workers/shopify/appProxy.test.js workers/production/productionRepository.js workers/production/productionRepository.test.js workers/production/productionRepository.integration.test.js docs/superpowers/plans/2026-08-04-phase3-cloud-order-linking.md
 git commit -m "feat: require cloud draft for cart handoff"
 ```
 

@@ -278,12 +278,12 @@ async function bindCartQuote(db, input) {
 
   const update = prepareBound(db, `
     UPDATE production_designs
-    SET bundle_id = ?, updated_at = ?
+    SET bundle_id = COALESCE(bundle_id, ?),
+      updated_at = CASE WHEN bundle_id IS NULL THEN ? ELSE updated_at END
     WHERE shop = ? AND design_id = ?
       AND status = 'cart_draft'
       AND expires_at > ?
-      AND (bundle_id IS NULL OR bundle_id = ?)
-  `, [bundleId, updatedAt, shop, designId, updatedAt, bundleId]);
+  `, [bundleId, updatedAt, shop, designId, updatedAt]);
   const select = prepareBound(db, `
     SELECT ${ROW_COLUMNS}
     FROM production_designs
@@ -297,7 +297,7 @@ async function bindCartQuote(db, input) {
   if (
     normalized.status !== 'cart_draft'
     || normalized.expiresAt <= updatedAt
-    || normalized.bundleId !== bundleId
+    || normalized.bundleId === null
   ) throw new ProductionRepositoryError('production-repository-conflict');
   return normalized;
 }

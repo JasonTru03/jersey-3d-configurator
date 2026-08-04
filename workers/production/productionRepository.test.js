@@ -377,7 +377,7 @@ describe('shop-scoped reads and quote binding', () => {
       .rejects.toMatchObject({ code: 'production-repository-failed' });
   });
 
-  it('binds a quote only to an unexpired same-shop cart draft and never replaces another bundle', async () => {
+  it('binds a quote only to an unexpired same-shop cart draft and fixes the first issued timestamp', async () => {
     const row = databaseRow({ bundle_id: BUNDLE_ID, updated_at: 1_700_000_000_100 });
     const db = createFakeD1({ batchResults: [d1Result({ changes: 1 }), d1Result({ results: [row] })] });
 
@@ -392,17 +392,31 @@ describe('shop-scoped reads and quote binding', () => {
     expect(update.sql).toMatch(/WHERE\s+shop\s*=\s*\?\s+AND\s+design_id\s*=\s*\?/iu);
     expect(update.sql).toContain("status = 'cart_draft'");
     expect(update.sql).toMatch(/expires_at\s*>\s*\?/iu);
-    expect(update.sql).toMatch(/bundle_id\s+IS NULL\s+OR\s+bundle_id\s*=\s*\?/iu);
+    expect(update.sql).toMatch(/bundle_id\s*=\s*COALESCE\s*\(\s*bundle_id\s*,\s*\?\s*\)/iu);
+    expect(update.sql).toMatch(/updated_at\s*=\s*CASE\s+WHEN\s+bundle_id\s+IS NULL\s+THEN\s+\?/iu);
     expect(update.values).toEqual([
       BUNDLE_ID, 1_700_000_000_100, SHOP, DESIGN_ID,
-      1_700_000_000_100, BUNDLE_ID,
+      1_700_000_000_100,
     ]);
     expect(select.values).toEqual([SHOP, DESIGN_ID]);
     expect(result.bundleId).toBe(BUNDLE_ID);
   });
 
+  it('returns the first authoritative bundle and timestamp when a racing quote proposed another bundle', async () => {
+    const firstBundle = 'bun_fedcba0987654321';
+    const firstIssuedAt = 1_700_000_000_050;
+    const row = databaseRow({ bundle_id: firstBundle, updated_at: firstIssuedAt });
+    const db = createFakeD1({ batchResults: [d1Result({ changes: 1 }), d1Result({ results: [row] })] });
+
+    await expect(createProductionRepository(db).bindCartQuote({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      bundleId: BUNDLE_ID,
+      updatedAt: 1_700_000_000_100,
+    })).resolves.toMatchObject({ bundleId: firstBundle, updatedAt: firstIssuedAt });
+  });
+
   it.each([
-    ['different bundle', databaseRow({ bundle_id: 'bun_fedcba0987654321' })],
     ['expired', databaseRow({ bundle_id: BUNDLE_ID, expires_at: 1_700_000_000_050 })],
     ['paid', databaseRow({ bundle_id: BUNDLE_ID, status: 'paid_pending_production' })],
     ['claimed for cleanup', databaseRow({

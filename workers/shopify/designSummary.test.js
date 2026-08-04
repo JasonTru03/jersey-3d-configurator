@@ -12,13 +12,13 @@ function rawState(overrides = {}) {
 }
 
 const productionFiles = {
-  bundleFilename: 'fn8788-jersey-production.zip',
-  designFilename: 'fn8788-jersey-design.json',
-  atlasFilename: 'fn8788-jersey-uv-atlas.png',
+  bundleFilename: 'fn8788-jersey-design-deadbeef.zip',
+  designFilename: 'design.json',
+  atlasFilename: 'uv-atlas.png',
   atlasSha256: `sha256:${'a'.repeat(64)}`,
 };
 
-function summarize(state, files = null) {
+function summarize(state, files = productionFiles) {
   return createDesignSummary({
     state,
     normalizedState: normalizeDesignState(state),
@@ -85,10 +85,10 @@ describe('createDesignSummary', () => {
       'Custom Text': 'FINAL',
       Extras: 'sleeveBadge, matchPatch',
       Artwork: 'Crest Badge, sponsor-logo.png',
-      'Production Files': 'Local ZIP download',
-      'Bundle File': 'fn8788-jersey-production.zip',
-      'Design File': 'fn8788-jersey-design.json',
-      'Atlas File': 'fn8788-jersey-uv-atlas.png',
+      'Production Files': 'Cloud package ready',
+      'Bundle File': 'fn8788-jersey-design-deadbeef.zip',
+      'Design File': 'design.json',
+      'Atlas File': 'uv-atlas.png',
       'UV Atlas SHA-256': `sha256:${'a'.repeat(64)}`,
     });
   });
@@ -106,7 +106,7 @@ describe('createDesignSummary', () => {
     const summary = createDesignSummary({
       state: { ...state, layout: 'xl', extras: {}, overrides: { ...state.overrides, customTextItems: [{ text: 'FORGED' }] } },
       normalizedState: normalized,
-      productionFiles: null,
+      productionFiles,
     });
 
     expect(summary.Size).toBe('s');
@@ -114,11 +114,14 @@ describe('createDesignSummary', () => {
     expect(summary['Custom Text']).toBe('SAFE');
   });
 
-  it('omits production summary when bottom pattern is disabled and requires files when enabled', () => {
+  it('always requires and reports the authoritative cloud package for every design', () => {
     const disabled = rawState({
       overrides: { ...rawState().overrides, bottomPattern: { enabled: false } },
     });
-    expect(summarize(disabled, productionFiles)).not.toHaveProperty('Production Files');
+    expect(summarize(disabled, productionFiles)).toMatchObject({
+      'Production Files': 'Cloud package ready',
+      'Bundle File': productionFiles.bundleFilename,
+    });
 
     const enabled = rawState({
       overrides: { ...rawState().overrides, bottomPattern: { enabled: true } },

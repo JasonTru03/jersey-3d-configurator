@@ -8,17 +8,11 @@ const GENERIC_ERROR = 'Secure cart preparation failed.';
 const TIMEOUT_ERROR = 'Secure cart request timed out. Try again.';
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 120_000;
-const PRODUCTION_FILE_KEYS = [
-  'atlasFilename',
-  'atlasSha256',
-  'bundleFilename',
-  'designFilename',
-];
 export async function createSecureCartHandoff({
   endpoint = '/api/cart-quotes',
   context,
+  designId,
   state,
-  productionFiles,
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   fetchImpl = fetch,
@@ -26,8 +20,8 @@ export async function createSecureCartHandoff({
   const request = snapshotRequest({
     endpoint,
     context,
+    designId,
     state,
-    productionFiles,
     signal,
     timeoutMs,
     fetchImpl,
@@ -55,8 +49,8 @@ export async function createSecureCartHandoff({
         },
         body: JSON.stringify({
           shop: request.shop,
+          designId: request.designId,
           state,
-          productionFiles: request.productionFiles,
         }),
         signal: controller.signal,
       }), controller.signal);
@@ -88,7 +82,7 @@ export async function createSecureCartHandoff({
   }
 }
 
-function snapshotRequest({ endpoint, context, state, productionFiles, signal, timeoutMs, fetchImpl }) {
+function snapshotRequest({ endpoint, context, designId, state, signal, timeoutMs, fetchImpl }) {
   if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required.');
   if (!isPlainObject(context)) {
     throw new TypeError('A valid Shopify launch context is required.');
@@ -96,6 +90,9 @@ function snapshotRequest({ endpoint, context, state, productionFiles, signal, ti
   const shop = context.shop;
   if (typeof shop !== 'string' || !SHOP_DOMAIN_PATTERN.test(shop)) {
     throw new TypeError('A valid Shopify launch context is required.');
+  }
+  if (typeof designId !== 'string' || !DESIGN_ID_PATTERN.test(designId)) {
+    throw new TypeError('A valid uploaded design ID is required.');
   }
   if (!isPlainObject(state)) throw new TypeError('A design state is required.');
   assertSameOriginEndpoint(endpoint);
@@ -109,9 +106,7 @@ function snapshotRequest({ endpoint, context, state, productionFiles, signal, ti
   ) throw new TypeError('Cart quote timeout is invalid.');
   return {
     shop,
-    productionFiles: productionFiles === undefined || productionFiles === null
-      ? null
-      : snapshotProductionFiles(productionFiles),
+    designId,
   };
 }
 
@@ -133,19 +128,6 @@ function assertSameOriginEndpoint(endpoint) {
   ) {
     throw new TypeError('Cart quote endpoint must be same-origin.');
   }
-}
-
-function snapshotProductionFiles(value) {
-  assertExactPlainObject(value, PRODUCTION_FILE_KEYS, 'Production files');
-  const snapshot = {};
-  for (const key of PRODUCTION_FILE_KEYS) {
-    const fieldValue = value[key];
-    if (typeof fieldValue !== 'string' || fieldValue.length === 0) {
-      throw new TypeError(`Production files ${key} is invalid.`);
-    }
-    snapshot[key] = fieldValue;
-  }
-  return snapshot;
 }
 
 function throwIfCancelled({ controller, signal, timedOut }) {

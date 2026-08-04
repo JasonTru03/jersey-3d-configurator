@@ -32,23 +32,14 @@ export function createDesignSummary({ state, normalizedState, productionFiles } 
     Artwork: summarizeArtwork(overrides.decorations),
   };
 
-  const bottomPattern = overrides.bottomPattern;
-  if (bottomPattern !== undefined) {
-    assertPlainObject(bottomPattern, 'Bottom pattern');
-    if (typeof bottomPattern.enabled !== 'boolean') {
-      throw new TypeError('Bottom pattern enabled flag must be a boolean.');
-    }
-  }
-  if (bottomPattern?.enabled === true) {
-    if (!productionFiles) throw new TypeError('Production files are required for an enabled bottom pattern.');
-    Object.assign(summary, {
-      'Production Files': 'Local ZIP download',
-      'Bundle File': productionFiles.bundleFilename,
-      'Design File': productionFiles.designFilename,
-      'Atlas File': productionFiles.atlasFilename,
-      'UV Atlas SHA-256': productionFiles.atlasSha256,
-    });
-  }
+  if (!productionFiles) throw new TypeError('Production files are required.');
+  Object.assign(summary, {
+    'Production Files': 'Cloud package ready',
+    'Bundle File': productionFiles.bundleFilename,
+    'Design File': productionFiles.designFilename,
+    'Atlas File': productionFiles.atlasFilename,
+    'UV Atlas SHA-256': productionFiles.atlasSha256,
+  });
 
   for (const [field, value] of Object.entries(summary)) {
     validateSummaryText(value, field, field === 'Colors' ? 512 : 1024);

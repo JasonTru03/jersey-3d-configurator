@@ -359,7 +359,7 @@ git commit -m "feat: store verified production drafts in r2"
 - Modify: `workers/production/productionRepository.test.js`
 - Modify: `workers/production/productionRepository.integration.test.js`
 
-- [ ] **Step 1: Change the request tests first**
+- [x] **Step 1: Change the request tests first**
 
 The browser request becomes exactly:
 
@@ -373,7 +373,7 @@ The browser request becomes exactly:
 
 The Worker must reject a missing draft, wrong shop, expired draft, non-`cart_draft` status, product/variant mismatch, changed design fingerprint, missing R2 manifest/ZIP metadata, or a caller-provided production filename/hash.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 npx vitest run src/features/configurator/shopify/cartQuoteClient.test.js workers/shopify/cartQuotes.test.js workers/shopify/designSummary.test.js workers/shopify/appProxy.test.js
@@ -381,7 +381,7 @@ npx vitest run src/features/configurator/shopify/cartQuoteClient.test.js workers
 
 Expected: FAIL because the current quote endpoint generates its own `designId` and trusts the legacy local production summary.
 
-- [ ] **Step 3: Make the stored draft authoritative**
+- [x] **Step 3: Make the stored draft authoritative**
 
 Load the D1 row by `(shop, designId)`, recompute the fingerprint from the incoming state plus the stored model/product/variant fields, and compare it to `design_fingerprint`. Check the private manifest and bundle with `R2.head()` before issuing a quote. Use the existing secure random `bundleId`, signing contract, KV quote record and App Proxy flow, but preserve the uploaded `designId`.
 
@@ -399,7 +399,7 @@ Derive this fulfillment summary only from the D1 row and manifest:
 
 Bind the generated `bundleId` back to D1 before writing KV or returning the handoff URL. The first successful bind fixes both `bundleId` and the quote `issuedAt`; retries and concurrent candidates must reuse that authoritative pair so a KV failure can be retried without a D1 conflict or a competing token. Do not accept a browser-supplied filename or hash.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```powershell
 npx vitest run src/features/configurator/shopify/cartQuoteClient.test.js workers/shopify/cartQuotes.test.js workers/shopify/designSummary.test.js workers/shopify/appProxy.test.js

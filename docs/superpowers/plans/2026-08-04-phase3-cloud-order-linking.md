@@ -260,7 +260,8 @@ Cover these observable behaviors:
 - `GET /api/production-drafts/config` exposes only the Turnstile site key.
 - `POST /api/production-drafts` rejects missing bindings, incorrect content type, excessive declared body length, invalid shop/upload ID, failed Turnstile, failed rate limit, malformed files and unconfigured shops before writing R2.
 - A valid package writes the seven verified files plus the Worker-rebuilt ZIP under `shops/<shopFingerprint>/designs/<designId>/` and then inserts one `cart_draft` row.
-- An R2 or D1 failure removes every key written by that request and returns a stable 503 without leaking an internal key or exception.
+- The rebuilt ZIP is passed to `PRODUCTION_ASSETS.put()` as the validated `ReadableStream`; the handler must not turn it back into a whole-package `Blob` or `ArrayBuffer`.
+- An R2 write, source-stream or D1 failure removes every key written by that request and returns a stable 503 without leaking an internal key, stream error or exception.
 - Repeating the same `(shop, uploadId)` returns the existing matching draft without writing a second package; a different fingerprint for the same upload ID is rejected.
 
 - [ ] **Step 2: Run RED**
@@ -284,7 +285,7 @@ TURNSTILE_SECRET_KEY
 SHOPIFY_STORE_CONFIG_JSON
 ```
 
-Use `crypto.randomUUID()` for the server `designId`, SHA-256 for object metadata, and the existing Web Crypto HMAC/fingerprint helpers. Verify Turnstile before expensive package hashing. Await every R2 write; on partial failure, await `PRODUCTION_ASSETS.delete(keys)`. Store only private keys in D1 and return:
+Use the atomic `validateAndRebuildUploadedProductionPackage()` entry point from Task 2. Use `crypto.randomUUID()` for the server `designId`, SHA-256 for object metadata, and the existing Web Crypto HMAC/fingerprint helpers. Verify Turnstile before expensive package hashing. Pass the returned ZIP stream directly to R2. Await every R2 write; on a rejected `put()`, a source-stream failure or a later D1 failure, await `PRODUCTION_ASSETS.delete(keys)` before returning the stable 503. Store only private keys in D1 and return:
 
 ```json
 {
@@ -522,6 +523,14 @@ Keep `LOCAL_PRODUCTION_FILES` set to `true` in the checked-in default until rele
 
 Add `PRODUCTION_UPLOAD_RATE_LIMIT` as a native rate-limit binding. Do not store either Turnstile key or `SHOPIFY_API_SECRET` in the repository; release preparation sets them with `wrangler secret put`.
 
+The streaming ZIP still performs incremental CRC work. Require the Workers Paid plan before enabling production uploads and configure a deliberate Standard Usage Model CPU ceiling in `wrangler.jsonc`:
+
+```jsonc
+"limits": { "cpu_ms": 30000 }
+```
+
+Keep uploads disabled when the account/plan cannot support this limit. Local tests do not enforce Cloudflare CPU limits; the release checkpoint must verify the deployed plan and observe upload CPU time.
+
 - [ ] **Step 4: Run GREEN and commit**
 
 ```powershell
@@ -543,13 +552,13 @@ git commit -m "feat: clean expired production drafts"
 
 The deployment guide must require this order:
 
-1. Verify a non-live app-development store and record the current Worker/App versions.
+1. Verify a non-live app-development store, confirm Workers Paid with the configured `cpu_ms` limit, and record the current Worker/App versions. Production uploads stay disabled if the plan or CPU setting is not confirmed.
 2. Create or automatically provision the private R2 bucket and D1 database.
 3. Apply `migrations/0001_production_designs.sql` locally, then remotely only after explicit approval.
 4. Configure Turnstile and set `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `SHOPIFY_API_SECRET` and existing quote secret without printing their values.
 5. Build and dry-run the Worker and Shopify App.
 6. Deploy a test Worker/App version, register `orders/paid`, and perform a Shopify test payment.
-7. Verify D1 order linkage and R2 manifest/ZIP metadata; do not expose raw R2 paths.
+7. Verify D1 order linkage, direct stream-to-R2 behavior, R2 manifest/ZIP metadata and Worker CPU usage at a representative package size; do not expose raw R2 paths.
 8. Roll back by restoring the previous Worker/App version and disabling the webhook subscription; preserve R2/D1 data.
 
 State explicitly that pushing Git does not authorize resource creation, migrations, webhook subscription, Shopify App deployment or production Worker deployment.

@@ -9,6 +9,25 @@ const SHOP = 'testcsj.myshopify.com';
 const ORDER_GID = 'gid://shopify/Order/1234567890';
 
 describe('production repository against node:sqlite', () => {
+  it('persists upload_pending before atomically finalizing the same upload', async () => {
+    await withDatabase(async (db) => {
+      const repository = createProductionRepository(createD1Adapter(db));
+      const pending = await repository.createUploadPending(draft(0));
+
+      expect(pending.status).toBe('upload_pending');
+      expect(statuses(db, 0, 1)).toEqual(['upload_pending']);
+
+      const finalized = await repository.finalizeCartDraft({
+        shop: SHOP,
+        designId: indexedDesignId(0),
+        uploadId: 'upl_0000000000000000',
+        updatedAt: 1_700_000_000_100,
+      });
+      expect(finalized.status).toBe('cart_draft');
+      expect(statuses(db, 0, 1)).toEqual(['cart_draft']);
+    });
+  });
+
   it.each([2, 250])('atomically records %i paid designs from the real migration', async (count) => {
     await withDatabase(async (db) => {
       const repository = createProductionRepository(createD1Adapter(db));

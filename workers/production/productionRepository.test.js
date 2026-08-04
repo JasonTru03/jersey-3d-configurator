@@ -29,7 +29,7 @@ describe('0001_production_designs migration', () => {
       'cleanup_token TEXT', 'cleanup_started_at INTEGER', 'updated_at INTEGER NOT NULL',
     ]) expect(normalizeSql(sql)).toContain(normalizeSql(column));
     for (const status of [
-      'cart_draft', 'paid_pending_production', 'file_error',
+      'upload_pending', 'cart_draft', 'paid_pending_production', 'file_error',
       'cancelled', 'refunded', 'archived', 'cleanup_pending',
     ]) expect(sql).toContain(`'${status}'`);
     expect(sql).toMatch(/UNIQUE\s*\(\s*shop\s*,\s*upload_id\s*\)/iu);
@@ -96,7 +96,7 @@ describe('createCartDraft', () => {
     expect(db.batches).toHaveLength(1);
     const [insert, select] = db.batches[0];
     expect(insert.sql).toMatch(/^\s*INSERT OR IGNORE INTO production_designs/iu);
-    expect(insert.sql).toContain("'cart_draft'");
+    expect(insert.values).toContain('cart_draft');
     expect(insert.sql).not.toContain(SHOP);
     expect(insert.sql).not.toContain(DESIGN_ID);
     expect(insert.values).toContain(SHOP);
@@ -151,6 +151,61 @@ describe('createCartDraft', () => {
     await expect(createProductionRepository(db).createCartDraft(withGetter))
       .rejects.toMatchObject({ code: 'invalid-production-repository-input' });
     expect(db.prepared).toHaveLength(0);
+  });
+});
+
+describe('upload pending reservation and finalization', () => {
+  it('atomically reserves an upload_pending row before R2 writes', async () => {
+    const pending = databaseRow({ status: 'upload_pending' });
+    const db = createFakeD1({
+      batchResults: [d1Result({ changes: 1 }), d1Result({ results: [pending] })],
+    });
+
+    const result = await createProductionRepository(db).createUploadPending(draft());
+
+    const [insert, select] = db.batches[0];
+    expect(insert.sql).toMatch(/^\s*INSERT OR IGNORE INTO production_designs/iu);
+    expect(insert.values).toContain('upload_pending');
+    expect(select.values).toEqual([SHOP, UPLOAD_ID]);
+    expect(result).toEqual(authoritativeRow({ status: 'upload_pending' }));
+  });
+
+  it('atomically finalizes only the owning upload_pending row as cart_draft', async () => {
+    const cart = databaseRow({ status: 'cart_draft', updated_at: 1_700_000_000_100 });
+    const db = createFakeD1({
+      batchResults: [d1Result({ changes: 1 }), d1Result({ results: [cart] })],
+    });
+
+    const result = await createProductionRepository(db).finalizeCartDraft({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      uploadId: UPLOAD_ID,
+      updatedAt: 1_700_000_000_100,
+    });
+
+    const [update, select] = db.batches[0];
+    expect(update.sql).toMatch(/^\s*UPDATE production_designs/iu);
+    expect(update.sql).toMatch(/SET\s+status\s*=\s*'cart_draft'/iu);
+    expect(update.sql).toMatch(/status\s*=\s*'upload_pending'/iu);
+    expect(update.values).toEqual([
+      1_700_000_000_100, SHOP, DESIGN_ID, UPLOAD_ID,
+    ]);
+    expect(select.values).toEqual([SHOP, UPLOAD_ID]);
+    expect(result).toEqual(authoritativeRow({ updated_at: 1_700_000_000_100 }));
+  });
+
+  it('conflicts when finalization does not produce the owning cart draft', async () => {
+    const other = databaseRow({ status: 'upload_pending', design_id: 'dsg_fedcba0987654321' });
+    const db = createFakeD1({
+      batchResults: [d1Result(), d1Result({ results: [other] })],
+    });
+
+    await expect(createProductionRepository(db).finalizeCartDraft({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      uploadId: UPLOAD_ID,
+      updatedAt: 1_700_000_000_100,
+    })).rejects.toMatchObject({ code: 'production-repository-conflict' });
   });
 });
 
@@ -550,7 +605,7 @@ describe('expired draft cleanup', () => {
     });
 
     const statement = db.prepared[0];
-    expect(statement.sql).toContain("status = 'cart_draft'");
+    expect(statement.sql).toMatch(/status\s+IN\s*\(\s*'upload_pending'\s*,\s*'cart_draft'\s*\)/iu);
     expect(statement.sql).toContain("status = 'cleanup_pending'");
     expect(statement.sql).toMatch(/expires_at\s*<\s*\?/iu);
     expect(statement.sql).toMatch(/cleanup_started_at\s*<=\s*\?/iu);
@@ -599,7 +654,7 @@ describe('expired draft cleanup', () => {
     const [claim, select] = db.batches[0];
     expect(claim.sql).toMatch(/^\s*UPDATE production_designs/iu);
     expect(claim.sql).toMatch(/SET\s+status\s*=\s*'cleanup_pending'/iu);
-    expect(claim.sql).toMatch(/status\s*=\s*'cart_draft'[^;]+expires_at\s*</isu);
+    expect(claim.sql).toMatch(/status\s+IN\s*\(\s*'upload_pending'\s*,\s*'cart_draft'\s*\)[^;]+expires_at\s*</isu);
     expect(claim.sql).toMatch(/status\s*=\s*'cleanup_pending'[^;]+cleanup_started_at\s*<=/isu);
     expect(claim.values).toContain(CLEANUP_TOKEN);
     expect(select.values).toEqual([SHOP, DESIGN_ID]);

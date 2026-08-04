@@ -16,6 +16,7 @@ import {
   ServiceError,
   TURNSTILE_TIMEOUT_MS,
   assertProductionStoreIdentity,
+  consumeProductionPreflightRateLimit,
   consumeProductionRateLimit,
   getProductionDraft,
   isLocalProductionMode,
@@ -27,6 +28,7 @@ import {
   verifyProductionTurnstile,
 } from './productionDraftRequest.js';
 import { createProductionRepository } from './productionRepository.js';
+import { sha256ReadableStreamHex } from './incrementalSha256.js';
 
 const CART_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_BUNDLE_BYTES = MAX_PRODUCTION_PACKAGE_BYTES + 64 * 1024;
@@ -36,6 +38,7 @@ const VARIANT_ID_PATTERN = /^[1-9][0-9]{0,31}$/u;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/u;
 const FINGERPRINT_PATTERN = /^[a-f0-9]{8}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const SHOP_FINGERPRINT_PATTERN = /^shop_[A-Za-z0-9_-]{12}$/u;
 
 export function createProductionDraftsHandler(env, dependencies = {}) {
   const validateAndRebuild = dependencies.validateAndRebuildUploadedProductionPackage
@@ -43,6 +46,7 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
   const createRepository = dependencies.createProductionRepository ?? createProductionRepository;
   const fingerprintShop = dependencies.createShopFingerprint ?? createShopFingerprint;
   const hashBlob = dependencies.sha256Hex ?? sha256Hex;
+  const hashStream = dependencies.sha256ReadableStreamHex ?? sha256ReadableStreamHex;
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const now = dependencies.now ?? Date.now;
   const randomUUID = dependencies.randomUUID ?? (() => crypto.randomUUID());
@@ -61,6 +65,10 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
     try {
       const bindings = validateProductionDraftBindings(env, createRepository);
       validateProductionMultipartHeaders(request);
+      await consumeProductionPreflightRateLimit(
+        bindings.rateLimit,
+        request.headers.get('cf-connecting-ip'),
+      );
       const form = await parseProductionDraftForm(request);
       const storeConfig = bindings.storeConfigs[form.shop];
       if (!storeConfig) throw new ServiceError('PRODUCTION_DRAFT_STORE_NOT_CONFIGURED');
@@ -114,8 +122,36 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
         packageSnapshot,
       });
 
+      const reservation = await reservePendingDraft(
+        bindings.repository,
+        draft,
+        form.manifest,
+        currentTime,
+      );
+      if (reservation.designId !== designId) {
+        if (matchesReusableProductionDraft(reservation, form.manifest, currentTime)) {
+          return successResponse(reservation);
+        }
+        throw new HttpError(409, CONFLICT_MESSAGE);
+      }
+      if (!matchesOwnedPendingDraft(reservation, draft, currentTime)) {
+        if (matchesReusableProductionDraft(reservation, form.manifest, currentTime)) {
+          return successResponse(reservation);
+        }
+        throw new HttpError(409, CONFLICT_MESSAGE);
+      }
+
+      const bundleSha256 = await createBundleHash(hashStream, packageSnapshot.bundle.stream);
+
       try {
-        await storePackage(bindings.assets, keys, packageSnapshot, form.manifest, manifestSha256);
+        await storePackage(
+          bindings.assets,
+          keys,
+          packageSnapshot,
+          form.manifest,
+          manifestSha256,
+          bundleSha256,
+        );
       } catch {
         await cleanupKeys(bindings.assets, keys, logger);
         throw new ServiceError('PRODUCTION_DRAFT_R2_WRITE_FAILED');
@@ -123,23 +159,39 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
 
       let authoritative;
       try {
-        authoritative = await bindings.repository.createCartDraft(draft);
+        authoritative = await bindings.repository.finalizeCartDraft({
+          shop: form.shop,
+          designId,
+          uploadId: form.uploadId,
+          updatedAt: currentTime,
+        });
       } catch {
-        authoritative = await recoverDraft(bindings.repository, form.shop, form.uploadId);
-        if (!authoritative) {
+        const recovery = await recoverDraft(bindings.repository, form.shop, form.uploadId);
+        if (recovery.kind === 'read_failed') {
+          throw new ServiceError('PRODUCTION_DRAFT_D1_RECOVERY_READ_FAILED');
+        }
+        if (recovery.kind === 'missing') {
           await cleanupKeys(bindings.assets, keys, logger);
           throw new ServiceError('PRODUCTION_DRAFT_D1_WRITE_FAILED');
         }
+        authoritative = recovery.draft;
       }
 
-      if (!matchesReusableProductionDraft(authoritative, form.manifest, currentTime)) {
-        await cleanupKeys(bindings.assets, keys, logger);
-        throw new HttpError(409, CONFLICT_MESSAGE);
+      if (authoritative.designId === designId) {
+        if (matchesReusableProductionDraft(authoritative, form.manifest, currentTime)) {
+          return successResponse(authoritative);
+        }
+        if (matchesOwnedPendingDraft(authoritative, draft, currentTime)) {
+          throw new ServiceError('PRODUCTION_DRAFT_FINALIZE_UNCONFIRMED');
+        }
       }
-      if (authoritative.designId !== designId) {
-        await cleanupKeys(bindings.assets, keys, logger);
+      if (!await cleanupKeys(bindings.assets, keys, logger)) {
+        throw new ServiceError('PRODUCTION_DRAFT_CLEANUP_FAILED');
       }
-      return successResponse(authoritative);
+      if (matchesReusableProductionDraft(authoritative, form.manifest, currentTime)) {
+        return successResponse(authoritative);
+      }
+      throw new HttpError(409, CONFLICT_MESSAGE);
     } catch (error) {
       if (error instanceof HttpError) {
         return errorResponse(error.status, error.message, error.headers);
@@ -216,6 +268,7 @@ function snapshotPackageResult(result) {
     || bundle.filename !== `${validated.productId}-design-${validated.designFingerprint}.zip`
     || bundle.mediaType !== 'application/zip'
     || !(bundle.stream instanceof ReadableStream)
+    || typeof bundle.createStream !== 'function'
     || !Number.isSafeInteger(bundle.contentLength)
     || bundle.contentLength <= 0
     || bundle.contentLength > MAX_BUNDLE_BYTES) {
@@ -258,11 +311,16 @@ function createDesignId(randomUUID) {
 }
 
 async function createFingerprint(fingerprintShop, shop) {
+  let fingerprint;
   try {
-    return await fingerprintShop(shop);
+    fingerprint = await fingerprintShop(shop);
   } catch {
     throw new ServiceError('PRODUCTION_DRAFT_SHOP_FINGERPRINT_FAILED');
   }
+  if (!matches(fingerprint, SHOP_FINGERPRINT_PATTERN)) {
+    throw new ServiceError('PRODUCTION_DRAFT_SHOP_FINGERPRINT_INVALID');
+  }
+  return fingerprint;
 }
 
 async function createManifestHash(hashBlob, blob) {
@@ -308,7 +366,67 @@ function createDraftRecord({
   };
 }
 
-async function storePackage(assets, keys, packageResult, manifest, manifestSha256) {
+async function createBundleHash(hashStream, stream) {
+  let hash;
+  try {
+    hash = await hashStream(stream);
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_BUNDLE_HASH_FAILED');
+  }
+  if (!matches(hash, SHA256_PATTERN)) {
+    throw new ServiceError('PRODUCTION_DRAFT_BUNDLE_HASH_INVALID');
+  }
+  return hash;
+}
+
+async function reservePendingDraft(repository, draft, manifest, currentTime) {
+  let authoritative;
+  try {
+    authoritative = await repository.createUploadPending(draft);
+  } catch {
+    const recovery = await recoverDraft(repository, draft.shop, draft.uploadId);
+    if (recovery.kind === 'read_failed') {
+      throw new ServiceError('PRODUCTION_DRAFT_D1_RESERVATION_READ_FAILED');
+    }
+    if (recovery.kind === 'missing') {
+      throw new ServiceError('PRODUCTION_DRAFT_D1_RESERVATION_FAILED');
+    }
+    authoritative = recovery.draft;
+  }
+  if (!isPlainObject(authoritative)) {
+    throw new ServiceError('PRODUCTION_DRAFT_D1_RESERVATION_INVALID');
+  }
+  if (authoritative.designId !== draft.designId
+    && !matchesReusableProductionDraft(authoritative, manifest, currentTime)) {
+    throw new HttpError(409, CONFLICT_MESSAGE);
+  }
+  return authoritative;
+}
+
+function matchesOwnedPendingDraft(value, draft, currentTime) {
+  return isPlainObject(value)
+    && value.status === 'upload_pending'
+    && value.designId === draft.designId
+    && value.shop === draft.shop
+    && value.uploadId === draft.uploadId
+    && value.productId === draft.productId
+    && value.variantId === draft.variantId
+    && value.size === draft.size
+    && value.designFingerprint === draft.designFingerprint
+    && value.manifestKey === draft.manifestKey
+    && value.bundleKey === draft.bundleKey
+    && Number.isSafeInteger(value.expiresAt)
+    && value.expiresAt > currentTime;
+}
+
+async function storePackage(
+  assets,
+  keys,
+  packageResult,
+  manifest,
+  manifestSha256,
+  bundleSha256,
+) {
   const common = {
     designFingerprint: packageResult.validated.designFingerprint,
     productId: packageResult.validated.productId,
@@ -323,9 +441,23 @@ async function storePackage(assets, keys, packageResult, manifest, manifestSha25
       customMetadata: { ...common, sha256: hash },
     });
   }
-  await checkedPut(assets, keys[7], packageResult.bundle.stream, {
+  let bundleStream;
+  try {
+    bundleStream = packageResult.bundle.createStream();
+  } catch {
+    throw new Error('Production ZIP stream creation failed.');
+  }
+  if (!(bundleStream instanceof ReadableStream)) {
+    throw new Error('Production ZIP stream is invalid.');
+  }
+  await checkedPut(assets, keys[7], bundleStream, {
     httpMetadata: { contentType: 'application/zip' },
-    customMetadata: { ...common, contentLength: String(packageResult.bundle.contentLength) },
+    sha256: bundleSha256,
+    customMetadata: {
+      ...common,
+      contentLength: String(packageResult.bundle.contentLength),
+      sha256: bundleSha256,
+    },
   });
 }
 
@@ -338,17 +470,22 @@ async function checkedPut(assets, key, value, options) {
 
 async function recoverDraft(repository, shop, uploadId) {
   try {
-    return await repository.getCartDraftByUpload(shop, uploadId);
+    const draft = await repository.getCartDraftByUpload(shop, uploadId);
+    return draft === null
+      ? Object.freeze({ kind: 'missing' })
+      : Object.freeze({ kind: 'found', draft });
   } catch {
-    return null;
+    return Object.freeze({ kind: 'read_failed' });
   }
 }
 
 async function cleanupKeys(assets, keys, logger) {
   try {
     await assets.delete(keys);
+    return true;
   } catch {
     logCode(logger, 'PRODUCTION_DRAFT_CLEANUP_FAILED');
+    return false;
   }
 }
 

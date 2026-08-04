@@ -168,6 +168,23 @@ describe('production draft request gates', () => {
     expect(body.bodyReads()).toBe(0);
   });
 
+  it('applies an anonymous IP rate limit before calling native formData', async () => {
+    const current = createRuntime({
+      env: {
+        PRODUCTION_UPLOAD_RATE_LIMIT: {
+          limit: vi.fn(async () => ({ success: false })),
+        },
+      },
+    });
+    const body = bodyTrackingRequest();
+
+    const response = await current.handler(body.request);
+
+    expect(response.status).toBe(429);
+    expect(body.formData).not.toHaveBeenCalled();
+    expect(body.bodyReads()).toBe(0);
+  });
+
   it.each([
     ['missing field', (form) => form.delete('shop')],
     ['duplicate string', (form) => form.append('shop', SHOP)],
@@ -241,7 +258,9 @@ describe('production draft abuse protection and store scope', () => {
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(status);
-    expect(current.env.PRODUCTION_UPLOAD_RATE_LIMIT.limit).not.toHaveBeenCalled();
+    expect(current.env.PRODUCTION_UPLOAD_RATE_LIMIT.limit).toHaveBeenCalledOnce();
+    expect(current.env.PRODUCTION_UPLOAD_RATE_LIMIT.limit.mock.calls[0][0].key)
+      .toMatch(/^production-draft-preflight:[A-Za-z0-9_-]{32}$/u);
     const [url, init] = current.dependencies.fetchImpl.mock.calls[0];
     expect(url).toBe('https://challenges.cloudflare.com/turnstile/v0/siteverify');
     expect(init.body.get('secret')).toBe('turnstile-secret');
@@ -267,6 +286,7 @@ describe('production draft abuse protection and store scope', () => {
     }));
     const current = createRuntime({ fetchImpl, turnstileTimeoutMs: 100 });
     const pending = current.handler(current.request());
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
     await vi.advanceTimersByTimeAsync(100);
 
     const response = await pending;
@@ -278,10 +298,12 @@ describe('production draft abuse protection and store scope', () => {
   it('uses a short SHA-256 rate-limit key without the raw IP or shop', async () => {
     await runtime.handler(runtime.request());
 
-    const input = runtime.env.PRODUCTION_UPLOAD_RATE_LIMIT.limit.mock.calls[0][0];
-    expect(input).toEqual({ key: expect.stringMatching(/^production-draft:[A-Za-z0-9_-]{32}$/u) });
-    expect(input.key).not.toContain('203.0.113.5');
-    expect(input.key).not.toContain(SHOP);
+    const inputs = runtime.env.PRODUCTION_UPLOAD_RATE_LIMIT.limit.mock.calls.map(([input]) => input);
+    expect(inputs).toEqual([
+      { key: expect.stringMatching(/^production-draft-preflight:[A-Za-z0-9_-]{32}$/u) },
+      { key: expect.stringMatching(/^production-draft:[A-Za-z0-9_-]{32}$/u) },
+    ]);
+    expect(inputs.every(({ key }) => !key.includes('203.0.113.5') && !key.includes(SHOP))).toBe(true);
   });
 
   it.each([
@@ -304,7 +326,7 @@ describe('production draft abuse protection and store scope', () => {
     const response = await current.handler(current.request());
     expect(response.status).toBe(400);
     expect(current.dependencies.fetchImpl).toHaveBeenCalledOnce();
-    expect(current.env.PRODUCTION_UPLOAD_RATE_LIMIT.limit).toHaveBeenCalledOnce();
+    expect(current.env.PRODUCTION_UPLOAD_RATE_LIMIT.limit).toHaveBeenCalledTimes(2);
     expect(current.dependencies.validateAndRebuildUploadedProductionPackage).not.toHaveBeenCalled();
   });
 });
@@ -338,7 +360,7 @@ describe('production draft idempotency', () => {
 
   it('cleans its unique keys and returns a matching authoritative concurrent row', async () => {
     const concurrent = existingDraft({ designId: 'dsg_22222222-2222-4222-8222-222222222222' });
-    const current = createRuntime({ createResult: concurrent });
+    const current = createRuntime({ finalizeResult: concurrent });
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(201);
@@ -348,15 +370,37 @@ describe('production draft idempotency', () => {
   });
 
   it('cleans its keys and returns 409 for a conflicting concurrent row', async () => {
-    const current = createRuntime({ createResult: existingDraft({ designFingerprint: 'deadbeef' }) });
+    const current = createRuntime({ finalizeResult: existingDraft({ designFingerprint: 'deadbeef' }) });
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(409);
     expect(current.env.PRODUCTION_ASSETS.delete).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ['matching', existingDraft({ designId: 'dsg_22222222-2222-4222-8222-222222222222' })],
+    ['conflicting', existingDraft({ designId: 'dsg_22222222-2222-4222-8222-222222222222', designFingerprint: 'deadbeef' })],
+  ])('returns stable 503 when %s concurrent cleanup fails', async (_label, finalizeResult) => {
+    const current = createRuntime({ deleteFailure: true, finalizeResult });
+
+    const response = await current.handler(current.request());
+
+    expect(response.status).toBe(503);
+    expect(current.env.PRODUCTION_ASSETS.delete).toHaveBeenCalledOnce();
+  });
 });
 
 describe('production draft private storage', () => {
+  it('rejects an unsafe shop fingerprint before creating D1 or R2 keys', async () => {
+    const current = createRuntime({ shopFingerprint: '../unsafe' });
+
+    const response = await current.handler(current.request());
+
+    expect(response.status).toBe(503);
+    expect(current.repository.createUploadPending).not.toHaveBeenCalled();
+    expect(current.env.PRODUCTION_ASSETS.put).not.toHaveBeenCalled();
+  });
+
   it('integrates a real browser package with the atomic validator and streamed R2 bundle', async () => {
     installBlobStreamPolyfill();
     const artifact = await createRealProductionPackage();
@@ -376,11 +420,16 @@ describe('production draft private storage', () => {
     expect(body.designFingerprint).toBe(artifact.fingerprint);
     expect(body.bundleFilename).toBe(artifact.filename);
     expect(current.env.PRODUCTION_ASSETS.put).toHaveBeenCalledTimes(8);
-    expect(current.env.PRODUCTION_ASSETS.put.mock.calls[7][1]).toBeInstanceOf(ReadableStream);
-    expect(current.repository.createCartDraft).toHaveBeenCalledOnce();
+    const bundlePut = current.env.PRODUCTION_ASSETS.put.mock.calls[7];
+    expect(bundlePut[1]).toBeInstanceOf(ReadableStream);
+    const storedBundle = new Blob([await new Response(bundlePut[1]).arrayBuffer()]);
+    expect(bundlePut[2].sha256).toBe(await sha256Hex(storedBundle));
+    expect(bundlePut[2].customMetadata.sha256).toBe(bundlePut[2].sha256);
+    expect(current.repository.createUploadPending).toHaveBeenCalledOnce();
+    expect(current.repository.finalizeCartDraft).toHaveBeenCalledOnce();
   });
 
-  it('writes seven validated Blobs then the untouched ZIP stream before D1', async () => {
+  it('reserves D1, writes seven validated Blobs and a fresh ZIP stream, then finalizes D1', async () => {
     const response = await runtime.handler(runtime.request());
 
     expect(response.status).toBe(201);
@@ -406,14 +455,15 @@ describe('production draft private storage', () => {
       .toEqual(PRODUCTION_PACKAGE_FILE_CONTRACT.map(({ filename }) => filename));
     expect(puts.slice(0, 7).every(([, value]) => value instanceof Blob)).toBe(true);
     expect(puts[7][0].split('/').at(-1)).toBe(BUNDLE_FILENAME);
-    expect(puts[7][1]).toBe(runtime.bundle.stream);
+    expect(puts[7][1]).not.toBe(runtime.bundle.stream);
     expect(puts[7][1]).toBeInstanceOf(ReadableStream);
     expect(runtime.events).toEqual([
+      'd1:reserve',
       'put:design.json', 'put:uv-atlas.png', 'put:uv-pattern-pieces.png',
       'put:uv-reference.pdf', 'put:preview-front.png', 'put:preview-back.png',
-      'put:manifest.json', `put:${BUNDLE_FILENAME}`, 'd1:create',
+      'put:manifest.json', `put:${BUNDLE_FILENAME}`, 'd1:finalize',
     ]);
-    expect(runtime.repository.createCartDraft).toHaveBeenCalledWith(expect.objectContaining({
+    expect(runtime.repository.createUploadPending).toHaveBeenCalledWith(expect.objectContaining({
       designId: DESIGN_ID,
       shop: SHOP,
       uploadId: UPLOAD_ID,
@@ -426,6 +476,12 @@ describe('production draft private storage', () => {
       expiresAt: EXPIRES_AT,
       updatedAt: NOW,
     }));
+    expect(runtime.repository.finalizeCartDraft).toHaveBeenCalledWith({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      uploadId: UPLOAD_ID,
+      updatedAt: NOW,
+    });
   });
 
   it('stores safe MIME, artifact SHA-256, manifest SHA-256 and bundle length metadata', async () => {
@@ -446,15 +502,18 @@ describe('production draft private storage', () => {
     const manifest = runtime.files[6].blob;
     const manifestHash = await sha256Hex(manifest);
     expect(calls[6][2].customMetadata.sha256).toBe(manifestHash);
-    expect(runtime.repository.createCartDraft.mock.calls[0][0].manifestSha256).toBe(manifestHash);
+    expect(runtime.repository.createUploadPending.mock.calls[0][0].manifestSha256).toBe(manifestHash);
+    const bundleHash = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
     expect(calls[7][2]).toEqual({
       httpMetadata: { contentType: 'application/zip' },
+      sha256: bundleHash,
       customMetadata: {
         designFingerprint: FINGERPRINT,
         productId: PRODUCT_ID,
         variantId: VARIANT_ID,
         size: SIZE,
         contentLength: String(runtime.bundle.contentLength),
+        sha256: bundleHash,
       },
     });
   });
@@ -468,12 +527,13 @@ describe('production draft private storage', () => {
       expect(response.status).toBe(503);
       expect(current.env.PRODUCTION_ASSETS.delete).toHaveBeenCalledOnce();
       expect(current.env.PRODUCTION_ASSETS.delete.mock.calls[0][0]).toHaveLength(8);
-      expect(current.repository.createCartDraft).not.toHaveBeenCalled();
+      expect(current.repository.createUploadPending).toHaveBeenCalledOnce();
+      expect(current.repository.finalizeCartDraft).not.toHaveBeenCalled();
       expect(JSON.stringify(await response.json())).not.toMatch(/shops\/|r2 details|stream details/iu);
     },
   );
 
-  it('treats a source stream failure as an R2 failure and cleans all keys', async () => {
+  it('preserves the pending index when the pre-upload ZIP hash stream fails', async () => {
     const stream = new ReadableStream({ start(controller) { controller.error(new Error('stream details')); } });
     const current = createRuntime({ bundle: { stream } });
     current.env.PRODUCTION_ASSETS.put.mockImplementation(async (key, value) => {
@@ -485,13 +545,14 @@ describe('production draft private storage', () => {
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(503);
-    expect(current.env.PRODUCTION_ASSETS.delete).toHaveBeenCalledOnce();
-    expect(current.repository.createCartDraft).not.toHaveBeenCalled();
+    expect(current.env.PRODUCTION_ASSETS.delete).not.toHaveBeenCalled();
+    expect(current.repository.createUploadPending).toHaveBeenCalledOnce();
+    expect(current.repository.finalizeCartDraft).not.toHaveBeenCalled();
   });
 
   it('recovers an authoritative own row after an ambiguous D1 failure', async () => {
     const current = createRuntime({
-      createFailure: new Error('d1 details'),
+      finalizeFailure: new Error('d1 details'),
       existingSequence: [null, existingDraft()],
     });
     const response = await current.handler(current.request());
@@ -501,8 +562,24 @@ describe('production draft private storage', () => {
     await expect(response.json()).resolves.toEqual(successPayload(existingDraft()));
   });
 
+  it('preserves indexed R2 objects when ambiguous finalization recovery read fails', async () => {
+    const current = createRuntime({
+      finalizeFailure: new Error('d1 details'),
+      existingSequence: [null, new Error('read details')],
+    });
+
+    const response = await current.handler(current.request());
+
+    expect(response.status).toBe(503);
+    expect(current.env.PRODUCTION_ASSETS.delete).not.toHaveBeenCalled();
+  });
+
   it('cleans all keys for a D1 failure and keeps a stable response when cleanup also fails', async () => {
-    const current = createRuntime({ createFailure: new Error('d1 details'), deleteFailure: true });
+    const current = createRuntime({
+      finalizeFailure: new Error('d1 details'),
+      existingSequence: [null, null],
+      deleteFailure: true,
+    });
     const response = await current.handler(current.request());
 
     expect(response.status).toBe(503);
@@ -527,18 +604,21 @@ describe('production draft private storage', () => {
 
 function createRuntime({
   bundle: bundleOverride,
-  createFailure,
-  createResult,
   deleteFailure = false,
   env: envOverrides = {},
   existing = null,
   existingSequence,
   fetchImpl,
+  finalizeFailure,
+  finalizeResult,
   form = validFormData(),
   now = () => NOW,
   putFailureIndex = -1,
   putResult,
+  reserveFailure,
+  reserveResult,
   randomUUID = () => UUID,
+  shopFingerprint = 'shop_abcdefghijkl',
   storeConfig = {},
   turnstile = { success: true, action: 'production_draft' },
   turnstileTimeoutMs,
@@ -557,11 +637,15 @@ function createRuntime({
     files: Object.freeze(files),
     ...validatedOverride,
   });
+  const createStream = () => new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array([1, 2, 3])); controller.close(); },
+  });
   const bundle = Object.freeze({
     contentLength: 321,
+    createStream,
     filename: BUNDLE_FILENAME,
     mediaType: 'application/zip',
-    stream: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } }),
+    stream: createStream(),
     ...bundleOverride,
   });
   const events = [];
@@ -579,12 +663,27 @@ function createRuntime({
     }),
   };
   const defaultExistingSequence = existingSequence ?? [existing];
+  let reservedDraft;
   const repository = {
-    getCartDraftByUpload: vi.fn(async () => defaultExistingSequence.shift() ?? null),
-    createCartDraft: vi.fn(async (draft) => {
-      events.push('d1:create');
-      if (createFailure) throw createFailure;
-      return createResult ?? existingDraft({ ...draft, status: 'cart_draft' });
+    getCartDraftByUpload: vi.fn(async () => {
+      const next = defaultExistingSequence.shift();
+      if (next instanceof Error) throw next;
+      return next ?? null;
+    }),
+    createUploadPending: vi.fn(async (draft) => {
+      events.push('d1:reserve');
+      if (reserveFailure) throw reserveFailure;
+      reservedDraft = existingDraft({ ...draft, status: 'upload_pending' });
+      return reserveResult ?? reservedDraft;
+    }),
+    finalizeCartDraft: vi.fn(async (input) => {
+      events.push('d1:finalize');
+      if (finalizeFailure) throw finalizeFailure;
+      return finalizeResult ?? existingDraft({
+        ...reservedDraft,
+        ...input,
+        status: 'cart_draft',
+      });
     }),
   };
   const store = {
@@ -608,7 +707,7 @@ function createRuntime({
     createProductionRepository: vi.fn(() => repository),
     validateAndRebuildUploadedProductionPackage: validateAndRebuild
       ?? vi.fn(async () => ({ validated, bundle })),
-    createShopFingerprint: vi.fn(async () => 'shop_abcdefghijkl'),
+    createShopFingerprint: vi.fn(async () => shopFingerprint),
     fetchImpl: fetchImpl ?? vi.fn(async () => Response.json(turnstile)),
     logger: { error: vi.fn() },
     now,

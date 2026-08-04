@@ -28,6 +28,7 @@ const LIFECYCLE_STATUSES = new Set([
 ]);
 const ORDER_TOPICS = new Set(['orders/paid', 'orders/cancelled', 'refunds/create']);
 const ALL_STATUSES = new Set([
+  'upload_pending',
   'cart_draft',
   'paid_pending_production',
   'file_error',
@@ -92,7 +93,9 @@ export function createProductionRepository(db) {
   assertDatabase(db);
 
   return Object.freeze({
+    createUploadPending: (draft) => createDraftWithStatus(db, draft, 'upload_pending'),
     createCartDraft: (draft) => createCartDraft(db, draft),
+    finalizeCartDraft: (input) => finalizeCartDraft(db, input),
     getDesign: (shop, designId) => getDesign(db, shop, designId),
     getCartDraftByUpload: (shop, uploadId) => getCartDraftByUpload(db, shop, uploadId),
     bindCartQuote: (input) => bindCartQuote(db, input),
@@ -106,6 +109,10 @@ export function createProductionRepository(db) {
 }
 
 async function createCartDraft(db, input) {
+  return createDraftWithStatus(db, input, 'cart_draft');
+}
+
+async function createDraftWithStatus(db, input, status) {
   const draft = validateDraft(input);
   const insert = prepareBound(db, `
     INSERT OR IGNORE INTO production_designs (
@@ -115,13 +122,14 @@ async function createCartDraft(db, input) {
       expires_at, paid_at, shopify_order_gid, shopify_order_name, error_code,
       cleanup_token, cleanup_started_at, updated_at
     ) VALUES (
-      ?, ?, ?, NULL, 'cart_draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       NULL, NULL, NULL, NULL, NULL, NULL, ?
     )
   `, [
     draft.designId,
     draft.shop,
     draft.uploadId,
+    status,
     draft.productId,
     draft.variantId,
     draft.size,
@@ -148,6 +156,35 @@ async function createCartDraft(db, input) {
   const row = firstBatchRow(results, 1);
   if (!row) throw new ProductionRepositoryError();
   return normalizeRow(row);
+}
+
+async function finalizeCartDraft(db, input) {
+  const value = readExactDataProperties(input, ['shop', 'designId', 'uploadId', 'updatedAt']);
+  if (!value) throw invalidInput();
+  const shop = requirePattern(value.shop, SHOP_PATTERN);
+  const designId = requirePattern(value.designId, DESIGN_ID_PATTERN);
+  const uploadId = requirePattern(value.uploadId, UPLOAD_ID_PATTERN);
+  const updatedAt = requireTimestamp(value.updatedAt);
+  const update = prepareBound(db, `
+    UPDATE production_designs
+    SET status = 'cart_draft', updated_at = ?
+    WHERE shop = ? AND design_id = ? AND upload_id = ?
+      AND status = 'upload_pending'
+  `, [updatedAt, shop, designId, uploadId]);
+  const select = prepareBound(db, `
+    SELECT ${ROW_COLUMNS}
+    FROM production_designs
+    WHERE shop = ? AND upload_id = ?
+    LIMIT 1
+  `, [shop, uploadId]);
+  const results = await executeBatch(db, [update, select]);
+  const row = firstBatchRow(results, 1);
+  if (!row) throw new ProductionRepositoryError('production-repository-conflict');
+  const normalized = normalizeRow(row);
+  if (normalized.designId !== designId || normalized.status !== 'cart_draft') {
+    throw new ProductionRepositoryError('production-repository-conflict');
+  }
+  return normalized;
 }
 
 async function getDesign(db, shopInput, designIdInput) {
@@ -288,7 +325,7 @@ async function listExpiredDrafts(db, input) {
     SELECT shop, design_id, manifest_key, bundle_key, expires_at,
       cleanup_token, cleanup_started_at
     FROM production_designs
-    WHERE (status = 'cart_draft' AND expires_at < ?)
+    WHERE (status IN ('upload_pending', 'cart_draft') AND expires_at < ?)
       OR (status = 'cleanup_pending' AND cleanup_started_at <= ?)
     ORDER BY expires_at ASC, design_id ASC
     LIMIT ?
@@ -314,7 +351,7 @@ async function claimExpiredDraft(db, input) {
     SET status = 'cleanup_pending', cleanup_token = ?, cleanup_started_at = ?, updated_at = ?
     WHERE shop = ? AND design_id = ? AND expires_at = ?
       AND (
-        (status = 'cart_draft' AND expires_at < ?)
+        (status IN ('upload_pending', 'cart_draft') AND expires_at < ?)
         OR (
           status = 'cleanup_pending'
           AND (cleanup_token = ? OR cleanup_started_at <= ?)

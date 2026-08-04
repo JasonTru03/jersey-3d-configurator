@@ -4,6 +4,7 @@ CREATE TABLE production_designs (
   upload_id TEXT NOT NULL,
   bundle_id TEXT,
   status TEXT NOT NULL CHECK (status IN (
+    'upload_pending',
     'cart_draft',
     'paid_pending_production',
     'file_error',

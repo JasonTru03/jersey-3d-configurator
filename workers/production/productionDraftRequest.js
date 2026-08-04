@@ -68,7 +68,8 @@ export function validateProductionDraftBindings(env, createRepository) {
   }
   if (!repository
     || typeof repository.getCartDraftByUpload !== 'function'
-    || typeof repository.createCartDraft !== 'function') {
+    || typeof repository.createUploadPending !== 'function'
+    || typeof repository.finalizeCartDraft !== 'function') {
     throw new ServiceError('PRODUCTION_DRAFT_REPOSITORY_INVALID');
   }
   return {
@@ -352,6 +353,31 @@ export async function consumeProductionRateLimit(rateLimit, shop, ip) {
   }
   if (!isPlainObject(result) || typeof result.success !== 'boolean') {
     throw new ServiceError('PRODUCTION_DRAFT_RATE_LIMIT_RESULT_INVALID');
+  }
+  if (!result.success) throw new HttpError(429, 'Production draft upload rate limit exceeded.');
+}
+
+export async function consumeProductionPreflightRateLimit(rateLimit, ip) {
+  const client = typeof ip === 'string' && ip.length > 0 ? `ip:${ip}` : 'anonymous';
+  let digest;
+  try {
+    digest = new Uint8Array(await crypto.subtle.digest(
+      'SHA-256',
+      encoder.encode(`production-draft-preflight:${client}`),
+    ));
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_PREFLIGHT_RATE_HASH_FAILED');
+  }
+  let result;
+  try {
+    result = await rateLimit.limit({
+      key: `production-draft-preflight:${encodeBase64Url(digest).slice(0, 32)}`,
+    });
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_PREFLIGHT_RATE_LIMIT_FAILED');
+  }
+  if (!isPlainObject(result) || typeof result.success !== 'boolean') {
+    throw new ServiceError('PRODUCTION_DRAFT_PREFLIGHT_RATE_LIMIT_RESULT_INVALID');
   }
   if (!result.success) throw new HttpError(429, 'Production draft upload rate limit exceeded.');
 }

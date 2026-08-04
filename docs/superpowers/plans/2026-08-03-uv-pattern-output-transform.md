@@ -1,5 +1,8 @@
 # UV Pattern Output Transform Implementation Plan
 
+> [!IMPORTANT]
+> **真实 ZIP 已否决早期方向方案。** 下文关于“piece 与 global 两层相同变换可恢复正向”的步骤只保留作历史记录，禁止重新执行。当前 Chelsea/FN8788 必须使用 front/back 单片恒等变换 `{ rotation: 0, mirrorX: false }`，共享方向修正只由 global `{ rotation: 180, mirrorX: true }` 执行；实施与验收以文末“真实生产包验收后的方向修正”为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为生产裁片图增加模型级最终旋转/镜像参数，使当前 Chelsea 和 FN8788 的裁片与 `PLAYER 16` 文字最终朝上且从左到右可读。
@@ -890,7 +893,7 @@ Expected: 全部 exit 0，且 `git status --short --branch` 无文件改动。
 
 调用 `superpowers:finishing-a-development-branch`，向用户提供该技能要求的四个本地/远端集成选项。未经用户明确确认，不执行 merge、push、PR 或 Cloudflare 发布。
 
-## 附录：真实验收修正（2026-08-04）
+## 附录：真实生产包验收后的方向修正（2026-08-04）
 
 原实施步骤完成后，真实生产 ZIP/PDF 视觉验收否决了“双层均配置 `{ rotation: 180, mirrorX: true }`”的结果。该组合在 piece 层和 global 层各执行一次上下翻转，两次变换互相抵消，导致领口、`FRONT TOP`、`PLAYER`、`16` 与 Crest 仍然上下颠倒。
 

@@ -1,124 +1,117 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDesignAssetsHandler } from './designAssets.js';
-import { createDesignDocument } from '../src/features/configurator/designs/designDocument.js';
 
-const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]);
-const transform = { offset: { u: 0, v: 0 }, scale: 1, rotationDeg: 0, repeat: { u: 3, v: 4 } };
-const metadata = { atlasSize: 2048, projectionVersion: 1, sourceHash: 'asset://pattern-a', transform, projectionId: 'chelsea-jersey-cylindrical-v1', bakeKey: 'bottom-pattern-atlas:pattern-a' };
+const DESIGN_ID = 'dsg_11111111-1111-4111-8111-111111111111';
 
-afterEach(() => vi.unstubAllGlobals());
+describe('legacy design asset compatibility', () => {
+  it('retires the old POST upload route without reading the body or writing DESIGN_ASSETS', async () => {
+    let bodyReads = 0;
+    const designAssets = { put: vi.fn(), get: vi.fn() };
+    const handler = createDesignAssetsHandler({ DESIGN_ASSETS: designAssets });
+    const request = {
+      method: 'POST',
+      url: 'https://example.workers.dev/api/design-assets',
+      headers: new Headers({ 'content-type': 'multipart/form-data; boundary=old' }),
+      formData: vi.fn(),
+    };
+    Object.defineProperty(request, 'body', { get() { bodyReads += 1; return null; } });
 
-function design(overrides = {}) {
-  return {
-    format: 'jersey-design',
-    version: 2,
-    productId: 'jersey-1',
-    savedAt: '2026-07-23T00:00:00.000Z',
-    state: { overrides: { bottomPattern: { enabled: true, source: { assetRef: 'asset://pattern-a' }, transform, projectionVersion: 1, modelProjectionId: 'chelsea-jersey-cylindrical-v1', bakeMetadata: metadata } } },
-    ...overrides,
-  };
-}
+    const response = await handler(request);
 
-function request({ designDocument = design(), uploadMetadata = metadata, turnstileToken = 'valid-turnstile-token', ip = '203.0.113.1', atlas = { type: 'image/png', size: png.length, slice: () => ({ arrayBuffer: async () => png.buffer }), arrayBuffer: async () => png.buffer } } = {}) {
-  const form = { get: (key) => ({ atlas, design: { text: async () => JSON.stringify(designDocument) }, metadata: JSON.stringify(uploadMetadata), turnstileToken })[key] };
-  return { method: 'POST', url: 'https://example.workers.dev/api/design-assets', headers: { get: (name) => ({ 'content-type': 'multipart/form-data', 'cf-connecting-ip': ip }[name] ?? null) }, formData: async () => form };
-}
-
-function env(overrides = {}) {
-  return {
-    TURNSTILE_SECRET_KEY: 'secret',
-    TURNSTILE_SITE_KEY: 'public-site-key',
-    DESIGN_UPLOAD_RATE_LIMIT: { get: vi.fn(async () => null), put: vi.fn(async () => {}) },
-    DESIGN_ASSETS: { put: vi.fn(), get: vi.fn() },
-    ASSETS: { fetch: vi.fn(() => new Response('app')) },
-    ...overrides,
-  };
-}
-
-function acceptTurnstile() {
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ success: true })));
-}
-
-describe('design asset worker', () => {
-  it('returns a clear unavailable response for every design asset API route in local production files mode', async () => {
-    const handler = createDesignAssetsHandler(env({ LOCAL_PRODUCTION_FILES: 'true', DESIGN_ASSETS: undefined, DESIGN_UPLOAD_RATE_LIMIT: undefined }));
-    for (const apiRequest of [
-      new Request('https://example.workers.dev/api/design-assets/config'),
-      request(),
-      new Request('https://example.workers.dev/api/design-assets/dsg_123/atlas.png'),
-    ]) {
-      const response = await handler(apiRequest);
-      expect(response.status).toBe(503);
-      await expect(response.json()).resolves.toEqual({ error: 'Design asset storage is unavailable in LOCAL_PRODUCTION_FILES mode.' });
-    }
+    expect(response.status).toBe(410);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Legacy design asset uploads are no longer available.' });
+    expect(request.formData).not.toHaveBeenCalled();
+    expect(bodyReads).toBe(0);
+    expect(designAssets.put).not.toHaveBeenCalled();
   });
 
-  it('returns a normal not-found response when a missing static asset reaches a worker without an asset binding', async () => {
-    const handler = createDesignAssetsHandler(env({ ASSETS: undefined }));
-    const response = await handler(new Request('https://example.workers.dev/favicon.ico'));
+  it('preserves read-only access to an exact historical atlas ID when the binding exists', async () => {
+    const body = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1, 2])); controller.close(); } });
+    const designAssets = {
+      get: vi.fn(async () => ({
+        body,
+        httpMetadata: { contentType: 'image/png' },
+      })),
+    };
+    const handler = createDesignAssetsHandler({ DESIGN_ASSETS: designAssets });
 
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe('Not found');
+    const response = await handler(new Request(
+      `https://example.workers.dev/api/design-assets/${DESIGN_ID}/atlas.png`,
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('image/png');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(designAssets.get).toHaveBeenCalledWith(`design-assets/${DESIGN_ID}/atlas.png`);
   });
 
-  it('publishes only the configured public Turnstile site key', async () => {
-    const response = await createDesignAssetsHandler(env())(new Request('https://example.workers.dev/api/design-assets/config'));
-    expect(await response.json()).toEqual({ turnstileSiteKey: 'public-site-key' });
-  });
-
-  it('stores a captcha-verified, rate-limited, internally consistent v2 design', async () => {
-    acceptTurnstile();
-    const runtime = env();
-    const response = await createDesignAssetsHandler(runtime)(request());
-    const body = await response.json();
-    expect(response.status).toBe(201);
-    expect(body).toMatchObject({ designId: expect.stringMatching(/^dsg_/), url: expect.stringContaining('/api/design-assets/dsg_'), size: png.length, version: 1, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
-    expect(fetch).toHaveBeenCalledWith('https://challenges.cloudflare.com/turnstile/v0/siteverify', expect.objectContaining({ method: 'POST' }));
-    expect(runtime.DESIGN_UPLOAD_RATE_LIMIT.put).toHaveBeenCalledTimes(1);
-    expect(runtime.DESIGN_ASSETS.put).toHaveBeenCalledTimes(3);
-  });
-
-  it('accepts a current v3 design document created by the configurator', async () => {
-    acceptTurnstile();
-    const v3Document = createDesignDocument({
-      productId: 'jersey-1',
-      savedAt: '2026-07-24T00:00:00.000Z',
-      state: design().state,
+  it('returns 404 for a missing historical object or missing read binding', async () => {
+    const missingObject = createDesignAssetsHandler({
+      DESIGN_ASSETS: { get: vi.fn(async () => null) },
     });
-    const response = await createDesignAssetsHandler(env())(request({ designDocument: v3Document }));
+    const missingBinding = createDesignAssetsHandler({});
 
-    expect(v3Document.version).toBe(3);
-    expect(response.status).toBe(201);
+    expect((await missingObject(new Request(
+      `https://example.workers.dev/api/design-assets/${DESIGN_ID}/atlas.png`,
+    ))).status).toBe(404);
+    expect((await missingBinding(new Request(
+      `https://example.workers.dev/api/design-assets/${DESIGN_ID}/atlas.png`,
+    ))).status).toBe(404);
   });
 
-  it('rejects missing or failed Turnstile verification before storage', async () => {
-    const runtime = env();
-    expect((await createDesignAssetsHandler(runtime)(request({ turnstileToken: '' }))).status).toBe(403);
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ success: false })));
-    expect((await createDesignAssetsHandler(runtime)(request())).status).toBe(403);
-    expect(runtime.DESIGN_ASSETS.put).not.toHaveBeenCalled();
+  it.each([
+    '/api/design-assets/../secret/atlas.png',
+    '/api/design-assets/dsg_short/atlas.png',
+    `/api/design-assets/${DESIGN_ID}/atlas.png/extra`,
+    `/api/design-assets/${encodeURIComponent('../secret')}/atlas.png`,
+  ])('does not turn unsafe or non-exact historical paths into R2 keys: %s', async (pathname) => {
+    const assetsResponse = new Response('static fallback');
+    const env = {
+      DESIGN_ASSETS: { get: vi.fn() },
+      ASSETS: { fetch: vi.fn(() => assetsResponse) },
+    };
+    const handler = createDesignAssetsHandler(env);
+    const response = await handler(new Request(`https://example.workers.dev${pathname}`));
+
+    expect(response).toBe(assetsResponse);
+    expect(env.DESIGN_ASSETS.get).not.toHaveBeenCalled();
   });
 
-  it('rejects production writes without rate-limit KV and over the per-minute IP quota', async () => {
-    acceptTurnstile();
-    expect((await createDesignAssetsHandler(env({ DESIGN_UPLOAD_RATE_LIMIT: undefined }))(request())).status).toBe(503);
-    const runtime = env({ DESIGN_UPLOAD_RATE_LIMIT: { get: vi.fn(async () => '10'), put: vi.fn() } });
-    expect((await createDesignAssetsHandler(runtime)(request())).status).toBe(429);
-    expect(runtime.DESIGN_ASSETS.put).not.toHaveBeenCalled();
+  it.each([
+    ['GET', '/api/design-assets/config'],
+    ['GET', '/api/design-assets'],
+    ['POST', '/api/design-assets/extra'],
+    ['PUT', `/api/design-assets/${DESIGN_ID}/atlas.png`],
+    ['GET', '/assets/app.js'],
+  ])('keeps static ASSETS.fetch as the final fallback for %s %s', async (method, pathname) => {
+    const assetsResponse = new Response('static fallback');
+    const env = { ASSETS: { fetch: vi.fn(() => assetsResponse) } };
+    const handler = createDesignAssetsHandler(env);
+    const request = new Request(`https://example.workers.dev${pathname}`, { method });
+
+    expect(await handler(request)).toBe(assetsResponse);
+    expect(env.ASSETS.fetch).toHaveBeenCalledWith(request);
   });
 
-  it('rejects a design whose bottom-pattern source, bake key, projection, or transform differs from upload metadata', async () => {
-    acceptTurnstile();
-    const mismatched = structuredClone(metadata);
-    mismatched.bakeKey = 'bottom-pattern-atlas:other';
-    const response = await createDesignAssetsHandler(env())(request({ uploadMetadata: mismatched }));
-    expect(response.status).toBe(400);
+  it('returns a plain 404 when no static binding handles the final fallback', async () => {
+    const response = await createDesignAssetsHandler({})(
+      new Request('https://example.workers.dev/favicon.ico'),
+    );
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toBe('Not found');
   });
 
-  it('rejects non-PNG uploads and routes non-API requests to static assets', async () => {
-    const runtime = env();
-    const bad = { type: 'image/jpeg', size: 7, slice: () => ({ arrayBuffer: async () => new ArrayBuffer(0) }), arrayBuffer: async () => new ArrayBuffer(0) };
-    expect((await createDesignAssetsHandler(runtime)(request({ atlas: bad }))).status).toBe(400);
-    expect(await (await createDesignAssetsHandler(runtime)(new Request('https://example.workers.dev/'))).text()).toBe('app');
+  it('does not disable historical reads merely because new production uploads are local-only', async () => {
+    const env = {
+      LOCAL_PRODUCTION_FILES: 'true',
+      DESIGN_ASSETS: {
+        get: vi.fn(async () => ({ body: 'png', httpMetadata: { contentType: 'image/png' } })),
+      },
+    };
+    const response = await createDesignAssetsHandler(env)(new Request(
+      `https://example.workers.dev/api/design-assets/${DESIGN_ID}/atlas.png`,
+    ));
+    expect(response.status).toBe(200);
   });
 });

@@ -5,12 +5,14 @@ function createInjectedRouter(overrides = {}) {
   const handlers = {
     cartQuotes: vi.fn(() => new Response('cart quotes')),
     appProxy: vi.fn(() => new Response('app proxy')),
+    productionDrafts: vi.fn(() => new Response('production drafts')),
     designAssets: vi.fn(() => new Response('design assets')),
     ...overrides,
   };
   const factories = {
     createCartQuotesHandler: vi.fn(() => handlers.cartQuotes),
     createAppProxyHandler: vi.fn(() => handlers.appProxy),
+    createProductionDraftsHandler: vi.fn(() => handlers.productionDrafts),
     createDesignAssetsHandler: vi.fn(() => handlers.designAssets),
   };
   const env = { marker: 'runtime' };
@@ -26,7 +28,10 @@ describe('Worker router', () => {
   it.each([
     ['POST', '/api/cart-quotes', 'cartQuotes'],
     ['GET', '/apps/jersey-configurator/cart-handoff', 'appProxy'],
-    ['GET', '/api/design-assets/config', 'designAssets'],
+    ['GET', '/api/production-drafts/config', 'productionDrafts'],
+    ['POST', '/api/production-drafts', 'productionDrafts'],
+    ['PUT', '/api/production-drafts', 'productionDrafts'],
+    ['POST', '/api/production-drafts/config', 'productionDrafts'],
     ['GET', '/storefront.js', 'designAssets'],
   ])('routes %s %s to %s', async (method, pathname, expectedHandler) => {
     const runtime = createInjectedRouter();
@@ -69,6 +74,9 @@ describe('Worker router', () => {
     '/api/cart-quotes/',
     '/apps/jersey-configurator/cart-handoff/extra',
     '/apps/jersey-configurator/cart-handoff/',
+    '/api/production-drafts-extra',
+    '/api/production-drafts/',
+    '/api/production-drafts/config/',
   ])('falls back instead of prefix-matching %s', async (pathname) => {
     const runtime = createInjectedRouter();
     const request = new Request(`https://example.workers.dev${pathname}`);
@@ -97,18 +105,22 @@ describe('Worker router', () => {
     const cartQuotesHandler = vi.fn(() => new Response('direct cart'));
     const appProxyHandler = vi.fn(() => new Response('direct proxy'));
     const designAssetsHandler = vi.fn(() => new Response('direct fallback'));
+    const productionDraftsHandler = vi.fn(() => new Response('direct production drafts'));
     const handler = createWorkerHandler({}, {
       cartQuotesHandler,
       appProxyHandler,
+      productionDraftsHandler,
       designAssetsHandler,
     });
 
     await handler(new Request('https://example.workers.dev/api/cart-quotes', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/apps/jersey-configurator/cart-handoff'));
+    await handler(new Request('https://example.workers.dev/api/production-drafts', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/'));
 
     expect(cartQuotesHandler).toHaveBeenCalledOnce();
     expect(appProxyHandler).toHaveBeenCalledOnce();
+    expect(productionDraftsHandler).toHaveBeenCalledOnce();
     expect(designAssetsHandler).toHaveBeenCalledOnce();
   });
 
@@ -125,9 +137,10 @@ describe('Worker router', () => {
     expect(() => errorRouter.handler(new Request('https://example.workers.dev/'))).toThrow(error);
   });
 
-  it('preserves real design-assets config and static asset behavior', async () => {
+  it('preserves real production-draft config and static asset behavior', async () => {
     const assetsResponse = new Response('static app');
     const env = {
+      LOCAL_PRODUCTION_FILES: 'false',
       TURNSTILE_SITE_KEY: 'public-site-key',
       ASSETS: { fetch: vi.fn(() => assetsResponse) },
     };
@@ -136,7 +149,7 @@ describe('Worker router', () => {
       appProxyHandler: vi.fn(),
     });
 
-    const configResponse = await handler(new Request('https://example.workers.dev/api/design-assets/config'));
+    const configResponse = await handler(new Request('https://example.workers.dev/api/production-drafts/config'));
     const staticRequest = new Request('https://example.workers.dev/assets/app.js');
     const staticResult = await handler(staticRequest);
 
@@ -155,12 +168,12 @@ describe('Worker router', () => {
       appProxyHandler: vi.fn(),
     });
 
-    const localResponse = await localHandler(new Request('https://example.workers.dev/api/design-assets/config'));
+    const localResponse = await localHandler(new Request('https://example.workers.dev/api/production-drafts/config'));
     const missingResponse = await defaultHandler(new Request('https://example.workers.dev/favicon.ico'));
 
     expect(localResponse.status).toBe(503);
     await expect(localResponse.json()).resolves.toEqual({
-      error: 'Design asset storage is unavailable in LOCAL_PRODUCTION_FILES mode.',
+      error: 'Production draft uploads are temporarily unavailable.',
     });
     expect(missingResponse.status).toBe(404);
     await expect(missingResponse.text()).resolves.toBe('Not found');

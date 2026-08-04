@@ -1,0 +1,389 @@
+import {
+  MAX_PRODUCTION_PACKAGE_BYTES,
+  PRODUCTION_PACKAGE_FILE_CONTRACT,
+  sha256Hex,
+} from '../../src/features/configurator/designs/productionManifest.js';
+import { createShopFingerprint } from '../shopify/quoteContract.js';
+import {
+  ProductionPackageValidationError,
+  validateAndRebuildUploadedProductionPackage,
+} from './productionPackageValidator.js';
+import {
+  CONFLICT_MESSAGE,
+  HttpError,
+  REQUEST_MESSAGE,
+  SERVICE_MESSAGE,
+  ServiceError,
+  TURNSTILE_TIMEOUT_MS,
+  assertProductionStoreIdentity,
+  consumeProductionRateLimit,
+  getProductionDraft,
+  isLocalProductionMode,
+  isPlainObject,
+  matchesReusableProductionDraft,
+  parseProductionDraftForm,
+  validateProductionDraftBindings,
+  validateProductionMultipartHeaders,
+  verifyProductionTurnstile,
+} from './productionDraftRequest.js';
+import { createProductionRepository } from './productionRepository.js';
+
+const CART_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_BUNDLE_BYTES = MAX_PRODUCTION_PACKAGE_BYTES + 64 * 1024;
+const DESIGN_ID_PATTERN = /^dsg_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PRODUCT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,100}$/u;
+const VARIANT_ID_PATTERN = /^[1-9][0-9]{0,31}$/u;
+const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/u;
+const FINGERPRINT_PATTERN = /^[a-f0-9]{8}$/u;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+
+export function createProductionDraftsHandler(env, dependencies = {}) {
+  const validateAndRebuild = dependencies.validateAndRebuildUploadedProductionPackage
+    ?? validateAndRebuildUploadedProductionPackage;
+  const createRepository = dependencies.createProductionRepository ?? createProductionRepository;
+  const fingerprintShop = dependencies.createShopFingerprint ?? createShopFingerprint;
+  const hashBlob = dependencies.sha256Hex ?? sha256Hex;
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const now = dependencies.now ?? Date.now;
+  const randomUUID = dependencies.randomUUID ?? (() => crypto.randomUUID());
+  const logger = dependencies.logger ?? console;
+  const turnstileTimeoutMs = dependencies.turnstileTimeoutMs ?? TURNSTILE_TIMEOUT_MS;
+
+  return async function handleProductionDraft(request) {
+    const pathname = readPathname(request);
+    if (pathname === '/api/production-drafts/config') {
+      if (request.method !== 'GET') return methodNotAllowed('GET');
+      return handlePublicConfig(env);
+    }
+    if (pathname !== '/api/production-drafts') return errorResponse(404, 'Not found.');
+    if (request.method !== 'POST') return methodNotAllowed('POST');
+
+    try {
+      const bindings = validateProductionDraftBindings(env, createRepository);
+      validateProductionMultipartHeaders(request);
+      const form = await parseProductionDraftForm(request);
+      const storeConfig = bindings.storeConfigs[form.shop];
+      if (!storeConfig) throw new ServiceError('PRODUCTION_DRAFT_STORE_NOT_CONFIGURED');
+
+      await verifyProductionTurnstile({
+        fetchImpl,
+        ip: request.headers.get('cf-connecting-ip'),
+        secret: bindings.turnstileSecret,
+        timeoutMs: turnstileTimeoutMs,
+        token: form.turnstileToken,
+      });
+      await consumeProductionRateLimit(
+        bindings.rateLimit,
+        form.shop,
+        request.headers.get('cf-connecting-ip'),
+      );
+      assertProductionStoreIdentity(storeConfig, form.manifest);
+
+      const currentTime = readClock(now);
+      const existing = await getProductionDraft(bindings.repository, form.shop, form.uploadId);
+      if (existing) {
+        if (!matchesReusableProductionDraft(existing, form.manifest, currentTime)) {
+          throw new HttpError(409, CONFLICT_MESSAGE);
+        }
+        return successResponse(existing);
+      }
+
+      const packageSnapshot = await validatePackage(validateAndRebuild, form);
+      assertValidatedIdentity(packageSnapshot.validated, form.manifest, storeConfig);
+      const designId = createDesignId(randomUUID);
+      const shopFingerprint = await createFingerprint(fingerprintShop, form.shop);
+      const expiresAt = currentTime + CART_DRAFT_TTL_MS;
+      if (!Number.isSafeInteger(expiresAt)) throw new ServiceError('PRODUCTION_DRAFT_EXPIRY_INVALID');
+      const manifestSha256 = await createManifestHash(
+        hashBlob,
+        packageSnapshot.validated.files[6].blob,
+      );
+
+      const prefix = `shops/${shopFingerprint}/designs/${designId}/`;
+      const keys = [
+        ...PRODUCTION_PACKAGE_FILE_CONTRACT.map(({ filename }) => `${prefix}${filename}`),
+        `${prefix}${packageSnapshot.bundle.filename}`,
+      ];
+      const draft = createDraftRecord({
+        currentTime,
+        designId,
+        expiresAt,
+        form,
+        keys,
+        manifestSha256,
+        packageSnapshot,
+      });
+
+      try {
+        await storePackage(bindings.assets, keys, packageSnapshot, form.manifest, manifestSha256);
+      } catch {
+        await cleanupKeys(bindings.assets, keys, logger);
+        throw new ServiceError('PRODUCTION_DRAFT_R2_WRITE_FAILED');
+      }
+
+      let authoritative;
+      try {
+        authoritative = await bindings.repository.createCartDraft(draft);
+      } catch {
+        authoritative = await recoverDraft(bindings.repository, form.shop, form.uploadId);
+        if (!authoritative) {
+          await cleanupKeys(bindings.assets, keys, logger);
+          throw new ServiceError('PRODUCTION_DRAFT_D1_WRITE_FAILED');
+        }
+      }
+
+      if (!matchesReusableProductionDraft(authoritative, form.manifest, currentTime)) {
+        await cleanupKeys(bindings.assets, keys, logger);
+        throw new HttpError(409, CONFLICT_MESSAGE);
+      }
+      if (authoritative.designId !== designId) {
+        await cleanupKeys(bindings.assets, keys, logger);
+      }
+      return successResponse(authoritative);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return errorResponse(error.status, error.message, error.headers);
+      }
+      const code = error instanceof ServiceError
+        ? error.code
+        : 'PRODUCTION_DRAFT_UNEXPECTED_FAILURE';
+      logCode(logger, code);
+      return errorResponse(503, SERVICE_MESSAGE);
+    }
+  };
+}
+
+function readPathname(request) {
+  try {
+    return new URL(request.url).pathname;
+  } catch {
+    return '';
+  }
+}
+
+function handlePublicConfig(env) {
+  if (isLocalProductionMode(env)
+    || typeof env?.TURNSTILE_SITE_KEY !== 'string'
+    || env.TURNSTILE_SITE_KEY.length === 0) {
+    return errorResponse(503, SERVICE_MESSAGE);
+  }
+  return jsonResponse(200, { turnstileSiteKey: env.TURNSTILE_SITE_KEY });
+}
+
+function readClock(now) {
+  let currentTime;
+  try {
+    currentTime = now();
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_CLOCK_FAILED');
+  }
+  if (!Number.isSafeInteger(currentTime) || currentTime < 0) {
+    throw new ServiceError('PRODUCTION_DRAFT_CLOCK_INVALID');
+  }
+  return currentTime;
+}
+
+async function validatePackage(validateAndRebuild, form) {
+  let result;
+  try {
+    result = await validateAndRebuild({ expectedShop: form.shop, files: form.files });
+  } catch (error) {
+    if (error instanceof ProductionPackageValidationError
+      || error?.code === 'invalid-production-package') {
+      throw new HttpError(400, REQUEST_MESSAGE);
+    }
+    throw new ServiceError('PRODUCTION_DRAFT_PACKAGE_REBUILD_FAILED');
+  }
+  return snapshotPackageResult(result);
+}
+
+function snapshotPackageResult(result) {
+  if (!isPlainObject(result) || !isPlainObject(result.validated) || !isPlainObject(result.bundle)) {
+    throw new ServiceError('PRODUCTION_DRAFT_PACKAGE_RESULT_INVALID');
+  }
+  const validated = result.validated;
+  const bundle = result.bundle;
+  if (!matches(validated.designFingerprint, FINGERPRINT_PATTERN)
+    || !matches(validated.productId, PRODUCT_ID_PATTERN)
+    || !matches(validated.variantId, VARIANT_ID_PATTERN)
+    || !matches(validated.size, SAFE_ID_PATTERN)
+    || !matches(validated.modelId, SAFE_ID_PATTERN)
+    || !matches(validated.modelVersion, SAFE_ID_PATTERN)
+    || !matches(validated.uvExportVersion, SAFE_ID_PATTERN)
+    || !Array.isArray(validated.files)
+    || validated.files.length !== PRODUCTION_PACKAGE_FILE_CONTRACT.length
+    || typeof bundle.filename !== 'string'
+    || bundle.filename !== `${validated.productId}-design-${validated.designFingerprint}.zip`
+    || bundle.mediaType !== 'application/zip'
+    || !(bundle.stream instanceof ReadableStream)
+    || !Number.isSafeInteger(bundle.contentLength)
+    || bundle.contentLength <= 0
+    || bundle.contentLength > MAX_BUNDLE_BYTES) {
+    throw new ServiceError('PRODUCTION_DRAFT_PACKAGE_RESULT_INVALID');
+  }
+  validated.files.forEach((file, index) => {
+    const contract = PRODUCTION_PACKAGE_FILE_CONTRACT[index];
+    if (!isPlainObject(file)
+      || file.filename !== contract.filename
+      || !(file.blob instanceof Blob)
+      || file.blob.size <= 0
+      || file.blob.size > contract.maxBytes
+      || file.blob.type !== contract.mediaType) {
+      throw new ServiceError('PRODUCTION_DRAFT_PACKAGE_RESULT_INVALID');
+    }
+  });
+  return { validated, bundle };
+}
+
+function assertValidatedIdentity(validated, manifest, storeConfig) {
+  if (validated.designFingerprint !== manifest.designFingerprint
+    || validated.productId !== manifest.productId
+    || validated.variantId !== manifest.variantId
+    || validated.size !== manifest.size) {
+    throw new ServiceError('PRODUCTION_DRAFT_VALIDATED_IDENTITY_MISMATCH');
+  }
+  assertProductionStoreIdentity(storeConfig, validated);
+}
+
+function createDesignId(randomUUID) {
+  let uuid;
+  try {
+    uuid = randomUUID();
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_RANDOM_FAILED');
+  }
+  const designId = `dsg_${uuid}`;
+  if (!DESIGN_ID_PATTERN.test(designId)) throw new ServiceError('PRODUCTION_DRAFT_RANDOM_INVALID');
+  return designId;
+}
+
+async function createFingerprint(fingerprintShop, shop) {
+  try {
+    return await fingerprintShop(shop);
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_SHOP_FINGERPRINT_FAILED');
+  }
+}
+
+async function createManifestHash(hashBlob, blob) {
+  let hash;
+  try {
+    hash = await hashBlob(blob);
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_MANIFEST_HASH_FAILED');
+  }
+  if (typeof hash !== 'string' || !SHA256_PATTERN.test(hash)) {
+    throw new ServiceError('PRODUCTION_DRAFT_MANIFEST_HASH_INVALID');
+  }
+  return hash;
+}
+
+function createDraftRecord({
+  currentTime,
+  designId,
+  expiresAt,
+  form,
+  keys,
+  manifestSha256,
+  packageSnapshot,
+}) {
+  return {
+    designId,
+    shop: form.shop,
+    uploadId: form.uploadId,
+    productId: packageSnapshot.validated.productId,
+    variantId: packageSnapshot.validated.variantId,
+    size: packageSnapshot.validated.size,
+    modelId: packageSnapshot.validated.modelId,
+    modelVersion: packageSnapshot.validated.modelVersion,
+    uvExportVersion: packageSnapshot.validated.uvExportVersion,
+    designFingerprint: packageSnapshot.validated.designFingerprint,
+    manifestSha256,
+    manifestKey: keys[6],
+    bundleKey: keys[7],
+    bundleFilename: packageSnapshot.bundle.filename,
+    createdAt: currentTime,
+    expiresAt,
+    updatedAt: currentTime,
+  };
+}
+
+async function storePackage(assets, keys, packageResult, manifest, manifestSha256) {
+  const common = {
+    designFingerprint: packageResult.validated.designFingerprint,
+    productId: packageResult.validated.productId,
+    variantId: packageResult.validated.variantId,
+    size: packageResult.validated.size,
+  };
+  for (let index = 0; index < packageResult.validated.files.length; index += 1) {
+    const file = packageResult.validated.files[index];
+    const hash = index === 6 ? manifestSha256 : manifest.hashes[file.filename];
+    await checkedPut(assets, keys[index], file.blob, {
+      httpMetadata: { contentType: PRODUCTION_PACKAGE_FILE_CONTRACT[index].mediaType },
+      customMetadata: { ...common, sha256: hash },
+    });
+  }
+  await checkedPut(assets, keys[7], packageResult.bundle.stream, {
+    httpMetadata: { contentType: 'application/zip' },
+    customMetadata: { ...common, contentLength: String(packageResult.bundle.contentLength) },
+  });
+}
+
+async function checkedPut(assets, key, value, options) {
+  const result = await assets.put(key, value, options);
+  if (!result || typeof result !== 'object' || result.key !== key) {
+    throw new Error('R2 put result is invalid.');
+  }
+}
+
+async function recoverDraft(repository, shop, uploadId) {
+  try {
+    return await repository.getCartDraftByUpload(shop, uploadId);
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupKeys(assets, keys, logger) {
+  try {
+    await assets.delete(keys);
+  } catch {
+    logCode(logger, 'PRODUCTION_DRAFT_CLEANUP_FAILED');
+  }
+}
+
+function successResponse(draft) {
+  return jsonResponse(201, {
+    designId: draft.designId,
+    designFingerprint: draft.designFingerprint,
+    bundleFilename: draft.bundleFilename,
+    expiresAt: draft.expiresAt,
+  });
+}
+
+function methodNotAllowed(method) {
+  return errorResponse(405, `Method must be ${method}.`, { Allow: method });
+}
+
+function errorResponse(status, message, headers = {}) {
+  return jsonResponse(status, { error: message }, headers);
+}
+
+function jsonResponse(status, body, headers = {}) {
+  return Response.json(body, {
+    status,
+    headers: { 'cache-control': 'no-store', ...headers },
+  });
+}
+
+function logCode(logger, code) {
+  try {
+    logger?.error?.(code);
+  } catch {
+    // Stable responses must not depend on logging availability.
+  }
+}
+
+function matches(value, pattern) {
+  return typeof value === 'string' && pattern.test(value);
+}

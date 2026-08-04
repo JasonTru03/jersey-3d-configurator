@@ -529,6 +529,22 @@ App Block：
 - 禁用订单回调订阅；
 - 保留已写入对象和索引，不做破坏性删除。
 
+#### 2026-08-04 本地实施检查点
+
+已完成本地代码范围：
+
+- 七文件生产包在加购前上传，D1 先原子预留、R2 后流式写入并带哈希 metadata；
+- 报价、KV、App Proxy 私有属性和 Shopify 生命周期通过同一 `designId` 关联；
+- `orders/paid` raw-body HMAC、幂等 delivery/event、文件缺失/损坏 `file_error`、取消/退款终态；
+- 最多 100 条的过期未付款草稿定时清理，以及 payment/cleanup 原子竞态；
+- R2/D1 自动 provision bindings、cron、上传限流和 Standard Usage Model `cpu_ms=30000` 配置。
+
+检查入库默认仍保持 `LOCAL_PRODUCTION_FILES=true`。本地 migration 和自动测试不代表正式上线；线上启用仍必须确认 Workers Paid / Standard、显式 Turnstile allowed hostnames、适用的 `read_orders` protected customer data 审批/声明与商家授权、实际 granted scopes、webhook 注册、Shopify 测试支付，以及代表包和 32 MiB 边界包的 CPU/内存表现。
+
+当前未创建或自动 provision 线上 R2/D1，未执行远程 migration，未写入生产 secrets，未部署本阶段 Worker/App，也未完成测试支付。精确激活与保留数据回滚顺序见 `docs/deployment/phase3-production-storage.md`。Git push 不构成上述任何外部动作授权。
+
+后台取件仍属于阶段 4。Phase 3 只建立订单与文件的可靠关联，尚不提供 Shopify 订单详情文件卡片、App 定制订单列表或安全下载入口。
+
 ### 阶段 4：后台取件
 
 范围：

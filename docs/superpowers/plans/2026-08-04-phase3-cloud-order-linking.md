@@ -462,7 +462,7 @@ git commit -m "feat: upload production package before cart"
 - Modify: `shopify-app/shopify.app.toml`
 - Modify: `shopify-app/scripts/verify-scaffold.mjs`
 
-- [ ] **Step 1: Write failing HMAC and order-link tests**
+- [x] **Step 1: Write failing HMAC and order-link tests**
 
 Use a raw UTF-8 JSON body and Web Crypto to create the expected base64 HMAC. Cover:
 
@@ -476,7 +476,7 @@ Use a raw UTF-8 JSON body and Web Crypto to create the expected base64 HMAC. Cov
 - cancellation and refund events update only designs already bound to the same shop/order, without deleting their R2 files;
 - duplicate webhook deliveries and repeated events return 200 without duplicating production rows or moving a design to another order.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 npx vitest run workers/shopify/orderLifecycleWebhooks.test.js workers/router.test.js
@@ -484,7 +484,7 @@ npx vitest run workers/shopify/orderLifecycleWebhooks.test.js workers/router.tes
 
 Expected: FAIL because the webhook route and handler are missing.
 
-- [ ] **Step 3: Implement raw-body verification and idempotent linking**
+- [x] **Step 3: Implement raw-body verification and idempotent linking**
 
 Read the request body once with a strict byte limit. Compute:
 
@@ -507,7 +507,7 @@ uri = "/webhooks/shopify/orders"
 
 Use the relative URI so Shopify resolves it against the private app `application_url`; do not add a second hard-coded Worker domain.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```powershell
 npx vitest run workers/shopify/orderLifecycleWebhooks.test.js workers/router.test.js
@@ -525,13 +525,13 @@ git commit -m "feat: link shopify order lifecycle to production drafts"
 - Modify: `workers/index.test.js`
 - Modify: `wrangler.jsonc`
 
-- [ ] **Step 1: Write failing scheduled-cleanup tests**
+- [x] **Step 1: Write failing scheduled-cleanup tests**
 
 Require the scheduled handler to select at most 100 expired `upload_pending` or `cart_draft` rows, plus `cleanup_pending` rows whose lease is older than `staleBefore`. For each candidate it must atomically claim the row with a cryptographically random `cleanupToken`, then delete its eight known R2 keys, then call `deleteClaimedDraft` with the same shop/design/expiry/token guard. Verify it skips `paid_pending_production`, `file_error`, cancelled, refunded and archived records.
 
 An R2 delete failure or Worker interruption must leave the row in `cleanup_pending`; after the lease expires a later run can reclaim and retry it. Add a payment-versus-cleanup race test proving exactly one database transition wins: once cleanup is claimed, payment cannot bind the design; once payment is recorded, cleanup cannot claim or delete its files.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 npx vitest run workers/production/cleanupDrafts.test.js workers/index.test.js
@@ -539,7 +539,7 @@ npx vitest run workers/production/cleanupDrafts.test.js workers/index.test.js
 
 Expected: FAIL because the Worker has no scheduled handler.
 
-- [ ] **Step 3: Add the cleanup handler and deployment bindings**
+- [x] **Step 3: Add the cleanup handler and deployment bindings**
 
 Export both Worker handlers:
 
@@ -575,7 +575,7 @@ The streaming ZIP performs incremental CRC work twice and incremental SHA-256 wo
 
 Keep uploads disabled when the account/plan cannot support this limit. Local tests do not enforce Cloudflare CPU limits; the release checkpoint must verify the deployed plan and observe upload CPU time.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```powershell
 npx vitest run workers/production/cleanupDrafts.test.js workers/index.test.js workers/router.test.js
@@ -592,7 +592,7 @@ git commit -m "feat: clean expired production drafts"
 - Modify: `shopify-app/README.md`
 - Modify: `docs/superpowers/specs/2026-07-30-shopify-3d-app-production-workflow-design.md`
 
-- [ ] **Step 1: Document the exact activation order and rollback**
+- [x] **Step 1: Document the exact activation order and rollback**
 
 The deployment guide must require this order:
 
@@ -607,7 +607,7 @@ The deployment guide must require this order:
 
 State explicitly that pushing Git does not authorize resource creation, migrations, webhook subscription, Shopify App deployment or production Worker deployment.
 
-- [ ] **Step 2: Run focused and full automated verification**
+- [x] **Step 2: Run focused and full automated verification**
 
 ```powershell
 npm test
@@ -620,7 +620,9 @@ git diff --check
 
 Expected: all Vitest and Shopify tests pass, both Vite builds pass, both Rust Functions pass, Wrangler bundles without secrets, and the diff has no whitespace errors.
 
-- [ ] **Step 3: Run local storage/migration checks**
+Final evidence: `npm test` passed 86 files / 1,534 tests; the single end-to-end contract passed 1/1; application, Shopify and showcase builds passed; Wrangler 4.118.0 dry-run recognized the expected KV/R2/D1/rate-limit bindings and preserved `LOCAL_PRODUCTION_FILES=true`. `npm --prefix shopify-app test` passed its 27-file scaffold check, 4 deploy tests, 12 store-config tests, 23 transform Rust tests and 13 validation Rust tests after using the installed Rust 1.97.1 toolchain with an ASCII temporary target directory. The temporary target and local Wrangler state were removed after verification.
+
+- [x] **Step 3: Run local storage/migration checks**
 
 Use the checked-in migration against Wrangler local state and inspect the schema:
 
@@ -631,7 +633,7 @@ npx wrangler d1 execute PRODUCTION_DB --local --command "SELECT name FROM sqlite
 
 Expected: `production_designs`, `shopify_webhook_deliveries` and Wrangler's migration table exist. Do not use `--remote` in this phase without explicit approval.
 
-- [ ] **Step 4: Perform an in-memory end-to-end contract test**
+- [x] **Step 4: Perform an in-memory end-to-end contract test**
 
 Drive one real seven-file browser artifact through the Worker handler with fake Turnstile, R2 and D1 bindings, then issue a quote and a correctly signed `orders/paid` webhook. Assert the same `designId` appears in upload response, KV quote record, App Proxy line property and final D1 paid record; corrupting the R2 bundle before the webhook must produce `file_error`.
 
@@ -640,7 +642,7 @@ Drive one real seven-file browser artifact through the Worker handler with fake 
 Record file ownership, RED/GREEN evidence, test counts, build results, local migration evidence, known deployment blockers, rollback and the fact that phase 4 Admin UI is not included.
 
 ```powershell
-git add docs/deployment/phase3-production-storage.md project-logs/changes/2026-08-04-phase3-cloud-order-linking.md project-logs/chat/2026-08-04-phase3-cloud-order-linking.md shopify-app/README.md docs/superpowers/specs/2026-07-30-shopify-3d-app-production-workflow-design.md
+git add docs/deployment/phase3-production-storage.md project-logs/changes/2026-08-04-phase3-cloud-order-linking.md project-logs/chat/2026-08-04-phase3-cloud-order-linking.md shopify-app/README.md docs/superpowers/specs/2026-07-30-shopify-3d-app-production-workflow-design.md docs/superpowers/plans/2026-08-04-phase3-cloud-order-linking.md
 git commit -m "docs: close phase 3 cloud order linking"
 ```
 

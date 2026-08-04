@@ -24,11 +24,29 @@ Keep every store-specific file under `shopify-app/local-config/`; this directory
 Never paste an Admin token, Shopify API secret, or cart quote signing secret into tracked files, command output, screenshots, or documentation. When uploading a Worker secret on Windows, redirect an exact UTF-8 file without a trailing newline instead of piping PowerShell text:
 
 ```powershell
-cmd /c "npx wrangler secret put CART_QUOTE_SIGNING_SECRET < shopify-app\local-config\cart-quote-signing-secret.txt"
-cmd /c "npx wrangler secret put SHOPIFY_API_SECRET < shopify-app\local-config\shopify-api-secret.txt"
+cmd /c "npx wrangler secret put CART_QUOTE_SIGNING_SECRET --config wrangler.phase3-test.jsonc < shopify-app\local-config\cart-quote-signing-secret.txt"
+cmd /c "npx wrangler secret put SHOPIFY_API_SECRET --config wrangler.phase3-test.jsonc < shopify-app\local-config\shopify-api-secret.txt"
 ```
 
 The same signing-secret bytes must be used by the Worker and both Shopify Function registration metafields.
+
+## Phase 3 production storage activation
+
+Cloud production uploads are checked in but disabled by default with `LOCAL_PRODUCTION_FILES=true`. That switch does not disable order webhooks; subscriptions must be stopped by rolling back or disabling the Shopify App subscription separately. Follow [the Phase 3 production storage guide](../docs/deployment/phase3-production-storage.md) before changing the upload switch.
+
+Important gates:
+
+- Use a non-live app-development store and Shopify test payment first.
+- Confirm Workers Paid / Standard Usage Model and the deployed `cpu_ms = 30000` ceiling before enabling uploads.
+- Use ignored `wrangler.phase3-test.jsonc` and `shopify.app.phase3-test.toml` files to lock an isolated test Worker/App target. Remove the copied production KV ID, give all three rate limiters distinct test-only namespace IDs, resolve every Shopify `TARGET_*`, and make every bootstrap, secret, migration, deploy and rollback command name that private configuration explicitly.
+- Let Wrangler auto provision `DESIGN_QUOTES`, `PRODUCTION_ASSETS`, and `PRODUCTION_DB` for the isolated test Worker only after separate approval. Do not commit the private config or resource IDs.
+- Apply `migrations/0001_production_designs.sql` locally before any separately approved remote migration.
+- Configure Turnstile with explicit allowed hostnames; never use `Any Hostname`.
+- `read_orders` is protected customer data. Complete the approval/declaration and merchant authorization applicable to the App type, then verify the installed App's granted scopes include `read_orders`.
+- `shopify app deploy` is what activates the relative webhook subscription in `shopify.app.toml`; a Git push or TOML edit alone does not register it.
+- Do not print or commit Turnstile keys, `SHOPIFY_API_SECRET`, or the quote signing secret.
+
+Phase 3 does not include an Admin Block, a customized-order list, or a secure merchant download UI. Those are Phase 4 work; do not promise backend ZIP download from this scaffold yet.
 
 ## Installation sequence for another store
 
@@ -86,7 +104,7 @@ The same signing-secret bytes must be used by the Worker and both Shopify Functi
    npm run read:store-config -- --config local-config/STORE-install.json
    ```
 
-8. Add the same store mapping to the Worker configuration, upload both Worker secrets from exact files, and deploy with `npx wrangler deploy`.
+8. Add the same store mapping to the Worker configuration. For Phase 3 cloud storage, stop here and complete the linked activation guide, including separate approval for secrets, resource provisioning, remote migration, webhook registration and deployment.
 9. Configure the product launcher so buyers enter the 3D configurator instead of adding the raw jersey directly.
 10. Run the acceptance checklist below before enabling sales.
 

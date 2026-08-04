@@ -178,6 +178,27 @@ describe('uploadProductionDraft', () => {
     await expect(request).rejects.toThrow('Production draft files are invalid.');
   });
 
+  it('accepts an artifact at the aggregate size limit', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW - 1);
+    const fetchImpl = vi.fn().mockResolvedValue(json());
+    const sizes = {
+      'design.json': FILE_SIZE_LIMITS['design.json'],
+      'uv-atlas.png': FILE_SIZE_LIMITS['uv-atlas.png'],
+      'uv-pattern-pieces.png': FILE_SIZE_LIMITS['uv-pattern-pieces.png'],
+      'uv-reference.pdf': FILE_SIZE_LIMITS['uv-reference.pdf'],
+      'preview-front.png': FILE_SIZE_LIMITS['preview-front.png'],
+      'preview-back.png': FILE_SIZE_LIMITS['preview-back.png'] - 1,
+      'manifest.json': 1,
+    };
+
+    const result = await uploadProductionDraft({
+      artifact: artifact(sizes), fetchImpl, shop: SHOP, turnstileToken: 'verified-token', uploadId: UPLOAD_ID,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(result).toEqual(SUCCESS);
+  });
+
   it('rejects an artifact above the aggregate size limit before fetch', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(json());
     const sizes = {

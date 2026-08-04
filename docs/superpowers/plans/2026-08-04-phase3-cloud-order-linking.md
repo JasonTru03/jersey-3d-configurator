@@ -415,7 +415,7 @@ git commit -m "feat: require cloud draft for cart handoff"
 - Modify: `src/features/configurator/ui/DesignReviewDialog.jsx`
 - Modify: `src/features/configurator/ui/DesignReviewDialog.test.jsx`
 
-- [ ] **Step 1: Write failing orchestration tests**
+- [x] **Step 1: Write failing orchestration tests**
 
 When the user clicks Add to Shopify cart, require this sequence for every design, not only an enabled bottom pattern:
 
@@ -430,7 +430,7 @@ snapshot state
 
 Verify that package generation/upload/quote use the same immutable state snapshot, the button stays disabled across all three asynchronous stages, design mutation or dialog close aborts the flow, upload failure never calls the quote endpoint, quote failure keeps the draft retryable, and no automatic browser download occurs.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 npx vitest run src/features/configurator/ui/ConfiguratorPage.test.jsx src/features/configurator/ui/DesignReviewDialog.test.jsx
@@ -438,13 +438,13 @@ npx vitest run src/features/configurator/ui/ConfiguratorPage.test.jsx src/featur
 
 Expected: FAIL because Add to cart currently skips package generation and uses the local-download receipt.
 
-- [ ] **Step 3: Implement one add-to-cart transaction**
+- [x] **Step 3: Implement one add-to-cart transaction**
 
 Generate an `upl_` ID with Web Crypto per cart attempt, clone the state once, build the production package, obtain a fresh Turnstile token, upload, and pass only the returned `designId` into `createSecureCartHandoff`. Keep Save design as an optional local ZIP download. Remove `localProductionReceipt` from the cart authorization path; a local file must never prove that the cloud draft exists.
 
 Use the existing request ID, `AbortController`, mounted-state and snapshot identity guards. Show one stable user-facing failure message and retain the open review dialog for retry.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```powershell
 npx vitest run src/features/configurator/ui/ConfiguratorPage.test.jsx src/features/configurator/ui/DesignReviewDialog.test.jsx src/features/configurator/api/productionDraftApi.test.js src/features/configurator/shopify/cartQuoteClient.test.js

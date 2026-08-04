@@ -318,3 +318,82 @@ Manifest 声明的六个生产文件长度与实际逐项一致，SHA-256 也与
 - 审核弹窗现有摘要 UI 不直显精确 `PLAYER / 16` 与 `Crest Badge` 文案；本轮未获授权修改该既有 UI，只在本记录中显式保留边界。
 - 本轮只修改本日志，没有新增公共模块、依赖、生产代码或项目内证据文件。
 - 方向修正版已经完成本地完整验证，但仍未 push、未 merge、未 deploy、未发布到 Cloudflare 或 Shopify。
+
+## 最终发布审查关闭（2026-08-04）
+
+### 审查提交与发布门禁
+
+- 最终审查 HEAD：`ff224026c23a7fd7ee6ee03af7c6b05b4b158509`。
+- 提交：`ff224026 fix: enforce UV export version contract`。
+- 该提交没有改变已经验收通过的方向图像输出；它关闭最终代码审查发现的 `uvExportVersion` 发布门禁缺口。
+- 唯一允许的生产 UV 导出版本为精确字符串 `"2"`；缺失、旧字符串 `"1"` 和数值 `2` 均不是有效值。
+
+门禁覆盖四个独立入口：
+
+1. Manifest 创建：`createProductionManifest()` 在读取文件或计算哈希前要求 `uvExportVersion === "2"`。
+2. 浏览器内产物复核：`verifyProductionArtifacts()` 在逐文件验证前要求 Manifest 的 `uvExportVersion === "2"`。
+3. Package preflight：`createProductionPackage()` 的请求预检在调用 artifact provider、PDF 或 ZIP 生成前要求模型 `uvExportVersion === "2"`。
+4. CLI：`verifyProductionPackageBytes()` 在 Manifest Schema 检查之后立即要求 `manifest.uvExportVersion === "2"`。
+
+版本常量统一为 `PRODUCTION_UV_EXPORT_VERSION = "2"`；浏览器端创建、复核与 Package preflight 共享该常量，CLI 使用对应的固定预期值。门禁失败均显式报错，不会以默认值或类型转换伪装成功。
+
+### 门禁回归测试
+
+新增或扩展的测试覆盖：
+
+- Manifest 创建拒绝 missing、`"1"`、number `2`。
+- 浏览器内 Manifest/产物复核拒绝 missing、`"1"`、number `2`。
+- Package preflight 在生产工作开始前拒绝非版本 `"2"` 的模型，并断言 artifact provider、PDF 与 ZIP 生成器均未调用。
+- CLI 拒绝 missing、`"1"`、number `2`，且错误发生在后续故意损坏的 Atlas hash 校验之前，证明版本门禁具有优先级。
+
+正式定向命令与结果：
+
+```text
+npx vitest run src/features/configurator/designs/productionManifest.test.js src/features/configurator/designs/productionPackage.test.js src/features/configurator/designs/productionFingerprint.test.js scripts/verify-production-package.test.js
+
+Test Files  4 passed (4)
+Tests       116 passed (116)
+exit 0
+```
+
+### 最终默认全量与构建
+
+```text
+npm test
+
+Test Files  77 passed (77)
+Tests       1163 passed (1163)
+Duration    71.15s
+exit 0
+
+npm run build
+exit 0
+```
+
+默认测试无失败、无 `ETIMEDOUT`；仍只有两条既有 jsdom `Not implemented: navigation to another Document` 提示。
+
+完整 build 的 app 与 Shopify 包均成功：app 转换 1,753 modules，Shopify 转换 1,738 modules。允许的既有警告仍为主 JS chunk 超过 500 kB，以及 Shopify `inlineDynamicImports option is ignored because codeSplitting: false is set`。
+
+### 最终真实 ZIP 与新 CLI
+
+使用 `ff224026` 中的新 CLI 对此前已完成真实浏览器下载与视觉验收的最终 ZIP fresh 执行：
+
+```text
+node scripts/verify-production-package.mjs "C:\Users\Administrator\Downloads\fn8788-jersey-design-6ac2cd02 (2).zip"
+Production package verification: PASS (6ac2cd02, 4096x4096, 2 PDF pages)
+exit 0
+```
+
+- 最终 ZIP SHA-256 仍为 `a700fb65f248369d2fc124648587915aa32efd729809c40778c82e888ddb12f2`。
+- 包内 `manifest.uvExportVersion` 为精确字符串 `"2"`，因此新门禁与此前结构、哈希及真实视觉证据一致。
+- 本次不重新生成 ZIP；方向图像的真实浏览器、解包、Poppler 与逐图证据继续使用上文已保留的同一最终包。
+
+### 最终代码审查结论
+
+| 级别 | 未关闭发现 |
+| --- | --- |
+| Critical | None |
+| Important | None |
+| Minor | None |
+
+Release review：**Ready = Yes**。这里的 Ready 仅表示本地代码、测试、构建、CLI 与真实生产包证据达到发布审查条件；项目仍未 push、未 merge、未 deploy、未发布。

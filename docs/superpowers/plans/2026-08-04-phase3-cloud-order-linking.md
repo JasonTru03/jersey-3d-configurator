@@ -213,7 +213,7 @@ shop TEXT NOT NULL,
 upload_id TEXT NOT NULL,
 bundle_id TEXT,
 status TEXT NOT NULL CHECK (status IN (
-  'cart_draft', 'paid_pending_production', 'file_error',
+  'upload_pending', 'cart_draft', 'paid_pending_production', 'file_error',
   'cancelled', 'refunded', 'cleanup_pending', 'archived'
 )),
 product_id TEXT NOT NULL,
@@ -248,7 +248,9 @@ Also create `shopify_webhook_deliveries(webhook_id PRIMARY KEY, event_id, shop, 
 
 Use `PRODUCTION_DB.batch()` with a single bounded JSON bind expanded by `json_each(?)`, one guarded lifecycle `UPDATE`, a conditional `INSERT OR IGNORE` receipt, and a scoped receipt read. Only strictly normalized design fields may be serialized; cast JSON timestamps to SQLite `INTEGER`, preserve JSON null as SQL `NULL`, and reject payloads above 1 MiB. This keeps the exact 250-design boundary below D1's per-query bind and SQL-size limits. The update must affect all requested designs or none; a receipt is accepted only after every design reaches the delivery's final state. Guard terminal transitions and `updated_at` so older or lower-priority events cannot overwrite newer state. Duplicate webhook IDs and duplicate non-null event IDs are idempotent, while cross-scope collisions return a stable conflict without changing designs.
 
-Cleanup must atomically move an expired `cart_draft` to `cleanup_pending` with `cleanup_token` and `cleanup_started_at` before any R2 deletion. Require `staleBefore < claimedAt`. A stale `cleanup_pending` lease can be reclaimed after `staleBefore`; payment lifecycle updates must never claim a `cleanup_pending` row.
+Before the first R2 write, reserve an `upload_pending` row with the final private object keys. Finalize only that same `(shop, designId, uploadId)` row to `cart_draft` after all eight objects are stored. This closes the unindexed-R2 crash window while preserving `(shop, upload_id)` idempotence.
+
+Cleanup must atomically move an expired `upload_pending` or `cart_draft` to `cleanup_pending` with `cleanup_token` and `cleanup_started_at` before any R2 deletion. Require `staleBefore < claimedAt`. A stale `cleanup_pending` lease can be reclaimed after `staleBefore`; payment lifecycle updates must never claim an `upload_pending` or `cleanup_pending` row.
 
 - [ ] **Step 4: Run GREEN and commit**
 
@@ -261,8 +263,16 @@ git commit -m "feat: add production design d1 index"
 ### Task 4: Store verified cart drafts in private R2
 
 **Files:**
+- Modify: `migrations/0001_production_designs.sql`
+- Modify: `src/features/configurator/designs/productionManifest.js`
+- Modify: `src/features/configurator/designs/productionBundle.js`
+- Create: `workers/production/incrementalSha256.js`
+- Create: `workers/production/incrementalSha256.test.js`
 - Create: `workers/production/productionDrafts.js`
 - Create: `workers/production/productionDrafts.test.js`
+- Modify: `workers/production/productionRepository.js`
+- Modify: `workers/production/productionRepository.test.js`
+- Modify: `workers/production/productionRepository.integration.test.js`
 - Modify: `workers/router.js`
 - Modify: `workers/router.test.js`
 - Replace legacy responsibility in: `workers/designAssets.js`
@@ -273,10 +283,11 @@ git commit -m "feat: add production design d1 index"
 Cover these observable behaviors:
 
 - `GET /api/production-drafts/config` exposes only the Turnstile site key.
-- `POST /api/production-drafts` rejects missing bindings, incorrect content type, excessive declared body length, invalid shop/upload ID, failed Turnstile, failed rate limit, malformed files and unconfigured shops before writing R2.
-- A valid package writes the seven verified files plus the Worker-rebuilt ZIP under `shops/<shopFingerprint>/designs/<designId>/` and then inserts one `cart_draft` row.
+- `POST /api/production-drafts` rejects missing bindings, incorrect content type, excessive declared body length, invalid shop/upload ID, failed Turnstile, failed rate limit, malformed files and unconfigured shops before writing R2. An IP/anonymous rate limit must run before `request.formData()`; the shared aggregate upload limit is 32 MiB.
+- A valid package first reserves one `upload_pending` D1 row, writes the seven verified files plus the Worker-rebuilt ZIP under `shops/<shopFingerprint>/designs/<designId>/`, and then atomically finalizes that row to `cart_draft`.
 - The rebuilt ZIP is passed to `PRODUCTION_ASSETS.put()` as the validated `ReadableStream`; the handler must not turn it back into a whole-package `Blob` or `ArrayBuffer`.
-- An R2 write, source-stream or D1 failure removes every key written by that request and returns a stable 503 without leaking an internal key, stream error or exception.
+- The rebuilt ZIP is deterministic across repeated stream creation. Hash the first stream incrementally, pass a fresh second stream directly to R2, and store the trusted SHA-256 both as R2 integrity input and `customMetadata.sha256`.
+- An R2 write, source-stream or D1 failure removes every key written by that request when ownership is certain and returns a stable 503 without leaking an internal key, stream error or exception. A failed D1 recovery read must preserve indexed R2 objects rather than guessing that no row exists. If compensating R2 deletion fails, return 503 rather than reporting an existing draft or conflict as successful.
 - Before writing R2, `getCartDraftByUpload(shop, uploadId)` checks for an existing authoritative row. Repeating the same `(shop, uploadId)` returns the existing matching draft without writing a second package; a different fingerprint for the same upload ID is rejected.
 
 - [ ] **Step 2: Run RED**
@@ -300,7 +311,7 @@ TURNSTILE_SECRET_KEY
 SHOPIFY_STORE_CONFIG_JSON
 ```
 
-Use the atomic `validateAndRebuildUploadedProductionPackage()` entry point from Task 2. Use `crypto.randomUUID()` for the server `designId`, SHA-256 for object metadata, and the existing Web Crypto HMAC/fingerprint helpers. Verify Turnstile before expensive package hashing. Pass the returned ZIP stream directly to R2. Await every R2 write; on a rejected `put()`, a source-stream failure or a later D1 failure, await `PRODUCTION_ASSETS.delete(keys)` before returning the stable 503. Store only private keys in D1 and return:
+Use the atomic `validateAndRebuildUploadedProductionPackage()` entry point from Task 2. Use `crypto.randomUUID()` for the server `designId`, SHA-256 for object metadata, and the existing Web Crypto HMAC/fingerprint helpers. Verify Turnstile before expensive package hashing. Reserve `upload_pending` before R2, pass a fresh rebuilt ZIP stream directly to R2, and finalize the reservation only after all writes succeed. Await every R2 write and compensating delete. Treat D1 recovery as three states (`found`, `missing`, `read_failed`) so an ambiguous committed row never loses its files. Store only private keys in D1 and return:
 
 ```json
 {
@@ -500,7 +511,7 @@ git commit -m "feat: link shopify order lifecycle to production drafts"
 
 - [ ] **Step 1: Write failing scheduled-cleanup tests**
 
-Require the scheduled handler to select at most 100 expired `cart_draft` rows or `cleanup_pending` rows whose lease is older than `staleBefore`. For each candidate it must atomically claim the row with a cryptographically random `cleanupToken`, then delete its eight known R2 keys, then call `deleteClaimedDraft` with the same shop/design/expiry/token guard. Verify it skips `paid_pending_production`, `file_error`, cancelled, refunded and archived records.
+Require the scheduled handler to select at most 100 expired `upload_pending` or `cart_draft` rows, plus `cleanup_pending` rows whose lease is older than `staleBefore`. For each candidate it must atomically claim the row with a cryptographically random `cleanupToken`, then delete its eight known R2 keys, then call `deleteClaimedDraft` with the same shop/design/expiry/token guard. Verify it skips `paid_pending_production`, `file_error`, cancelled, refunded and archived records.
 
 An R2 delete failure or Worker interruption must leave the row in `cleanup_pending`; after the lease expires a later run can reclaim and retry it. Add a payment-versus-cleanup race test proving exactly one database transition wins: once cleanup is claimed, payment cannot bind the design; once payment is recorded, cleanup cannot claim or delete its files.
 
@@ -540,7 +551,7 @@ Keep `LOCAL_PRODUCTION_FILES` set to `true` in the checked-in default until rele
 
 Add `PRODUCTION_UPLOAD_RATE_LIMIT` as a native rate-limit binding. Do not store either Turnstile key or `SHOPIFY_API_SECRET` in the repository; release preparation sets them with `wrangler secret put`.
 
-The streaming ZIP still performs incremental CRC work. Require the Workers Paid plan before enabling production uploads and configure a deliberate Standard Usage Model CPU ceiling in `wrangler.jsonc`:
+The streaming ZIP performs incremental CRC work twice and incremental SHA-256 work once. Require the Workers Paid plan before enabling production uploads and configure a deliberate Standard Usage Model CPU ceiling in `wrangler.jsonc`:
 
 ```jsonc
 "limits": { "cpu_ms": 30000 }
@@ -572,10 +583,10 @@ The deployment guide must require this order:
 1. Verify a non-live app-development store, confirm Workers Paid with the configured `cpu_ms` limit, and record the current Worker/App versions. Production uploads stay disabled if the plan or CPU setting is not confirmed.
 2. Create or automatically provision the private R2 bucket and D1 database.
 3. Apply `migrations/0001_production_designs.sql` locally, then remotely only after explicit approval.
-4. Configure Turnstile and set `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `SHOPIFY_API_SECRET` and existing quote secret without printing their values.
+4. Configure Turnstile with an explicit allowed-hostname list (do not use Any Hostname), then set `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `SHOPIFY_API_SECRET` and the existing quote secret without printing their values.
 5. Build and dry-run the Worker and Shopify App.
 6. Deploy a test Worker/App version, register `orders/paid`, and perform a Shopify test payment.
-7. Verify D1 order linkage, direct stream-to-R2 behavior, R2 manifest/ZIP metadata and Worker CPU usage at a representative package size; do not expose raw R2 paths.
+7. Verify D1 `upload_pending -> cart_draft` linkage, direct stream-to-R2 behavior, R2 manifest/ZIP SHA-256 metadata and Worker CPU/memory usage at both a representative package size and the 32 MiB boundary; do not expose raw R2 paths.
 8. Roll back by restoring the previous Worker/App version and disabling the webhook subscription; preserve R2/D1 data.
 
 State explicitly that pushing Git does not authorize resource creation, migrations, webhook subscription, Shopify App deployment or production Worker deployment.

@@ -637,7 +637,7 @@ Expected: `production_designs`, `shopify_webhook_deliveries` and Wrangler's migr
 
 Drive one real seven-file browser artifact through the Worker handler with fake Turnstile, R2 and D1 bindings, then issue a quote and a correctly signed `orders/paid` webhook. Assert the same `designId` appears in upload response, KV quote record, App Proxy line property and final D1 paid record; corrupting the R2 bundle before the webhook must produce `file_error`.
 
-- [ ] **Step 5: Update logs and commit the stage checkpoint**
+- [x] **Step 5: Update logs and commit the stage checkpoint**
 
 Record file ownership, RED/GREEN evidence, test counts, build results, local migration evidence, known deployment blockers, rollback and the fact that phase 4 Admin UI is not included.
 

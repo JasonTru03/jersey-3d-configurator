@@ -3,6 +3,7 @@ import {
   createProductionBundle,
   createStreamingProductionBundle,
 } from './productionBundle.js';
+import { MAX_PRODUCTION_PACKAGE_BYTES } from './productionManifest.js';
 
 const ZIP_NAMES = [
   'design.json',
@@ -147,9 +148,26 @@ describe('createStreamingProductionBundle', () => {
     ))).toBe(true);
   });
 
-  it('constructs the exact 64 MiB boundary without reading or preallocating a full ZIP', () => {
+  it('creates repeatable independent streams with byte-for-byte identical ZIP data', async () => {
+    const result = createStreamingProductionBundle({
+      files: createFiles(),
+      fingerprint: '12ab34cd',
+      productId: 'fn8788-jersey',
+    });
+
+    expect(result.createStream).toEqual(expect.any(Function));
+    const first = new Uint8Array(await new Response(result.createStream()).arrayBuffer());
+    const second = new Uint8Array(await new Response(result.createStream()).arrayBuffer());
+    const original = new Uint8Array(await new Response(result.stream).arrayBuffer());
+
+    expect(first).toEqual(second);
+    expect(original).toEqual(first);
+    expect(first.byteLength).toBe(result.contentLength);
+  });
+
+  it('constructs the exact shared package boundary without reading or preallocating a full ZIP', () => {
     const oneMiB = new Blob([new Uint8Array(MEBIBYTE)]);
-    const sizes = [8, 16, 16, 8, 8, 7, 1];
+    const sizes = [4, 8, 8, 4, 4, 3, 1];
     const files = ZIP_NAMES.map((filename, index) => ({
       blob: new Blob(Array(sizes[index]).fill(oneMiB)),
       filename,
@@ -163,8 +181,10 @@ describe('createStreamingProductionBundle', () => {
       productId: 'fn8788-jersey',
     });
 
-    expect(files.reduce((total, file) => total + file.blob.size, 0)).toBe(64 * MEBIBYTE);
-    expect(result.contentLength).toBeGreaterThan(64 * MEBIBYTE);
+    expect(MAX_PRODUCTION_PACKAGE_BYTES).toBe(32 * MEBIBYTE);
+    expect(files.reduce((total, file) => total + file.blob.size, 0))
+      .toBe(MAX_PRODUCTION_PACKAGE_BYTES);
+    expect(result.contentLength).toBeGreaterThan(MAX_PRODUCTION_PACKAGE_BYTES);
     expect(arrayBufferSpy).not.toHaveBeenCalled();
     expect(streamSpy).not.toHaveBeenCalled();
   });

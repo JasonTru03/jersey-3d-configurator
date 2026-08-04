@@ -182,13 +182,13 @@ describe('uploadProductionDraft', () => {
     vi.spyOn(Date, 'now').mockReturnValue(NOW - 1);
     const fetchImpl = vi.fn().mockResolvedValue(json());
     const sizes = {
-      'design.json': FILE_SIZE_LIMITS['design.json'],
-      'uv-atlas.png': FILE_SIZE_LIMITS['uv-atlas.png'],
-      'uv-pattern-pieces.png': FILE_SIZE_LIMITS['uv-pattern-pieces.png'],
-      'uv-reference.pdf': FILE_SIZE_LIMITS['uv-reference.pdf'],
-      'preview-front.png': FILE_SIZE_LIMITS['preview-front.png'],
-      'preview-back.png': FILE_SIZE_LIMITS['preview-back.png'] - 1,
-      'manifest.json': 1,
+      'design.json': 4 * MEBIBYTE,
+      'uv-atlas.png': 8 * MEBIBYTE,
+      'uv-pattern-pieces.png': 8 * MEBIBYTE,
+      'uv-reference.pdf': 4 * MEBIBYTE,
+      'preview-front.png': 4 * MEBIBYTE,
+      'preview-back.png': 3 * MEBIBYTE,
+      'manifest.json': MEBIBYTE,
     };
 
     const result = await uploadProductionDraft({

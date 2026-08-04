@@ -7,7 +7,7 @@ const PNG_SIGNATURE = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_IHDR = Object.freeze([73, 72, 68, 82]);
 const MEBIBYTE = 1024 * 1024;
 
-export const MAX_PRODUCTION_PACKAGE_BYTES = 64 * MEBIBYTE;
+export const MAX_PRODUCTION_PACKAGE_BYTES = 32 * MEBIBYTE;
 export const PRODUCTION_PACKAGE_FILE_CONTRACT = Object.freeze([
   Object.freeze({ filename: 'design.json', mediaType: 'application/json', maxBytes: 8 * MEBIBYTE }),
   Object.freeze({ filename: 'uv-atlas.png', mediaType: 'image/png', maxBytes: 16 * MEBIBYTE }),

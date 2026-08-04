@@ -61,7 +61,7 @@ describe('validateUploadedProductionPackage', () => {
       maxBytes: FILE_LIMITS[filename],
       mediaType: MIME_TYPES[filename],
     })));
-    expect(MAX_PRODUCTION_PACKAGE_BYTES).toBe(64 * MEBIBYTE);
+    expect(MAX_PRODUCTION_PACKAGE_BYTES).toBe(32 * MEBIBYTE);
     expect(DESIGN_DOCUMENT_FORMAT).toBe('jersey-design');
   });
 
@@ -186,14 +186,14 @@ describe('validateUploadedProductionPackage', () => {
       .rejects.toThrow('Uploaded production package is invalid.');
   }, 30_000);
 
-  it('accepts an exact 64 MiB aggregate and rejects one additional byte', async () => {
+  it('accepts an exact 32 MiB aggregate and rejects one additional byte', async () => {
     const sizes = {
-      'design.json': FILE_LIMITS['design.json'],
-      'uv-atlas.png': FILE_LIMITS['uv-atlas.png'],
-      'uv-pattern-pieces.png': FILE_LIMITS['uv-pattern-pieces.png'],
-      'uv-reference.pdf': FILE_LIMITS['uv-reference.pdf'],
-      'preview-front.png': FILE_LIMITS['preview-front.png'],
-      'preview-back.png': FILE_LIMITS['preview-back.png'] - FILE_LIMITS['manifest.json'],
+      'design.json': 4 * MEBIBYTE,
+      'uv-atlas.png': 8 * MEBIBYTE,
+      'uv-pattern-pieces.png': 8 * MEBIBYTE,
+      'uv-reference.pdf': 4 * MEBIBYTE,
+      'preview-front.png': 4 * MEBIBYTE,
+      'preview-back.png': 3 * MEBIBYTE,
       'manifest.json': FILE_LIMITS['manifest.json'],
     };
     const exact = await resizeValidFiles(validFiles, sizes);

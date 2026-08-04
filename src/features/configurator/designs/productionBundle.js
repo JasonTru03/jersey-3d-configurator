@@ -38,8 +38,21 @@ export function createStreamingProductionBundle({ files, fingerprint, productId 
   const filename = createProductionFilename(productId, fingerprint);
   const timestamp = toDosDateTime(new Date());
   const contentLength = calculateZipLength(entries);
+  const createStream = () => createZipStream(entries, timestamp);
+
+  return Object.freeze({
+    byteLength: contentLength,
+    contentLength,
+    createStream,
+    filename,
+    mediaType: ZIP_MEDIA_TYPE,
+    stream: createStream(),
+  });
+}
+
+function createZipStream(entries, timestamp) {
   const iterator = streamStoreOnlyZip(entries, timestamp);
-  const stream = new ReadableStream({
+  return new ReadableStream({
     async pull(controller) {
       try {
         const result = await iterator.next();
@@ -52,14 +65,6 @@ export function createStreamingProductionBundle({ files, fingerprint, productId 
     async cancel(reason) {
       await iterator.return(reason);
     },
-  });
-
-  return Object.freeze({
-    byteLength: contentLength,
-    contentLength,
-    filename,
-    mediaType: ZIP_MEDIA_TYPE,
-    stream,
   });
 }
 

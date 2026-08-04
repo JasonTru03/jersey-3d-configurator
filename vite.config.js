@@ -7,7 +7,7 @@ const nativeCanvasTestFiles = [
   'src/features/configurator/scene/uvPatternPieces.browser.test.js',
   'src/features/configurator/scene/uvPatternPiecesGarmentModels.test.js',
 ];
-const defaultTestExclude = [...configDefaults.exclude, 'shopify-app/**'];
+const defaultTestExclude = [...configDefaults.exclude, '**/.worktrees/**', 'shopify-app/**'];
 
 export default defineConfig({
   plugins: [react()],

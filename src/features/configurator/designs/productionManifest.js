@@ -1,4 +1,7 @@
-import { PRODUCTION_PACKAGE_SCHEMA_VERSION } from './productionFingerprint.js';
+import {
+  PRODUCTION_PACKAGE_SCHEMA_VERSION,
+  PRODUCTION_UV_EXPORT_VERSION,
+} from './productionFingerprint.js';
 
 const PNG_SIGNATURE = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_IHDR = Object.freeze([73, 72, 68, 82]);
@@ -30,6 +33,7 @@ export async function sha256Hex(blob) {
 }
 
 export async function createProductionManifest(input) {
+  assertExpectedUvExportVersion(input?.uvExportVersion);
   assertExactNames(input?.files);
   await validateImageMetadata(input, input.files);
   const files = [];
@@ -69,6 +73,7 @@ export async function verifyProductionArtifacts(files, manifest) {
       `生产清单 Schema 无效：schemaVersion 必须为 ${PRODUCTION_PACKAGE_SCHEMA_VERSION}。`,
     );
   }
+  assertExpectedUvExportVersion(manifest.uvExportVersion);
   assertExactNames(files);
   if (
     !manifest
@@ -211,6 +216,14 @@ export function validateProductionPatternPiecesMetadata(patternPieces, atlas) {
   });
   if (!ids.has('front') || !ids.has('back')) {
     throwInvalidPatternPieces('裁片清单必须包含独立的 front 和 back。');
+  }
+}
+
+function assertExpectedUvExportVersion(uvExportVersion) {
+  if (uvExportVersion !== PRODUCTION_UV_EXPORT_VERSION) {
+    throw new Error(
+      `生产清单 UV 导出版本无效：uvExportVersion 必须为 "${PRODUCTION_UV_EXPORT_VERSION}"。`,
+    );
   }
 }
 

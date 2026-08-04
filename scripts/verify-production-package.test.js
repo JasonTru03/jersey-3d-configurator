@@ -55,6 +55,24 @@ describe('verifyProductionPackageBytes', () => {
     );
   });
 
+  it.each([
+    ['missing', (manifest) => {
+      const { uvExportVersion: _uvExportVersion, ...rest } = manifest;
+      return rest;
+    }],
+    ['version 1', (manifest) => ({ ...manifest, uvExportVersion: '1' })],
+    ['numeric version 2', (manifest) => ({ ...manifest, uvExportVersion: 2 })],
+  ])('rejects a manifest whose uvExportVersion is %s', async (_label, mutateManifest) => {
+    const packageBytes = await createPackageBytes({
+      corruptAtlasHash: true,
+      mutateManifest,
+    });
+
+    expect(() => verifyProductionPackageBytes(packageBytes)).toThrow(
+      'manifest.json uvExportVersion must be "2"',
+    );
+  });
+
   it('rejects a package missing uv-pattern-pieces.png', async () => {
     const packageBytes = await createPackageBytes({ omitArtifact: 'uv-pattern-pieces.png' });
 
@@ -295,6 +313,7 @@ async function createPackageBytes({
   }
   const manifest = mutateManifest({
     schemaVersion: 2,
+    uvExportVersion: '2',
     designFingerprint: '12ab34cd',
     atlas: { width: 4096, height: 4096 },
     patternPieces: createPatternPieces(),

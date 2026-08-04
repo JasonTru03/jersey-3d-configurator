@@ -100,6 +100,36 @@ describe('production package', () => {
     })).resolves.toBe(result.fingerprint);
   });
 
+  it('rejects a model outside UV export version 2 before production work starts', async () => {
+    const product = {
+      ...jerseyProduct,
+      model: { ...jerseyProduct.model, uvExportVersion: '1' },
+    };
+    const artifactProvider = vi.fn().mockResolvedValue(createRenderedArtifacts());
+    const createBundle = vi.fn().mockResolvedValue({
+      blob: new Blob(['zip'], { type: 'application/zip' }),
+      filename: 'invalid.zip',
+    });
+    const createReferencePdf = vi.fn().mockResolvedValue({
+      blob: new Blob(['pdf'], { type: 'application/pdf' }),
+    });
+
+    await expect(createProductionPackage({
+      artifactProvider,
+      product,
+      selected: selectedOptions(product, product.defaultState),
+      state: product.defaultState,
+    }, {
+      createBundle,
+      createReferencePdf,
+    })).rejects.toThrow(
+      '生产清单 UV 导出版本无效：uvExportVersion 必须为 "2"。',
+    );
+    expect(artifactProvider).not.toHaveBeenCalled();
+    expect(createReferencePdf).not.toHaveBeenCalled();
+    expect(createBundle).not.toHaveBeenCalled();
+  });
+
   it('rejects an atlas that does not match the configured 4096 contract', async () => {
     const rendered = createRenderedArtifacts();
     rendered.atlas.width = 2048;

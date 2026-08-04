@@ -33,6 +33,12 @@ const manifestInput = (files) => ({
   variantId: null,
 });
 
+const INVALID_UV_EXPORT_VERSIONS = [
+  ['missing', undefined],
+  ['version 1', '1'],
+  ['numeric version 2', 2],
+];
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -111,6 +117,36 @@ describe('production manifest', () => {
     await expect(verifyProductionArtifacts(files, manifest))
       .rejects.toThrow('生产清单 Schema 无效：schemaVersion 必须为 2。');
   });
+
+  it.each(INVALID_UV_EXPORT_VERSIONS)(
+    'rejects %s uvExportVersion while creating a manifest',
+    async (_label, uvExportVersion) => {
+      const files = createFiles();
+      const input = manifestInput(files);
+      if (uvExportVersion === undefined) delete input.uvExportVersion;
+      else input.uvExportVersion = uvExportVersion;
+      files[1] = artifact('uv-atlas.png', new Uint8Array([0]), 'image/png');
+
+      await expect(createProductionManifest(input)).rejects.toThrow(
+        '生产清单 UV 导出版本无效：uvExportVersion 必须为 "2"。',
+      );
+    },
+  );
+
+  it.each(INVALID_UV_EXPORT_VERSIONS)(
+    'rejects %s uvExportVersion before artifact verification',
+    async (_label, uvExportVersion) => {
+      const files = createFiles();
+      const manifest = await createProductionManifest(manifestInput(files));
+      if (uvExportVersion === undefined) delete manifest.uvExportVersion;
+      else manifest.uvExportVersion = uvExportVersion;
+      files[1] = artifact('uv-atlas.png', new Uint8Array([0]), 'image/png');
+
+      await expect(verifyProductionArtifacts(files, manifest)).rejects.toThrow(
+        '生产清单 UV 导出版本无效：uvExportVersion 必须为 "2"。',
+      );
+    },
+  );
 
   it('rejects a manifest that changes media type or byte length', async () => {
     const files = createFiles();

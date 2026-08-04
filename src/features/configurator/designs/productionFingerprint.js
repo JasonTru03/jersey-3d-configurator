@@ -1,6 +1,7 @@
 import { normalizeDesignState } from './designDocument.js';
 
 export const PRODUCTION_PACKAGE_SCHEMA_VERSION = 2;
+export const PRODUCTION_UV_EXPORT_VERSION = '2';
 
 export function canonicalizeProductionValue(value) {
   return JSON.stringify(sortValue(value));

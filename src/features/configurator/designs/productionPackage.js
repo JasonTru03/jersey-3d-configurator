@@ -1,6 +1,7 @@
 import { createDesignDocument } from './designDocument.js';
 import {
   createDesignFingerprint,
+  PRODUCTION_UV_EXPORT_VERSION,
 } from './productionFingerprint.js';
 import {
   createProductionManifest,
@@ -294,5 +295,10 @@ function validateRequest({ artifactProvider, product, selected, state }) {
     || !state
   ) {
     throw new Error('生产文件请求数据不完整。');
+  }
+  if (product.model.uvExportVersion !== PRODUCTION_UV_EXPORT_VERSION) {
+    throw new Error(
+      `生产清单 UV 导出版本无效：uvExportVersion 必须为 "${PRODUCTION_UV_EXPORT_VERSION}"。`,
+    );
   }
 }

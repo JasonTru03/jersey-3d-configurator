@@ -17,6 +17,7 @@ const ARTIFACT_NAMES = Object.freeze(ZIP_ENTRY_NAMES.slice(0, -1));
 const LOCAL_FILE_HEADER = 0x04034b50;
 const CENTRAL_DIRECTORY_HEADER = 0x02014b50;
 const EXPECTED_SCHEMA_VERSION = 2;
+const EXPECTED_UV_EXPORT_VERSION = '2';
 const MAX_PNG_INFLATED_BYTES = (4096 * 4 + 1) * 4096;
 
 export function verifyProductionPackageBytes(bytes) {
@@ -25,6 +26,11 @@ export function verifyProductionPackageBytes(bytes) {
   const manifest = readJson(entries.get('manifest.json'), 'manifest.json');
   if (manifest?.schemaVersion !== EXPECTED_SCHEMA_VERSION) {
     throw new Error(`manifest.json schemaVersion must be ${EXPECTED_SCHEMA_VERSION}`);
+  }
+  if (manifest?.uvExportVersion !== EXPECTED_UV_EXPORT_VERSION) {
+    throw new Error(
+      `manifest.json uvExportVersion must be "${EXPECTED_UV_EXPORT_VERSION}"`,
+    );
   }
   verifyManifest(entries, manifest);
   readJson(entries.get('design.json'), 'design.json');

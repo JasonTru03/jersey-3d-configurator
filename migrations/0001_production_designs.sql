@@ -32,6 +32,10 @@ CREATE TABLE production_designs (
   cleanup_token TEXT,
   cleanup_started_at INTEGER,
   updated_at INTEGER NOT NULL,
+  CHECK (
+    (status = 'cleanup_pending' AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL)
+    OR (status <> 'cleanup_pending' AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
+  ),
   UNIQUE (shop, upload_id),
   UNIQUE (shop, shopify_order_gid, design_id)
 );
@@ -53,6 +57,10 @@ CREATE INDEX production_designs_shop_order_name_idx
 
 CREATE INDEX production_designs_expires_at_idx
   ON production_designs (expires_at);
+
+CREATE INDEX production_designs_cleanup_started_at_idx
+  ON production_designs (cleanup_started_at)
+  WHERE status = 'cleanup_pending';
 
 CREATE UNIQUE INDEX shopify_webhook_deliveries_shop_topic_event_id_uidx
   ON shopify_webhook_deliveries (shop, topic, event_id)

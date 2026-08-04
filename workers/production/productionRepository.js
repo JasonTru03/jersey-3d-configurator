@@ -251,9 +251,14 @@ async function recordOrderLifecycle(db, input) {
   if (new Set(normalizedDesigns.map((design) => design.designId)).size !== normalizedDesigns.length) {
     throw invalidInput();
   }
-  const specs = paidLifecycle
-    ? createPaidLifecycleStatementSpecs(delivery, normalizedDesigns, request.status)
-    : createTerminalLifecycleStatementSpecs(delivery, normalizedDesigns, request.status);
+  let specs;
+  try {
+    specs = paidLifecycle
+      ? createPaidLifecycleStatementSpecs(delivery, normalizedDesigns, request.status)
+      : createTerminalLifecycleStatementSpecs(delivery, normalizedDesigns, request.status);
+  } catch {
+    throw invalidInput();
+  }
   const update = prepareBound(db, specs.update.sql, specs.update.values);
   const receipt = prepareBound(db, specs.receipt.sql, specs.receipt.values);
   const selectReceipt = prepareBound(db, specs.selectReceipt.sql, specs.selectReceipt.values);
@@ -302,7 +307,7 @@ async function claimExpiredDraft(db, input) {
   const claimToken = requirePattern(value.claimToken, CLEANUP_TOKEN_PATTERN);
   const claimedAt = requireTimestamp(value.claimedAt);
   const staleBefore = requireTimestamp(value.staleBefore);
-  if (staleBefore > claimedAt) throw invalidInput();
+  if (staleBefore >= claimedAt) throw invalidInput();
 
   const claim = prepareBound(db, `
     UPDATE production_designs

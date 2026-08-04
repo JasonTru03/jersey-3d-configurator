@@ -48,6 +48,11 @@ describe('0001_production_designs migration', () => {
     expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*shop\s*,\s*shopify_order_name\s*\)/iu);
     expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*expires_at\s*\)/iu);
     expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]+shopify_webhook_deliveries\s*\(\s*shop\s*,\s*topic\s*,\s*event_id\s*\)[^;]+WHERE\s+event_id\s+IS\s+NOT\s+NULL/iu);
+    expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*cleanup_started_at\s*\)[^;]+WHERE\s+status\s*=\s*'cleanup_pending'/iu);
+    expect(normalizeSql(sql)).toContain(normalizeSql(`CHECK (
+      (status = 'cleanup_pending' AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL)
+      OR (status <> 'cleanup_pending' AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
+    )`));
   });
 });
 
@@ -323,9 +328,12 @@ describe('webhook lifecycle', () => {
     expect(update.sql).toMatch(/updated_at\s*<=/iu);
     expect(update.sql).toMatch(/NOT\s+EXISTS[^;]+shopify_webhook_deliveries/isu);
     expect((update.sql.match(/UPDATE\s+production_designs/giu) ?? [])).toHaveLength(1);
+    expect(update.sql).toMatch(/FROM\s+json_each\s*\(\s*\?\s*\)/iu);
+    expect(update.sql).toMatch(/CAST\s*\(\s*json_extract\([^)]+'\$\.updated_at'\)\s+AS\s+INTEGER\s*\)/iu);
     expect(update.sql).not.toContain(DESIGN_ID);
     expect(update.values).toContain(SHOP);
-    expect(update.values).toContain('dsg_fedcba0987654321');
+    expect(JSON.parse(update.values[0]).map((design) => design.design_id))
+      .toContain('dsg_fedcba0987654321');
     expect(update.values.filter((value) => value === ORDER_GID).length).toBeGreaterThanOrEqual(2);
     expect(receipt.sql).toMatch(/^\s*WITH\s+input_designs/iu);
     expect(receipt.sql).toMatch(/INSERT OR IGNORE INTO shopify_webhook_deliveries/iu);
@@ -338,6 +346,48 @@ describe('webhook lifecycle', () => {
       status: 'paid_pending_production',
       designCount: 2,
     }));
+  });
+
+  it.each(['paid_pending_production', 'file_error'])(
+    'keeps an exact 250-design %s lifecycle within a bounded bind count',
+    async (status) => {
+      const db = createFakeD1({ batchResults: lifecycleBatchResults() });
+      const designs = Array.from({ length: 250 }, (_, index) => paidDesignAt(index, status));
+
+      await expect(createProductionRepository(db).recordOrderLifecycle({
+        delivery: delivery(), designs, status,
+      })).resolves.toMatchObject({ designCount: 250 });
+
+      expect(db.batches[0]).toHaveLength(3);
+      for (const statement of db.batches[0]) expect(statement.values.length).toBeLessThanOrEqual(100);
+    },
+  );
+
+  it.each([
+    ['cancelled', 'orders/cancelled'],
+    ['refunded', 'refunds/create'],
+  ])('keeps an exact 250-design %s lifecycle within a bounded bind count', async (status, topic) => {
+    const db = createFakeD1({ batchResults: lifecycleBatchResults({ topic }) });
+    const designs = Array.from({ length: 250 }, (_, index) => ({
+      designId: indexedDesignId(index),
+      updatedAt: 1_700_000_000_300,
+    }));
+
+    await expect(createProductionRepository(db).recordOrderLifecycle({
+      delivery: delivery({ topic }), designs, status,
+    })).resolves.toMatchObject({ designCount: 250 });
+
+    for (const statement of db.batches[0]) expect(statement.values.length).toBeLessThanOrEqual(100);
+  });
+
+  it('rejects 251 lifecycle designs before preparing SQL', async () => {
+    const db = createFakeD1();
+    const designs = Array.from({ length: 251 }, (_, index) => paidDesignAt(index));
+
+    await expect(createProductionRepository(db).recordOrderLifecycle({
+      delivery: delivery(), designs, status: 'paid_pending_production',
+    })).rejects.toMatchObject({ code: 'invalid-production-repository-input' });
+    expect(db.prepared).toHaveLength(0);
   });
 
   it.each([
@@ -604,6 +654,16 @@ describe('expired draft cleanup', () => {
       .rejects.toMatchObject({ code: 'production-repository-conflict' });
   });
 
+  it('rejects an equal cleanup lease boundary before touching D1', async () => {
+    const db = createFakeD1();
+
+    await expect(createProductionRepository(db).claimExpiredDraft(cleanupClaim({
+      claimedAt: 1_700_000_000_200,
+      staleBefore: 1_700_000_000_200,
+    }))).rejects.toMatchObject({ code: 'invalid-production-repository-input' });
+    expect(db.prepared).toHaveLength(0);
+  });
+
   it('deletes only the same cleanup lease token after R2 succeeds', async () => {
     const db = createFakeD1({ runResults: [d1Result({ changes: 1 })] });
 
@@ -755,6 +815,18 @@ function paidDesign(overrides = {}) {
     errorCode: null,
     ...overrides,
   };
+}
+
+function indexedDesignId(index) {
+  return `dsg_${String(index).padStart(16, '0')}`;
+}
+
+function paidDesignAt(index, status = 'paid_pending_production') {
+  return paidDesign({
+    designId: indexedDesignId(index),
+    bundleId: `bun_${String(index).padStart(16, '0')}`,
+    errorCode: status === 'file_error' ? 'FILE_MISSING' : null,
+  });
 }
 
 function cleanupClaim(overrides = {}) {

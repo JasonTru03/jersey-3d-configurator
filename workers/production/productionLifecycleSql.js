@@ -1,3 +1,6 @@
+const MAX_INPUT_JSON_BYTES = 1024 * 1024;
+const INTEGER_COLUMNS = new Set(['paid_at', 'updated_at']);
+
 export function createPaidLifecycleStatementSpecs(delivery, designs, status) {
   return Object.freeze({
     update: createPaidUpdate(delivery, designs, status),
@@ -225,10 +228,25 @@ function createReceiptSelect(delivery) {
 }
 
 function createInputCte(designs, columns, getValues) {
-  const placeholders = designs.map(() => `(${columns.map(() => '?').join(', ')})`).join(', ');
+  const payload = designs.map((design) => {
+    const values = getValues(design);
+    return Object.fromEntries(columns.map((column, index) => [column, values[index]]));
+  });
+  const json = JSON.stringify(payload);
+  if (new TextEncoder().encode(json).byteLength > MAX_INPUT_JSON_BYTES) {
+    throw new RangeError('Production lifecycle input exceeds the D1 JSON limit.');
+  }
+  const selections = columns.map((column) => {
+    const value = `json_extract(value, '$.${column}')`;
+    return `${INTEGER_COLUMNS.has(column) ? `CAST(${value} AS INTEGER)` : value} AS ${column}`;
+  }).join(',\n        ');
   return {
-    sql: `WITH input_designs (${columns.join(', ')}) AS (VALUES ${placeholders})`,
-    values: designs.flatMap(getValues),
+    sql: `WITH input_designs (${columns.join(', ')}) AS (
+      SELECT
+        ${selections}
+      FROM json_each(?)
+    )`,
+    values: [json],
   };
 }
 

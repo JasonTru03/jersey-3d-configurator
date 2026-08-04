@@ -172,6 +172,7 @@ git commit -m "feat: validate uploaded production packages"
 - Create: `workers/production/productionRepository.js`
 - Create: `workers/production/productionLifecycleSql.js`
 - Create: `workers/production/productionRepository.test.js`
+- Create: `workers/production/productionRepository.integration.test.js`
 
 - [ ] **Step 1: Write the migration and repository contract tests first**
 
@@ -235,21 +236,25 @@ error_code TEXT,
 cleanup_token TEXT,
 cleanup_started_at INTEGER,
 updated_at INTEGER NOT NULL,
+CHECK (
+  (status = 'cleanup_pending' AND cleanup_token IS NOT NULL AND cleanup_started_at IS NOT NULL)
+  OR (status <> 'cleanup_pending' AND cleanup_token IS NULL AND cleanup_started_at IS NULL)
+),
 UNIQUE (shop, upload_id),
 UNIQUE (shop, shopify_order_gid, design_id)
 ```
 
-Also create `shopify_webhook_deliveries(webhook_id PRIMARY KEY, event_id, shop, topic, order_gid, received_at)`, a partial unique index on `(shop, topic, event_id) WHERE event_id IS NOT NULL`, plus indexes for `(shop, status, created_at)`, `(shop, shopify_order_name)` and `expires_at`.
+Also create `shopify_webhook_deliveries(webhook_id PRIMARY KEY, event_id, shop, topic, order_gid, received_at)`, a partial unique index on `(shop, topic, event_id) WHERE event_id IS NOT NULL`, plus indexes for `(shop, status, created_at)`, `(shop, shopify_order_name)`, `expires_at`, and `cleanup_started_at WHERE status = 'cleanup_pending'`.
 
-Use `PRODUCTION_DB.batch()` with one internally generated parameterized `VALUES` CTE and one guarded lifecycle `UPDATE`, a conditional `INSERT OR IGNORE` receipt, and a scoped receipt read. The update must affect all requested designs or none; a receipt is accepted only after every design reaches the delivery's final state. Guard terminal transitions and `updated_at` so older or lower-priority events cannot overwrite newer state. Duplicate webhook IDs and duplicate non-null event IDs are idempotent, while cross-scope collisions return a stable conflict without changing designs.
+Use `PRODUCTION_DB.batch()` with a single bounded JSON bind expanded by `json_each(?)`, one guarded lifecycle `UPDATE`, a conditional `INSERT OR IGNORE` receipt, and a scoped receipt read. Only strictly normalized design fields may be serialized; cast JSON timestamps to SQLite `INTEGER`, preserve JSON null as SQL `NULL`, and reject payloads above 1 MiB. This keeps the exact 250-design boundary below D1's per-query bind and SQL-size limits. The update must affect all requested designs or none; a receipt is accepted only after every design reaches the delivery's final state. Guard terminal transitions and `updated_at` so older or lower-priority events cannot overwrite newer state. Duplicate webhook IDs and duplicate non-null event IDs are idempotent, while cross-scope collisions return a stable conflict without changing designs.
 
-Cleanup must atomically move an expired `cart_draft` to `cleanup_pending` with `cleanup_token` and `cleanup_started_at` before any R2 deletion. A stale `cleanup_pending` lease can be reclaimed after `staleBefore`; payment lifecycle updates must never claim a `cleanup_pending` row.
+Cleanup must atomically move an expired `cart_draft` to `cleanup_pending` with `cleanup_token` and `cleanup_started_at` before any R2 deletion. Require `staleBefore < claimedAt`. A stale `cleanup_pending` lease can be reclaimed after `staleBefore`; payment lifecycle updates must never claim a `cleanup_pending` row.
 
 - [ ] **Step 4: Run GREEN and commit**
 
 ```powershell
-npx vitest run workers/production/productionRepository.test.js
-git add migrations/0001_production_designs.sql workers/production/productionRepository.js workers/production/productionLifecycleSql.js workers/production/productionRepository.test.js docs/superpowers/plans/2026-08-04-phase3-cloud-order-linking.md
+npx vitest run workers/production/productionRepository.test.js workers/production/productionRepository.integration.test.js
+git add migrations/0001_production_designs.sql workers/production/productionRepository.js workers/production/productionLifecycleSql.js workers/production/productionRepository.test.js workers/production/productionRepository.integration.test.js docs/superpowers/plans/2026-08-04-phase3-cloud-order-linking.md
 git commit -m "feat: add production design d1 index"
 ```
 

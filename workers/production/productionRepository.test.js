@@ -11,6 +11,7 @@ const DESIGN_ID = 'dsg_1234567890abcdef';
 const UPLOAD_ID = 'upl_1234567890abcdef';
 const BUNDLE_ID = 'bun_1234567890abcdef';
 const ORDER_GID = 'gid://shopify/Order/1234567890';
+const CLEANUP_TOKEN = 'cln_1234567890abcdef';
 
 describe('0001_production_designs migration', () => {
   it('defines the required production records, lifecycle guard and uniqueness rules', async () => {
@@ -25,11 +26,11 @@ describe('0001_production_designs migration', () => {
       'manifest_key TEXT NOT NULL', 'bundle_key TEXT NOT NULL', 'bundle_filename TEXT NOT NULL',
       'created_at INTEGER NOT NULL', 'expires_at INTEGER NOT NULL', 'paid_at INTEGER',
       'shopify_order_gid TEXT', 'shopify_order_name TEXT', 'error_code TEXT',
-      'updated_at INTEGER NOT NULL',
+      'cleanup_token TEXT', 'cleanup_started_at INTEGER', 'updated_at INTEGER NOT NULL',
     ]) expect(normalizeSql(sql)).toContain(normalizeSql(column));
     for (const status of [
       'cart_draft', 'paid_pending_production', 'file_error',
-      'cancelled', 'refunded', 'archived',
+      'cancelled', 'refunded', 'archived', 'cleanup_pending',
     ]) expect(sql).toContain(`'${status}'`);
     expect(sql).toMatch(/UNIQUE\s*\(\s*shop\s*,\s*upload_id\s*\)/iu);
     expect(sql).toMatch(/UNIQUE\s*\(\s*shop\s*,\s*shopify_order_gid\s*,\s*design_id\s*\)/iu);
@@ -46,6 +47,7 @@ describe('0001_production_designs migration', () => {
     expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*shop\s*,\s*status\s*,\s*created_at\s*\)/iu);
     expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*shop\s*,\s*shopify_order_name\s*\)/iu);
     expect(sql).toMatch(/CREATE INDEX[^;]+production_designs\s*\(\s*expires_at\s*\)/iu);
+    expect(sql).toMatch(/CREATE UNIQUE INDEX[^;]+shopify_webhook_deliveries\s*\(\s*shop\s*,\s*topic\s*,\s*event_id\s*\)[^;]+WHERE\s+event_id\s+IS\s+NOT\s+NULL/iu);
   });
 });
 
@@ -81,7 +83,7 @@ describe('createProductionRepository', () => {
 describe('createCartDraft', () => {
   it('atomically inserts a parameterized cart draft and returns the authoritative selected row', async () => {
     const expected = databaseRow();
-    const db = createFakeD1({ batchResults: [{ success: true }, { results: [expected] }] });
+    const db = createFakeD1({ batchResults: [d1Result({ changes: 1 }), d1Result({ results: [expected] })] });
     const repository = createProductionRepository(db);
 
     const result = await repository.createCartDraft(draft());
@@ -107,7 +109,7 @@ describe('createCartDraft', () => {
       bundle_key: 'shops/original/bundle.zip',
       shopify_order_gid: ORDER_GID,
     });
-    const db = createFakeD1({ batchResults: [{ success: true }, { results: [existing] }] });
+    const db = createFakeD1({ batchResults: [d1Result(), d1Result({ results: [existing] })] });
 
     const result = await createProductionRepository(db).createCartDraft(draft());
 
@@ -119,7 +121,7 @@ describe('createCartDraft', () => {
   });
 
   it('fails explicitly when the insert/select batch returns no authoritative row', async () => {
-    const db = createFakeD1({ batchResults: [{ success: true }, { results: [] }] });
+    const db = createFakeD1({ batchResults: [d1Result({ changes: 1 }), d1Result()] });
 
     await expect(createProductionRepository(db).createCartDraft(draft())).rejects.toMatchObject({
       code: 'production-repository-failed',
@@ -164,9 +166,73 @@ describe('shop-scoped reads and quote binding', () => {
       .resolves.toBeNull();
   });
 
+  it('strictly snapshots D1 rows and rejects accessors, extra columns and malformed values', async () => {
+    let getterCalls = 0;
+    const accessorRow = Object.defineProperties({}, {
+      ...Object.fromEntries(Object.entries(databaseRow()).map(([key, value]) => [key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value,
+      }])),
+      status: {
+        configurable: true,
+        enumerable: true,
+        get() { getterCalls += 1; return 'cart_draft'; },
+      },
+    });
+    const db = createFakeD1({ firstResults: [
+      accessorRow,
+      { ...databaseRow(), unexpected_column: 'x' },
+      { ...databaseRow(), created_at: '1700000000000' },
+      {},
+    ] });
+    const repository = createProductionRepository(db);
+
+    for (let index = 0; index < 4; index += 1) {
+      await expect(repository.getDesign(SHOP, DESIGN_ID))
+        .rejects.toMatchObject({ code: 'production-repository-failed' });
+    }
+    expect(getterCalls).toBe(0);
+  });
+
+  it('accepts a complete D1 row with a null prototype', async () => {
+    const row = Object.assign(Object.create(null), databaseRow());
+    const db = createFakeD1({ firstResults: [row] });
+
+    await expect(createProductionRepository(db).getDesign(SHOP, DESIGN_ID))
+      .resolves.toEqual(authoritativeRow());
+  });
+
+  it('gets a cart draft by the same-shop upload ID for pre-R2 deduplication', async () => {
+    const db = createFakeD1({ firstResults: [databaseRow()] });
+
+    const result = await createProductionRepository(db).getCartDraftByUpload(SHOP, UPLOAD_ID);
+
+    expect(db.prepared[0].sql).toMatch(/WHERE\s+shop\s*=\s*\?\s+AND\s+upload_id\s*=\s*\?/iu);
+    expect(db.prepared[0].values).toEqual([SHOP, UPLOAD_ID]);
+    expect(result).toEqual(authoritativeRow());
+  });
+
+  it('does not expose an upload from another shop and returns null when absent', async () => {
+    const db = createFakeD1({ firstResults: [null, null] });
+    const repository = createProductionRepository(db);
+
+    await expect(repository.getCartDraftByUpload(OTHER_SHOP, UPLOAD_ID)).resolves.toBeNull();
+    await expect(repository.getCartDraftByUpload(SHOP, 'upl_fedcba0987654321')).resolves.toBeNull();
+    expect(db.prepared.map((statement) => statement.values[0])).toEqual([OTHER_SHOP, SHOP]);
+  });
+
+  it('returns a stable repository error when the upload lookup fails in D1', async () => {
+    const db = createFakeD1({ firstError: new Error('D1 unavailable') });
+
+    await expect(createProductionRepository(db).getCartDraftByUpload(SHOP, UPLOAD_ID))
+      .rejects.toMatchObject({ code: 'production-repository-failed' });
+  });
+
   it('binds a quote only to an unexpired same-shop cart draft and never replaces another bundle', async () => {
     const row = databaseRow({ bundle_id: BUNDLE_ID, updated_at: 1_700_000_000_100 });
-    const db = createFakeD1({ batchResults: [{ meta: { changes: 1 } }, { results: [row] }] });
+    const db = createFakeD1({ batchResults: [d1Result({ changes: 1 }), d1Result({ results: [row] })] });
 
     const result = await createProductionRepository(db).bindCartQuote({
       shop: SHOP,
@@ -190,10 +256,16 @@ describe('shop-scoped reads and quote binding', () => {
 
   it.each([
     ['different bundle', databaseRow({ bundle_id: 'bun_fedcba0987654321' })],
-    ['expired', databaseRow({ bundle_id: BUNDLE_ID, expires_at: 1_699_999_999_999 })],
+    ['expired', databaseRow({ bundle_id: BUNDLE_ID, expires_at: 1_700_000_000_050 })],
     ['paid', databaseRow({ bundle_id: BUNDLE_ID, status: 'paid_pending_production' })],
+    ['claimed for cleanup', databaseRow({
+      bundle_id: BUNDLE_ID,
+      status: 'cleanup_pending',
+      cleanup_token: CLEANUP_TOKEN,
+      cleanup_started_at: 1_700_000_000_050,
+    })],
   ])('rejects a quote bind when the authoritative row is %s', async (_label, row) => {
-    const db = createFakeD1({ batchResults: [{ meta: { changes: 0 } }, { results: [row] }] });
+    const db = createFakeD1({ batchResults: [d1Result(), d1Result({ results: [row] })] });
     await expect(createProductionRepository(db).bindCartQuote({
       shop: SHOP,
       designId: DESIGN_ID,
@@ -216,52 +288,153 @@ describe('webhook lifecycle', () => {
     expect(db.prepared[0].values).toEqual([SHOP, 'wh_1234567890abcdef']);
   });
 
-  it('records paid designs and the delivery in one batch with guarded, idempotent updates', async () => {
-    const db = createFakeD1({ batchResults: [{ success: true }, { success: true }] });
+  it('checks an optional event identity by shop, topic and event ID', async () => {
+    const db = createFakeD1({ firstResults: [{ event_id: 'evt_1234567890abcdef' }] });
+
+    await expect(createProductionRepository(db).hasWebhookEvent({
+      shop: SHOP,
+      topic: 'orders/paid',
+      eventId: 'evt_1234567890abcdef',
+    })).resolves.toBe(true);
+
+    expect(db.prepared[0].sql).toMatch(/WHERE\s+shop\s*=\s*\?\s+AND\s+topic\s*=\s*\?\s+AND\s+event_id\s*=\s*\?/iu);
+    expect(db.prepared[0].values).toEqual([SHOP, 'orders/paid', 'evt_1234567890abcdef']);
+  });
+
+  it('records all paid designs and the delivery atomically with one guarded CTE update', async () => {
+    const db = createFakeD1({ batchResults: lifecycleBatchResults() });
     const repository = createProductionRepository(db);
 
     const result = await repository.recordOrderLifecycle({
       delivery: delivery(),
-      designs: [paidDesign()],
+      designs: [
+        paidDesign(),
+        paidDesign({ designId: 'dsg_fedcba0987654321' }),
+      ],
       status: 'paid_pending_production',
     });
 
     expect(db.batches).toHaveLength(1);
-    const [update, receipt] = db.batches[0];
-    expect(update.sql).toMatch(/^\s*UPDATE production_designs/iu);
-    expect(update.sql).toMatch(/WHERE\s+shop\s*=\s*\?\s+AND\s+design_id\s*=\s*\?/iu);
-    expect(update.sql).toMatch(/bundle_id\s*=\s*\?/iu);
-    expect(update.sql).toMatch(/shopify_order_gid\s+IS NULL\s+OR\s+shopify_order_gid\s*=\s*\?/iu);
-    expect(update.sql).toMatch(/status\s+IN\s*\(\s*'cart_draft'\s*,\s*'paid_pending_production'\s*,\s*'file_error'\s*\)/iu);
+    const [update, receipt, selectedReceipt] = db.batches[0];
+    expect(db.batches[0]).toHaveLength(3);
+    expect(update.sql).toMatch(/^\s*WITH\s+input_designs/iu);
+    expect(update.sql).toMatch(/UPDATE\s+production_designs/iu);
+    expect(update.sql).toMatch(/COUNT\s*\(\s*\*\s*\)[^;]+COUNT\s*\(\s*\*\s*\)/isu);
+    expect(update.sql).toMatch(/updated_at\s*<=/iu);
+    expect(update.sql).toMatch(/NOT\s+EXISTS[^;]+shopify_webhook_deliveries/isu);
+    expect((update.sql.match(/UPDATE\s+production_designs/giu) ?? [])).toHaveLength(1);
+    expect(update.sql).not.toContain(DESIGN_ID);
     expect(update.values).toContain(SHOP);
+    expect(update.values).toContain('dsg_fedcba0987654321');
     expect(update.values.filter((value) => value === ORDER_GID).length).toBeGreaterThanOrEqual(2);
-    expect(receipt.sql).toMatch(/^\s*INSERT OR IGNORE INTO shopify_webhook_deliveries/iu);
+    expect(receipt.sql).toMatch(/^\s*WITH\s+input_designs/iu);
+    expect(receipt.sql).toMatch(/INSERT OR IGNORE INTO shopify_webhook_deliveries/iu);
+    expect(receipt.sql).toMatch(/SELECT[^;]+WHERE[^;]+COUNT\s*\(\s*\*\s*\)/isu);
     expect(receipt.sql).not.toContain(SHOP);
-    expect(receipt.values).toEqual([
-      'wh_1234567890abcdef', 'evt_1234567890abcdef', SHOP,
-      'orders/paid', ORDER_GID, 1_700_000_000_200,
-    ]);
+    expect(selectedReceipt.sql).toMatch(/FROM\s+shopify_webhook_deliveries/iu);
+    expect(selectedReceipt.sql).toMatch(/webhook_id\s*=\s*\?[^;]+event_id\s*=\s*\?/isu);
     expect(result).toEqual(Object.freeze({
       webhookId: 'wh_1234567890abcdef',
       status: 'paid_pending_production',
-      designCount: 1,
+      designCount: 2,
     }));
   });
 
-  it.each(['cancelled', 'refunded'])('updates %s only for designs already bound to the same shop and order', async (status) => {
-    const db = createFakeD1({ batchResults: [{ success: true }, { success: true }] });
+  it.each([
+    ['cancelled', 'orders/cancelled', "'paid_pending_production', 'file_error', 'cancelled'"],
+    ['refunded', 'refunds/create', "'paid_pending_production', 'file_error', 'cancelled', 'refunded'"],
+  ])('updates %s monotonically for the same shop/order', async (status, topic, allowedStates) => {
+    const db = createFakeD1({ batchResults: lifecycleBatchResults({ topic }) });
 
     await createProductionRepository(db).recordOrderLifecycle({
-      delivery: delivery({ topic: status === 'cancelled' ? 'orders/cancelled' : 'refunds/create' }),
+      delivery: delivery({ topic }),
       designs: [{ designId: DESIGN_ID, updatedAt: 1_700_000_000_300 }],
       status,
     });
 
     const [update] = db.batches[0];
-    expect(update.sql).toMatch(/WHERE\s+shop\s*=\s*\?\s+AND\s+design_id\s*=\s*\?/iu);
+    expect(update.sql).toMatch(/^\s*WITH\s+input_designs/iu);
     expect(update.sql).toMatch(/shopify_order_gid\s*=\s*\?/iu);
     expect(update.sql).not.toMatch(/shopify_order_gid\s+IS NULL/iu);
-    expect(update.values).toEqual([status, 1_700_000_000_300, SHOP, DESIGN_ID, ORDER_GID]);
+    expect(normalizeSql(update.sql)).toContain(normalizeSql(`status IN (${allowedStates})`));
+    expect(update.sql).toMatch(/updated_at\s*<=/iu);
+  });
+
+  it('returns a stable conflict and no receipt when any design misses its guard', async () => {
+    const db = createFakeD1({ batchResults: lifecycleBatchResults({ receipt: null }) });
+
+    await expect(createProductionRepository(db).recordOrderLifecycle({
+      delivery: delivery(),
+      designs: [paidDesign(), paidDesign({ designId: 'dsg_fedcba0987654321' })],
+      status: 'paid_pending_production',
+    })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+
+    expect(db.batches[0]).toHaveLength(3);
+  });
+
+  it('treats a repeated webhook or a different delivery for the same event as idempotent success', async () => {
+    const repeated = lifecycleBatchResults({ receiptInserted: false });
+    const sameEvent = lifecycleBatchResults({
+      webhookId: 'wh_original12345678', receiptInserted: false,
+    });
+    const db = createFakeD1({ batchResultsQueue: [repeated, sameEvent] });
+    const repository = createProductionRepository(db);
+
+    await expect(repository.recordOrderLifecycle({
+      delivery: delivery(), designs: [paidDesign()], status: 'paid_pending_production',
+    })).resolves.toMatchObject({ designCount: 1 });
+    await expect(repository.recordOrderLifecycle({
+      delivery: delivery({ webhookId: 'wh_different123456' }),
+      designs: [paidDesign()],
+      status: 'paid_pending_production',
+    })).resolves.toMatchObject({ designCount: 1 });
+  });
+
+  it('rejects a webhook ID collision from another scope without reporting lifecycle success', async () => {
+    const db = createFakeD1({ batchResults: lifecycleBatchResults({ receipt: null }) });
+
+    await expect(createProductionRepository(db).recordOrderLifecycle({
+      delivery: delivery(), designs: [paidDesign()], status: 'paid_pending_production',
+    })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+
+    expect(db.batches[0][0].sql).toMatch(/NOT\s+EXISTS[^;]+webhook_id\s*=\s*\?/isu);
+  });
+
+  it('rejects a late cancellation after refund while allowing a newer refund after cancellation', async () => {
+    const cancelledDb = createFakeD1({ batchResults: lifecycleBatchResults({ receipt: null }) });
+    await expect(createProductionRepository(cancelledDb).recordOrderLifecycle({
+      delivery: delivery({ topic: 'orders/cancelled' }),
+      designs: [{ designId: DESIGN_ID, updatedAt: 1_700_000_000_250 }],
+      status: 'cancelled',
+    })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+
+    const refundedDb = createFakeD1({
+      batchResults: lifecycleBatchResults({ topic: 'refunds/create' }),
+    });
+    await expect(createProductionRepository(refundedDb).recordOrderLifecycle({
+      delivery: delivery({ topic: 'refunds/create', receivedAt: 1_700_000_000_400 }),
+      designs: [{ designId: DESIGN_ID, updatedAt: 1_700_000_000_400 }],
+      status: 'refunded',
+    })).resolves.toMatchObject({ status: 'refunded' });
+  });
+
+  it('snapshots a Proxy lifecycle array without reading its length getter', async () => {
+    const db = createFakeD1({ batchResults: lifecycleBatchResults() });
+    let lengthReads = 0;
+    const designs = new Proxy([paidDesign()], {
+      get(target, property, receiver) {
+        if (property === 'length') {
+          lengthReads += 1;
+          throw new Error('length getter ran');
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    await expect(createProductionRepository(db).recordOrderLifecycle({
+      delivery: delivery(), designs, status: 'paid_pending_production',
+    })).resolves.toMatchObject({ designCount: 1 });
+    expect(lengthReads).toBe(0);
   });
 
   it('rejects arbitrary lifecycle status or extra design fields before touching D1', async () => {
@@ -304,28 +477,44 @@ describe('webhook lifecycle', () => {
     });
     expect(error.message).not.toContain('SQL');
     expect(error.message).not.toContain('shops/');
+    expect(db.rolledBack).toBe(true);
   });
 });
 
 describe('expired draft cleanup', () => {
-  it('lists at most 100 expired cart drafts globally in stable order with only cleanup fields', async () => {
-    const rows = [databaseRow(), databaseRow({ design_id: 'dsg_fedcba0987654321' })];
-    const db = createFakeD1({ allResults: [{ results: rows }] });
+  it('lists expired drafts and stale cleanup leases in stable order with validated cleanup fields', async () => {
+    const rows = [
+      cleanupListRow(),
+      cleanupListRow({
+        design_id: 'dsg_fedcba0987654321',
+        cleanup_token: CLEANUP_TOKEN,
+        cleanup_started_at: 1_700_000_000_050,
+      }),
+    ];
+    const db = createFakeD1({ allResults: [d1Result({ results: rows })] });
 
     const result = await createProductionRepository(db).listExpiredDrafts({
       before: 1_700_000_000_200,
+      staleBefore: 1_700_000_000_100,
       limit: 100,
     });
 
     const statement = db.prepared[0];
     expect(statement.sql).toContain("status = 'cart_draft'");
+    expect(statement.sql).toContain("status = 'cleanup_pending'");
     expect(statement.sql).toMatch(/expires_at\s*<\s*\?/iu);
+    expect(statement.sql).toMatch(/cleanup_started_at\s*<=\s*\?/iu);
     expect(statement.sql).toMatch(/ORDER BY\s+expires_at\s+ASC\s*,\s*design_id\s+ASC/iu);
     expect(statement.sql).toMatch(/LIMIT\s+\?/iu);
-    expect(statement.values).toEqual([1_700_000_000_200, 100]);
+    expect(statement.values).toEqual([1_700_000_000_200, 1_700_000_000_100, 100]);
     expect(Object.keys(result[0])).toEqual([
       'shop', 'designId', 'manifestKey', 'bundleKey', 'expiresAt',
+      'cleanupToken', 'cleanupStartedAt',
     ]);
+    expect(result[1]).toMatchObject({
+      cleanupToken: CLEANUP_TOKEN,
+      cleanupStartedAt: 1_700_000_000_050,
+    });
     expect(result).toHaveLength(2);
   });
 
@@ -333,25 +522,114 @@ describe('expired draft cleanup', () => {
     const db = createFakeD1();
     await expect(createProductionRepository(db).listExpiredDrafts({
       before: 1_700_000_000_200,
+      staleBefore: 1_700_000_000_100,
       limit,
     })).rejects.toMatchObject({ code: 'invalid-production-repository-input' });
     expect(db.prepared).toHaveLength(0);
   });
 
-  it('deletes only the unchanged same-shop expired cart draft and returns whether a row changed', async () => {
-    const db = createFakeD1({ runResults: [{ meta: { changes: 1 } }] });
+  it('atomically claims an expired same-shop draft before any R2 deletion', async () => {
+    const claimed = databaseRow({
+      status: 'cleanup_pending',
+      cleanup_token: CLEANUP_TOKEN,
+      cleanup_started_at: 1_700_000_000_200,
+      updated_at: 1_700_000_000_200,
+    });
+    const db = createFakeD1({ batchResults: [d1Result({ changes: 1 }), d1Result({ results: [claimed] })] });
 
-    await expect(createProductionRepository(db).deleteExpiredDraft({
+    const result = await createProductionRepository(db).claimExpiredDraft({
       shop: SHOP,
       designId: DESIGN_ID,
       expiresAt: 1_700_000_001_000,
+      claimToken: CLEANUP_TOKEN,
+      claimedAt: 1_700_000_000_200,
+      staleBefore: 1_699_999_000_000,
+    });
+
+    const [claim, select] = db.batches[0];
+    expect(claim.sql).toMatch(/^\s*UPDATE production_designs/iu);
+    expect(claim.sql).toMatch(/SET\s+status\s*=\s*'cleanup_pending'/iu);
+    expect(claim.sql).toMatch(/status\s*=\s*'cart_draft'[^;]+expires_at\s*</isu);
+    expect(claim.sql).toMatch(/status\s*=\s*'cleanup_pending'[^;]+cleanup_started_at\s*<=/isu);
+    expect(claim.values).toContain(CLEANUP_TOKEN);
+    expect(select.values).toEqual([SHOP, DESIGN_ID]);
+    expect(result).toEqual(authoritativeRow({
+      status: 'cleanup_pending',
+      cleanup_token: CLEANUP_TOKEN,
+      cleanup_started_at: 1_700_000_000_200,
+      updated_at: 1_700_000_000_200,
+    }));
+  });
+
+  it('returns null for a missing claim target and conflicts for a paid or differently claimed row', async () => {
+    const missingDb = createFakeD1({
+      batchResults: [d1Result({ changes: 0 }), d1Result({ results: [] })],
+    });
+    await expect(createProductionRepository(missingDb).claimExpiredDraft(cleanupClaim()))
+      .resolves.toBeNull();
+
+    const paidDb = createFakeD1({
+      batchResults: [
+        d1Result({ changes: 0 }),
+        d1Result({ results: [databaseRow({ status: 'paid_pending_production' })] }),
+      ],
+    });
+    await expect(createProductionRepository(paidDb).claimExpiredDraft(cleanupClaim()))
+      .rejects.toMatchObject({ code: 'production-repository-conflict' });
+  });
+
+  it('reclaims a stale cleanup lease with a new token but not a live lease', async () => {
+    const reclaimed = databaseRow({
+      status: 'cleanup_pending',
+      cleanup_token: CLEANUP_TOKEN,
+      cleanup_started_at: 1_700_000_000_200,
+      updated_at: 1_700_000_000_200,
+    });
+    const staleDb = createFakeD1({
+      batchResults: [d1Result({ changes: 1 }), d1Result({ results: [reclaimed] })],
+    });
+    await expect(createProductionRepository(staleDb).claimExpiredDraft(cleanupClaim()))
+      .resolves.toMatchObject({ cleanupToken: CLEANUP_TOKEN });
+
+    const liveRow = databaseRow({
+      status: 'cleanup_pending',
+      cleanup_token: 'cln_fedcba0987654321',
+      cleanup_started_at: 1_700_000_000_150,
+      updated_at: 1_700_000_000_150,
+    });
+    const liveDb = createFakeD1({
+      batchResults: [d1Result(), d1Result({ results: [liveRow] })],
+    });
+    await expect(createProductionRepository(liveDb).claimExpiredDraft(cleanupClaim()))
+      .rejects.toMatchObject({ code: 'production-repository-conflict' });
+  });
+
+  it('deletes only the same cleanup lease token after R2 succeeds', async () => {
+    const db = createFakeD1({ runResults: [d1Result({ changes: 1 })] });
+
+    await expect(createProductionRepository(db).deleteClaimedDraft({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      expiresAt: 1_700_000_001_000,
+      claimToken: CLEANUP_TOKEN,
     })).resolves.toBe(true);
 
     const statement = db.prepared[0];
     expect(statement.sql).toMatch(/^\s*DELETE FROM production_designs/iu);
     expect(statement.sql).toMatch(/shop\s*=\s*\?\s+AND\s+design_id\s*=\s*\?\s+AND\s+expires_at\s*=\s*\?/iu);
-    expect(statement.sql).toContain("status = 'cart_draft'");
-    expect(statement.values).toEqual([SHOP, DESIGN_ID, 1_700_000_001_000]);
+    expect(statement.sql).toContain("status = 'cleanup_pending'");
+    expect(statement.sql).toMatch(/cleanup_token\s*=\s*\?/iu);
+    expect(statement.values).toEqual([SHOP, DESIGN_ID, 1_700_000_001_000, CLEANUP_TOKEN]);
+  });
+
+  it('rejects malformed cleanup rows instead of normalizing missing values', async () => {
+    const db = createFakeD1({ allResults: [d1Result({ results: [{}] })] });
+
+    await expect(createProductionRepository(db).listExpiredDrafts({
+      before: 1_700_000_000_200,
+      staleBefore: 1_700_000_000_100,
+      limit: 100,
+    })).rejects.toMatchObject({ code: 'production-repository-failed' });
   });
 });
 
@@ -403,6 +681,8 @@ function databaseRow(overrides = {}) {
     shopify_order_gid: null,
     shopify_order_name: null,
     error_code: null,
+    cleanup_token: null,
+    cleanup_started_at: null,
     updated_at: value.updatedAt,
     ...overrides,
   };
@@ -433,7 +713,23 @@ function authoritativeRow(overrides = {}) {
     shopifyOrderGid: row.shopify_order_gid,
     shopifyOrderName: row.shopify_order_name,
     errorCode: row.error_code,
+    cleanupToken: row.cleanup_token,
+    cleanupStartedAt: row.cleanup_started_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function cleanupListRow(overrides = {}) {
+  const row = databaseRow();
+  return {
+    shop: row.shop,
+    design_id: row.design_id,
+    manifest_key: row.manifest_key,
+    bundle_key: row.bundle_key,
+    expires_at: row.expires_at,
+    cleanup_token: row.cleanup_token,
+    cleanup_started_at: row.cleanup_started_at,
+    ...overrides,
   };
 }
 
@@ -461,16 +757,66 @@ function paidDesign(overrides = {}) {
   };
 }
 
+function cleanupClaim(overrides = {}) {
+  return {
+    shop: SHOP,
+    designId: DESIGN_ID,
+    expiresAt: 1_700_000_001_000,
+    claimToken: CLEANUP_TOKEN,
+    claimedAt: 1_700_000_000_200,
+    staleBefore: 1_699_999_000_000,
+    ...overrides,
+  };
+}
+
+function d1Result({ changes = 0, results = [] } = {}) {
+  return {
+    success: true,
+    meta: { changes },
+    results,
+  };
+}
+
+function lifecycleReceipt(overrides = {}) {
+  return {
+    webhook_id: 'wh_1234567890abcdef',
+    event_id: 'evt_1234567890abcdef',
+    shop: SHOP,
+    topic: 'orders/paid',
+    order_gid: ORDER_GID,
+    received_at: 1_700_000_000_200,
+    ...overrides,
+  };
+}
+
+function lifecycleBatchResults({
+  receipt = lifecycleReceipt(), topic, webhookId, receiptInserted = true,
+} = {}) {
+  const resolvedReceipt = receipt && {
+    ...receipt,
+    ...(topic ? { topic } : {}),
+    ...(webhookId ? { webhook_id: webhookId } : {}),
+  };
+  return [
+    d1Result({ changes: receipt ? 1 : 0 }),
+    d1Result({ changes: receipt && receiptInserted ? 1 : 0 }),
+    d1Result({ results: resolvedReceipt ? [resolvedReceipt] : [] }),
+  ];
+}
+
 function createFakeD1({
   allResults = [],
   batchError,
   batchResults = [],
+  batchResultsQueue = null,
+  firstError,
   firstResults = [],
   runResults = [],
 } = {}) {
   const db = {
     prepared: [],
     batches: [],
+    rolledBack: false,
     prepare(sql) {
       const statement = {
         sql,
@@ -480,13 +826,14 @@ function createFakeD1({
           return this;
         },
         async first() {
+          if (firstError) throw firstError;
           return firstResults.shift() ?? null;
         },
         async all() {
-          return allResults.shift() ?? { results: [] };
+          return allResults.shift() ?? d1Result();
         },
         async run() {
-          return runResults.shift() ?? { success: true, meta: { changes: 0 } };
+          return runResults.shift() ?? d1Result();
         },
       };
       db.prepared.push(statement);
@@ -494,8 +841,11 @@ function createFakeD1({
     },
     async batch(statements) {
       db.batches.push(statements);
-      if (batchError) throw batchError;
-      return batchResults;
+      if (batchError) {
+        db.rolledBack = true;
+        throw batchError;
+      }
+      return batchResultsQueue ? batchResultsQueue.shift() : batchResults;
     },
   };
   return db;

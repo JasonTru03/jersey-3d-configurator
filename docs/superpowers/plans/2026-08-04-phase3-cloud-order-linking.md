@@ -170,6 +170,7 @@ git commit -m "feat: validate uploaded production packages"
 **Files:**
 - Create: `migrations/0001_production_designs.sql`
 - Create: `workers/production/productionRepository.js`
+- Create: `workers/production/productionLifecycleSql.js`
 - Create: `workers/production/productionRepository.test.js`
 
 - [ ] **Step 1: Write the migration and repository contract tests first**
@@ -179,11 +180,16 @@ Require these operations against a D1-compatible fake that records prepared SQL 
 ```js
 await repository.createCartDraft(draft);
 await repository.getDesign('testcsj.myshopify.com', draft.designId);
+await repository.getCartDraftByUpload('testcsj.myshopify.com', draft.uploadId);
 await repository.bindCartQuote({ shop, designId, bundleId, updatedAt });
-await repository.hasWebhookDelivery(webhookId);
+await repository.hasWebhookDelivery({ shop, webhookId });
+await repository.hasWebhookEvent({ shop, topic, eventId });
 await repository.recordOrderLifecycle({ delivery, designs, status: 'paid_pending_production' });
-await repository.listExpiredDrafts({ before, limit: 100 });
-await repository.deleteExpiredDraft({ shop, designId, expiresAt });
+await repository.listExpiredDrafts({ before, staleBefore, limit: 100 });
+await repository.claimExpiredDraft({
+  shop, designId, expiresAt, claimToken, claimedAt, staleBefore,
+});
+await repository.deleteClaimedDraft({ shop, designId, expiresAt, claimToken });
 ```
 
 Verify every SQL query is parameterized, store scope is always included, duplicate `(shop, upload_id)` returns the existing draft, and a design cannot silently move from one Shopify order to another.
@@ -207,7 +213,7 @@ upload_id TEXT NOT NULL,
 bundle_id TEXT,
 status TEXT NOT NULL CHECK (status IN (
   'cart_draft', 'paid_pending_production', 'file_error',
-  'cancelled', 'refunded', 'archived'
+  'cancelled', 'refunded', 'cleanup_pending', 'archived'
 )),
 product_id TEXT NOT NULL,
 variant_id TEXT,
@@ -226,20 +232,24 @@ paid_at INTEGER,
 shopify_order_gid TEXT,
 shopify_order_name TEXT,
 error_code TEXT,
+cleanup_token TEXT,
+cleanup_started_at INTEGER,
 updated_at INTEGER NOT NULL,
 UNIQUE (shop, upload_id),
 UNIQUE (shop, shopify_order_gid, design_id)
 ```
 
-Also create `shopify_webhook_deliveries(webhook_id PRIMARY KEY, event_id, shop, topic, order_gid, received_at)` plus indexes for `(shop, status, created_at)`, `(shop, shopify_order_name)` and `expires_at`.
+Also create `shopify_webhook_deliveries(webhook_id PRIMARY KEY, event_id, shop, topic, order_gid, received_at)`, a partial unique index on `(shop, topic, event_id) WHERE event_id IS NOT NULL`, plus indexes for `(shop, status, created_at)`, `(shop, shopify_order_name)` and `expires_at`.
 
-Use `PRODUCTION_DB.batch()` for the paid-order updates and webhook receipt so D1 rolls the batch back if a statement fails. Use `INSERT OR IGNORE` for the receipt and idempotent guarded updates for retry safety.
+Use `PRODUCTION_DB.batch()` with one internally generated parameterized `VALUES` CTE and one guarded lifecycle `UPDATE`, a conditional `INSERT OR IGNORE` receipt, and a scoped receipt read. The update must affect all requested designs or none; a receipt is accepted only after every design reaches the delivery's final state. Guard terminal transitions and `updated_at` so older or lower-priority events cannot overwrite newer state. Duplicate webhook IDs and duplicate non-null event IDs are idempotent, while cross-scope collisions return a stable conflict without changing designs.
+
+Cleanup must atomically move an expired `cart_draft` to `cleanup_pending` with `cleanup_token` and `cleanup_started_at` before any R2 deletion. A stale `cleanup_pending` lease can be reclaimed after `staleBefore`; payment lifecycle updates must never claim a `cleanup_pending` row.
 
 - [ ] **Step 4: Run GREEN and commit**
 
 ```powershell
 npx vitest run workers/production/productionRepository.test.js
-git add migrations/0001_production_designs.sql workers/production/productionRepository.js workers/production/productionRepository.test.js
+git add migrations/0001_production_designs.sql workers/production/productionRepository.js workers/production/productionLifecycleSql.js workers/production/productionRepository.test.js docs/superpowers/plans/2026-08-04-phase3-cloud-order-linking.md
 git commit -m "feat: add production design d1 index"
 ```
 
@@ -262,7 +272,7 @@ Cover these observable behaviors:
 - A valid package writes the seven verified files plus the Worker-rebuilt ZIP under `shops/<shopFingerprint>/designs/<designId>/` and then inserts one `cart_draft` row.
 - The rebuilt ZIP is passed to `PRODUCTION_ASSETS.put()` as the validated `ReadableStream`; the handler must not turn it back into a whole-package `Blob` or `ArrayBuffer`.
 - An R2 write, source-stream or D1 failure removes every key written by that request and returns a stable 503 without leaking an internal key, stream error or exception.
-- Repeating the same `(shop, uploadId)` returns the existing matching draft without writing a second package; a different fingerprint for the same upload ID is rejected.
+- Before writing R2, `getCartDraftByUpload(shop, uploadId)` checks for an existing authoritative row. Repeating the same `(shop, uploadId)` returns the existing matching draft without writing a second package; a different fingerprint for the same upload ID is rejected.
 
 - [ ] **Step 2: Run RED**
 
@@ -485,7 +495,9 @@ git commit -m "feat: link shopify order lifecycle to production drafts"
 
 - [ ] **Step 1: Write failing scheduled-cleanup tests**
 
-Require the scheduled handler to select at most 100 expired `cart_draft` rows, delete their eight known R2 keys, and then conditionally delete the unchanged D1 row. Verify it skips `paid_pending_production`, `file_error`, cancelled, refunded and archived records. An R2 delete failure must leave D1 intact for retry.
+Require the scheduled handler to select at most 100 expired `cart_draft` rows or `cleanup_pending` rows whose lease is older than `staleBefore`. For each candidate it must atomically claim the row with a cryptographically random `cleanupToken`, then delete its eight known R2 keys, then call `deleteClaimedDraft` with the same shop/design/expiry/token guard. Verify it skips `paid_pending_production`, `file_error`, cancelled, refunded and archived records.
+
+An R2 delete failure or Worker interruption must leave the row in `cleanup_pending`; after the lease expires a later run can reclaim and retry it. Add a payment-versus-cleanup race test proving exactly one database transition wins: once cleanup is claimed, payment cannot bind the design; once payment is recorded, cleanup cannot claim or delete its files.
 
 - [ ] **Step 2: Run RED**
 

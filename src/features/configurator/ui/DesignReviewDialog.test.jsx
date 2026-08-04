@@ -27,6 +27,27 @@ describe('DesignReviewDialog', () => {
     expect(close).toHaveFocus();
   });
 
+  it('keeps an interactive Turnstile iframe inside the dialog focus loop', async () => {
+    render(<ReviewFocusHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const dialog = await screen.findByRole('dialog');
+    const container = screen.getByRole('group', { name: 'Security verification' });
+    const iframe = document.createElement('iframe');
+    iframe.title = 'Cloudflare security verification';
+    iframe.tabIndex = 0;
+    container.append(iframe);
+
+    expect(dialog).toContainElement(container);
+    expect(container).toContainElement(iframe);
+    iframe.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(screen.getByRole('button', { name: 'Close review' })).toHaveFocus();
+
+    screen.getByRole('button', { name: 'Close review' }).focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(iframe).toHaveFocus();
+  });
+
   it('closes on Escape and restores focus to the trigger', async () => {
     render(<ReviewFocusHarness />);
     const trigger = screen.getByRole('button', { name: 'Open review' });

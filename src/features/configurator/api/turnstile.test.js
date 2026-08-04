@@ -4,18 +4,22 @@ import { getDesignUploadTurnstileToken } from './turnstile.js';
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  document.querySelectorAll('[data-turnstile-production-draft]').forEach((element) => element.remove());
+  document.querySelectorAll('[data-turnstile-test-dialog]').forEach((element) => element.remove());
 });
 
 describe('getDesignUploadTurnstileToken', () => {
   it('renders an explicit execute-mode widget and resolves only the callback token', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     let options;
     let renderedWhileConnected = false;
     const turnstile = {
       ready: vi.fn((callback) => callback()),
       render: vi.fn((container, nextOptions) => {
         renderedWhileConnected = container.isConnected;
+        const iframe = document.createElement('iframe');
+        iframe.title = 'Cloudflare security verification';
+        container.append(iframe);
         options = nextOptions;
         return 'widget-1';
       }),
@@ -26,7 +30,7 @@ describe('getDesignUploadTurnstileToken', () => {
       remove: vi.fn(),
     };
 
-    const token = await getDesignUploadTurnstileToken({ turnstile });
+    const token = await getDesignUploadTurnstileToken({ container, turnstile });
 
     expect(token).toBe('captcha-token');
     expect(fetch).toHaveBeenCalledWith('/api/production-drafts/config', {
@@ -34,12 +38,9 @@ describe('getDesignUploadTurnstileToken', () => {
       signal: expect.any(AbortSignal),
     });
     expect(renderedWhileConnected).toBe(true);
-    const container = turnstile.render.mock.calls[0][0];
     expect(container).toHaveAttribute('role', 'group');
     expect(container).toHaveAttribute('aria-label', 'Security verification');
-    expect(container.style.position).toBe('fixed');
-    expect(Number(container.style.zIndex)).toBeGreaterThan(1000);
-    expect(turnstile.render).toHaveBeenCalledWith(expect.any(HTMLElement), expect.objectContaining({
+    expect(turnstile.render).toHaveBeenCalledWith(container, expect.objectContaining({
       sitekey: 'public-site-key',
       action: 'production_draft',
       execution: 'execute',
@@ -51,11 +52,13 @@ describe('getDesignUploadTurnstileToken', () => {
     }));
     expect(turnstile.execute).toHaveBeenCalledWith('widget-1');
     expect(turnstile.remove).toHaveBeenCalledWith('widget-1');
-    expect(document.querySelector('[data-turnstile-production-draft]')).toBeNull();
+    expect(container.isConnected).toBe(true);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('keeps endpoint and action dependency injection available to callers', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     let options;
     const turnstile = {
       ready: (callback) => callback(),
@@ -69,6 +72,7 @@ describe('getDesignUploadTurnstileToken', () => {
 
     await getDesignUploadTurnstileToken({
       action: 'test_action',
+      container,
       endpoint: '/api/test-turnstile-config',
       turnstile,
     });
@@ -82,6 +86,7 @@ describe('getDesignUploadTurnstileToken', () => {
 
   it('creates and removes a fresh widget for every token request', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     const containers = [];
     const optionsById = new Map();
     let widgetNumber = 0;
@@ -97,16 +102,18 @@ describe('getDesignUploadTurnstileToken', () => {
       remove: vi.fn(),
     };
 
-    await expect(getDesignUploadTurnstileToken({ turnstile })).resolves.toBe('token-widget-1');
-    await expect(getDesignUploadTurnstileToken({ turnstile })).resolves.toBe('token-widget-2');
+    await expect(getDesignUploadTurnstileToken({ container, turnstile })).resolves.toBe('token-widget-1');
+    await expect(getDesignUploadTurnstileToken({ container, turnstile })).resolves.toBe('token-widget-2');
 
-    expect(containers[0]).not.toBe(containers[1]);
+    expect(containers).toEqual([container, container]);
     expect(turnstile.remove.mock.calls).toEqual([['widget-1'], ['widget-2']]);
-    expect(containers.every((container) => !container.isConnected)).toBe(true);
+    expect(container.isConnected).toBe(true);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('handles a callback fired synchronously during render without executing or leaking the widget', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     const execute = vi.fn();
     const remove = vi.fn();
     const turnstile = {
@@ -119,10 +126,11 @@ describe('getDesignUploadTurnstileToken', () => {
       remove,
     };
 
-    await expect(getDesignUploadTurnstileToken({ turnstile })).resolves.toBe('synchronous-token');
+    await expect(getDesignUploadTurnstileToken({ container, turnstile })).resolves.toBe('synchronous-token');
     expect(execute).not.toHaveBeenCalled();
     expect(remove).toHaveBeenCalledWith('widget-synchronous');
-    expect(document.querySelector('[data-turnstile-production-draft]')).toBeNull();
+    expect(container.isConnected).toBe(true);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it.each([
@@ -131,6 +139,7 @@ describe('getDesignUploadTurnstileToken', () => {
     ['timeout-callback'],
   ])('rejects a %s with one stable error and cleans up', async (callbackName, callbackValue) => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     let options;
     const remove = vi.fn();
     const turnstile = {
@@ -143,14 +152,16 @@ describe('getDesignUploadTurnstileToken', () => {
       remove,
     };
 
-    await expect(getDesignUploadTurnstileToken({ turnstile }))
+    await expect(getDesignUploadTurnstileToken({ container, turnstile }))
       .rejects.toThrow('Design upload verification failed.');
     expect(remove).toHaveBeenCalledWith('widget-failure');
-    expect(document.querySelector('[data-turnstile-production-draft]')).toBeNull();
+    expect(container.isConnected).toBe(true);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('aborts a pending widget, removes it once, and ignores a late callback', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     const controller = new AbortController();
     let options;
     const remove = vi.fn();
@@ -164,18 +175,20 @@ describe('getDesignUploadTurnstileToken', () => {
       remove,
     };
 
-    const request = getDesignUploadTurnstileToken({ signal: controller.signal, turnstile });
+    const request = getDesignUploadTurnstileToken({ container, signal: controller.signal, turnstile });
     await vi.waitFor(() => expect(turnstile.execute).toHaveBeenCalledWith('widget-abort'));
     controller.abort();
 
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
     options.callback('late-token');
     expect(remove).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-turnstile-production-draft]')).toBeNull();
+    expect(container.isConnected).toBe(true);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('times out a pending widget and cleans it up', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     const remove = vi.fn();
     const turnstile = {
       ready: (callback) => callback(),
@@ -185,7 +198,7 @@ describe('getDesignUploadTurnstileToken', () => {
     };
     vi.useFakeTimers();
 
-    const request = getDesignUploadTurnstileToken({ timeoutMs: 25, turnstile });
+    const request = getDesignUploadTurnstileToken({ container, timeoutMs: 25, turnstile });
     const rejection = expect(request).rejects.toThrow('Design upload verification timed out.');
     await Promise.resolve();
     await Promise.resolve();
@@ -193,11 +206,13 @@ describe('getDesignUploadTurnstileToken', () => {
 
     await rejection;
     expect(remove).toHaveBeenCalledWith('widget-timeout');
-    expect(document.querySelector('[data-turnstile-production-draft]')).toBeNull();
+    expect(container.isConnected).toBe(true);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it.each(['ready', 'render', 'execute'])('contains synchronous %s failures and removes any created widget', async (failurePoint) => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
+    const container = createTurnstileContainer();
     const remove = vi.fn();
     const turnstile = {
       ready: (callback) => {
@@ -214,9 +229,32 @@ describe('getDesignUploadTurnstileToken', () => {
       remove,
     };
 
-    await expect(getDesignUploadTurnstileToken({ turnstile }))
+    await expect(getDesignUploadTurnstileToken({ container, turnstile }))
       .rejects.toThrow('Design upload verification failed.');
     expect(remove).toHaveBeenCalledTimes(failurePoint === 'execute' ? 1 : 0);
-    expect(document.querySelector('[data-turnstile-production-draft]')).toBeNull();
+    expect(container.isConnected).toBe(true);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it.each([null, document.createElement('div'), document.body])('fails closed before fetch when the container is not a valid dialog placeholder', async (container) => {
+    vi.stubGlobal('fetch', vi.fn());
+
+    await expect(getDesignUploadTurnstileToken({ container, turnstile: {} }))
+      .rejects.toThrow('Design upload verification is unavailable.');
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+function createTurnstileContainer() {
+  const dialog = document.createElement('section');
+  dialog.dataset.turnstileTestDialog = '';
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('role', 'dialog');
+  const container = document.createElement('div');
+  container.dataset.turnstileProductionDraft = '';
+  container.setAttribute('role', 'group');
+  container.setAttribute('aria-label', 'Security verification');
+  dialog.append(container);
+  document.body.append(dialog);
+  return container;
+}

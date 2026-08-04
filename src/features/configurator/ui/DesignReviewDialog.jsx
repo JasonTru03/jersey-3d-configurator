@@ -13,7 +13,7 @@ const APPEARANCE_SUMMARY_ROWS = [
   ['number', 'Name and number'],
 ];
 
-export function DesignReviewDialog({ cartError, cartPending = false, cartUnavailable = false, mutationPending = false, onAddToCart, onClose, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state }) {
+export function DesignReviewDialog({ cartError, cartPending = false, cartUnavailable = false, mutationPending = false, onAddToCart, onClose, onSave, open, preparedDownload, product, quote, selected, shopifyContext, state, turnstileContainerRef }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -146,6 +146,13 @@ export function DesignReviewDialog({ cartError, cartPending = false, cartUnavail
             {cartPending ? 'Preparing secure cart…' : 'Add to Shopify cart'}
           </button>
         </div>
+        <div
+          aria-label="Security verification"
+          className="review-turnstile"
+          data-turnstile-production-draft=""
+          ref={turnstileContainerRef}
+          role="group"
+        />
       </section>
     </div>
   );
@@ -154,6 +161,6 @@ export function DesignReviewDialog({ cartError, cartPending = false, cartUnavail
 function getFocusableElements(container) {
   if (!container) return [];
   return Array.from(container.querySelectorAll(
-    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe:not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])',
   ));
 }

@@ -920,6 +920,22 @@
   justify-content: flex-end;
 }
 
+.review-turnstile:empty {
+  display: none;
+}
+
+.review-turnstile:not(:empty) {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+.review-turnstile iframe {
+  max-width: 100%;
+}
+
 .decoration-panel {
   display: grid;
   gap: 12px;

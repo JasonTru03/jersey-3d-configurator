@@ -1,14 +1,24 @@
 const VERIFICATION_FAILED = 'Design upload verification failed.';
 const VERIFICATION_TIMEOUT = 'Design upload verification timed out.';
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 export async function getDesignUploadTurnstileToken({
   action = 'production_draft',
+  container,
   endpoint = '/api/production-drafts/config',
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   turnstile = window.turnstile,
 } = {}) {
+  if (
+    !(container instanceof HTMLElement)
+    || !container.isConnected
+    || !container.hasAttribute('data-turnstile-production-draft')
+    || !container.closest('[role="dialog"][aria-modal="true"]')
+  ) {
+    throw new Error('Design upload verification is unavailable.');
+  }
+  container.replaceChildren();
   const requestController = new AbortController();
   let timedOut = false;
   const handleExternalAbort = () => requestController.abort(toAbortError(signal?.reason));
@@ -44,6 +54,7 @@ export async function getDesignUploadTurnstileToken({
     await waitUntilReady(turnstile, requestController.signal);
     return await executeWidget({
       action,
+      container,
       signal: requestController.signal,
       siteKey: config.turnstileSiteKey.trim(),
       turnstile,
@@ -59,10 +70,7 @@ export async function getDesignUploadTurnstileToken({
   }
 }
 
-function executeWidget({ action, signal, siteKey, turnstile }) {
-  const container = createWidgetContainer();
-  document.body.append(container);
-
+function executeWidget({ action, container, signal, siteKey, turnstile }) {
   return new Promise((resolve, reject) => {
     let widgetId = null;
     let settled = false;
@@ -76,7 +84,7 @@ function executeWidget({ action, signal, siteKey, turnstile }) {
           // Cleanup must not replace the stable verification result.
         }
       }
-      container.remove();
+      container.replaceChildren();
     };
     const settle = (handler, value) => {
       if (settled) return;
@@ -145,20 +153,6 @@ function waitUntilReady(turnstile, signal) {
       finish(reject, new StableTurnstileError(VERIFICATION_FAILED));
     }
   });
-}
-
-function createWidgetContainer() {
-  const container = document.createElement('div');
-  container.dataset.turnstileProductionDraft = '';
-  container.setAttribute('role', 'group');
-  container.setAttribute('aria-label', 'Security verification');
-  Object.assign(container.style, {
-    position: 'fixed',
-    right: '16px',
-    bottom: '16px',
-    zIndex: '2147483647',
-  });
-  return container;
 }
 
 function normalizeTimeout(timeoutMs) {

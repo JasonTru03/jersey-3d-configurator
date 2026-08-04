@@ -1039,8 +1039,14 @@ describe('ConfiguratorPage', () => {
       'navigate',
     ]);
     expect(cloudDraftHarness.tokenRequests[0]).toEqual({
+      container: expect.any(HTMLElement),
       signal: expect.any(AbortSignal),
     });
+    const verificationContainer = cloudDraftHarness.tokenRequests[0].container;
+    expect(screen.getByRole('dialog')).toContainElement(verificationContainer);
+    expect(verificationContainer).toHaveAttribute('aria-label', 'Security verification');
+    expect(verificationContainer.isConnected).toBe(true);
+    expect(verificationContainer).toBeEmptyDOMElement();
     const packageRequest = productionPackageHarness.requests[0];
     expect(packageRequest).toEqual(expect.objectContaining({
       artifactProvider: expect.any(Function),

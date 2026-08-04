@@ -83,6 +83,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
   const [productionPending, setProductionPending] = useState(false);
   const [productionProviderReady, setProductionProviderReady] = useState(false);
   const productionProviderRef = useRef(null);
+  const turnstileContainerRef = useRef(null);
   const productionPendingRef = useRef(false);
   const activeCartRequestRef = useRef(null);
   const cartPendingRef = useRef(false);
@@ -253,7 +254,10 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
       }), controller.signal);
       cartStage = 'turnstile';
       const turnstileToken = await waitForCartStage(
-        getDesignUploadTurnstileToken({ signal: controller.signal }),
+        getDesignUploadTurnstileToken({
+          container: turnstileContainerRef.current,
+          signal: controller.signal,
+        }),
         controller.signal,
       );
       cartStage = 'upload';
@@ -407,6 +411,7 @@ export function ConfiguratorPage({ navigateToCart = defaultNavigateToCart } = {}
         selected={selected}
         shopifyContext={shopifyContext}
         state={state}
+        turnstileContainerRef={turnstileContainerRef}
       />
     </main>
   );

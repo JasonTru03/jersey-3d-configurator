@@ -616,12 +616,19 @@ describe('toMinorUnits', () => {
 });
 
 describe('wrangler cart quote configuration', () => {
-  it('keeps production cloud resources disabled until the deployment task provisions them', () => {
+  it('keeps local production files enabled while cloud resources await automatic provisioning', () => {
     const config = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
     expect(config.vars.LOCAL_PRODUCTION_FILES).toBe('true');
-    expect(config).not.toHaveProperty('r2_buckets');
-    expect(config).not.toHaveProperty('d1_databases');
+    expect(config.r2_buckets).toEqual([{ binding: 'PRODUCTION_ASSETS' }]);
+    expect(config.d1_databases).toEqual([{
+      binding: 'PRODUCTION_DB',
+      migrations_dir: 'migrations',
+    }]);
+    expect(config.r2_buckets[0]).not.toHaveProperty('bucket_name');
+    expect(config.d1_databases[0]).not.toHaveProperty('database_id');
     expect(config.vars).not.toHaveProperty('CART_QUOTE_SIGNING_SECRET');
+    expect(config.vars).not.toHaveProperty('TURNSTILE_SITE_KEY');
+    expect(config.vars).not.toHaveProperty('TURNSTILE_SECRET_KEY');
     expect(config.vars).not.toHaveProperty('SHOPIFY_API_SECRET');
   });
 });

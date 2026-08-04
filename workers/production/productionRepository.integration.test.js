@@ -198,6 +198,85 @@ describe('production repository against node:sqlite', () => {
       `).get()?.name).toBe('production_designs_cleanup_started_at_idx');
     });
   });
+
+  it('lets payment win before cleanup and preserves the paid row', async () => {
+    await withDatabase(async (db) => {
+      const repository = createProductionRepository(createD1Adapter(db));
+      const [design] = await createBoundDrafts(repository, 1);
+      await repository.recordOrderLifecycle({
+        delivery: delivery(),
+        designs: [design],
+        status: 'paid_pending_production',
+      });
+
+      await expect(repository.claimExpiredDraft({
+        shop: SHOP,
+        designId: indexedDesignId(0),
+        expiresAt: 1_700_000_001_000,
+        claimToken: 'cln_1111111111111111',
+        claimedAt: 1_700_000_002_000,
+        staleBefore: 1_700_000_001_999,
+      })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+
+      expect(statuses(db, 0, 1)).toEqual(['paid_pending_production']);
+    });
+  });
+
+  it('lets cleanup win before payment and preserves the cleanup lease', async () => {
+    await withDatabase(async (db) => {
+      const repository = createProductionRepository(createD1Adapter(db));
+      const [design] = await createBoundDrafts(repository, 1);
+      await repository.claimExpiredDraft({
+        shop: SHOP,
+        designId: indexedDesignId(0),
+        expiresAt: 1_700_000_001_000,
+        claimToken: 'cln_1111111111111111',
+        claimedAt: 1_700_000_002_000,
+        staleBefore: 1_700_000_001_999,
+      });
+
+      await expect(repository.recordOrderLifecycle({
+        delivery: delivery(),
+        designs: [design],
+        status: 'paid_pending_production',
+      })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+
+      expect(db.prepare(`
+        SELECT status, cleanup_token FROM production_designs WHERE design_id = ?
+      `).get(indexedDesignId(0))).toEqual({
+        status: 'cleanup_pending',
+        cleanup_token: 'cln_1111111111111111',
+      });
+    });
+  });
+
+  it('never lists expired paid or terminal production rows for cleanup', async () => {
+    await withDatabase(async (db) => {
+      const repository = createProductionRepository(createD1Adapter(db));
+      for (let index = 0; index < 5; index += 1) {
+        await repository.createCartDraft(draft(index));
+      }
+      const excludedStatuses = [
+        'paid_pending_production',
+        'file_error',
+        'cancelled',
+        'refunded',
+        'archived',
+      ];
+      excludedStatuses.forEach((status, index) => {
+        db.prepare(`
+          UPDATE production_designs SET status = ?, updated_at = ? WHERE design_id = ?
+        `).run(status, 1_700_000_002_000, indexedDesignId(index));
+      });
+
+      await expect(repository.listExpiredDrafts({
+        before: 1_700_000_002_000,
+        staleBefore: 1_700_000_001_999,
+        limit: 100,
+      })).resolves.toEqual([]);
+      expect(statuses(db, 0, 5)).toEqual(excludedStatuses);
+    });
+  });
 });
 
 async function withDatabase(run) {

@@ -1,4 +1,5 @@
 import { createWorkerHandler } from './router.js';
+import { cleanExpiredProductionDrafts } from './production/cleanupDrafts.js';
 
 const handlersByEnv = new WeakMap();
 
@@ -12,7 +13,10 @@ export function getWorkerHandler(env) {
 }
 
 export default {
-  fetch(request, env) {
-    return getWorkerHandler(env)(request);
+  fetch(request, env, ctx) {
+    return getWorkerHandler(env)(request, ctx);
+  },
+  scheduled(controller, env, ctx) {
+    ctx.waitUntil(cleanExpiredProductionDrafts(env, controller.scheduledTime));
   },
 };

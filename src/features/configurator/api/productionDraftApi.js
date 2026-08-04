@@ -1,3 +1,8 @@
+import {
+  MAX_PRODUCTION_PACKAGE_BYTES,
+  PRODUCTION_PACKAGE_FILE_CONTRACT,
+} from '../designs/productionManifest.js';
+
 const SHOP_DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
 const UPLOAD_ID_PATTERN = /^upl_[A-Za-z0-9_-]{16,64}$/u;
 const DESIGN_ID_PATTERN = /^dsg_[A-Za-z0-9_-]{16,64}$/u;
@@ -6,19 +11,8 @@ const BUNDLE_FILENAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,100}-design-([a-f0-9]{8})\
 const MAX_TOKEN_LENGTH = 4_096;
 const MAX_SERVER_ERROR_LENGTH = 200;
 const DEFAULT_TIMEOUT_MS = 120_000;
-const MEBIBYTE = 1024 * 1024;
-const MAX_PRODUCTION_FILES_BYTES = 64 * MEBIBYTE;
 const GENERIC_ERROR = 'Production draft upload failed.';
 const TIMEOUT_ERROR = 'Production draft upload timed out. Try again.';
-const PRODUCTION_FILES = Object.freeze([
-  Object.freeze(['design.json', 'application/json', 8 * MEBIBYTE]),
-  Object.freeze(['uv-atlas.png', 'image/png', 16 * MEBIBYTE]),
-  Object.freeze(['uv-pattern-pieces.png', 'image/png', 16 * MEBIBYTE]),
-  Object.freeze(['uv-reference.pdf', 'application/pdf', 8 * MEBIBYTE]),
-  Object.freeze(['preview-front.png', 'image/png', 8 * MEBIBYTE]),
-  Object.freeze(['preview-back.png', 'image/png', 8 * MEBIBYTE]),
-  Object.freeze(['manifest.json', 'application/json', MEBIBYTE]),
-]);
 
 export async function uploadProductionDraft({
   artifact,
@@ -122,20 +116,22 @@ function snapshotFiles(artifact) {
     throw new TypeError('Production draft files are invalid.');
   }
   if (
-    artifact.files.length !== PRODUCTION_FILES.length
-    || artifact.files.some((file, index) => file?.filename !== PRODUCTION_FILES[index][0])
+    artifact.files.length !== PRODUCTION_PACKAGE_FILE_CONTRACT.length
+    || artifact.files.some((file, index) => (
+      file?.filename !== PRODUCTION_PACKAGE_FILE_CONTRACT[index].filename
+    ))
   ) {
     throw new TypeError('Production draft files are invalid.');
   }
   let totalBytes = 0;
   return artifact.files.map((file, index) => {
-    const [filename, mediaType, maxBytes] = PRODUCTION_FILES[index];
+    const { filename, mediaType, maxBytes } = PRODUCTION_PACKAGE_FILE_CONTRACT[index];
     const blob = file?.blob;
     if (!(blob instanceof Blob) || blob.size === 0 || blob.type !== mediaType || blob.size > maxBytes) {
       throw new TypeError('Production draft files are invalid.');
     }
     totalBytes += blob.size;
-    if (totalBytes > MAX_PRODUCTION_FILES_BYTES) {
+    if (totalBytes > MAX_PRODUCTION_PACKAGE_BYTES) {
       throw new TypeError('Production draft files are invalid.');
     }
     return { blob, filename };

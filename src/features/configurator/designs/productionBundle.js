@@ -1,16 +1,11 @@
 import { createProductionFilename } from './productionFingerprint.js';
+import { PRODUCTION_PACKAGE_FILE_CONTRACT } from './productionManifest.js';
 
 const UTF8_FLAG = 0x0800;
 const STORE_METHOD = 0;
-const ZIP_NAMES = Object.freeze([
-  'design.json',
-  'uv-atlas.png',
-  'uv-pattern-pieces.png',
-  'uv-reference.pdf',
-  'preview-front.png',
-  'preview-back.png',
-  'manifest.json',
-]);
+const ZIP_NAMES = Object.freeze(
+  PRODUCTION_PACKAGE_FILE_CONTRACT.map(({ filename }) => filename),
+);
 
 export async function createProductionBundle({ files, fingerprint, productId }) {
   if (
@@ -27,6 +22,19 @@ export async function createProductionBundle({ files, fingerprint, productId }) 
     blob: new Blob([zip], { type: 'application/zip' }),
     filename,
   };
+}
+
+export async function rebuildProductionBundle(input) {
+  const values = readExactDataProperties(
+    input,
+    ['designFingerprint', 'files', 'productId'],
+  );
+  if (!values) throw new TypeError('服务端生产 ZIP 输入无效。');
+  return createProductionBundle({
+    files: values.files,
+    fingerprint: values.designFingerprint,
+    productId: values.productId,
+  });
 }
 
 async function readEntry(file) {
@@ -126,4 +134,31 @@ function crc32(bytes) {
     }
   }
   return (crc ^ 0xffffffff) >>> 0;
+}
+
+function readExactDataProperties(value, expectedKeys) {
+  if (!isPlainObject(value)) return null;
+  let descriptors;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch {
+    return null;
+  }
+  const keys = Reflect.ownKeys(descriptors);
+  if (
+    keys.length !== expectedKeys.length
+    || expectedKeys.some((key) => !Object.hasOwn(descriptors, key))
+    || keys.some((key) => !Object.hasOwn(descriptors[key], 'value'))
+  ) return null;
+  return Object.fromEntries(expectedKeys.map((key) => [key, descriptors[key].value]));
+}
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
 }

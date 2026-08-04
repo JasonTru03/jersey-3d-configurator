@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createProductionBundle } from './productionBundle.js';
+import { createProductionBundle, rebuildProductionBundle } from './productionBundle.js';
 
 const ZIP_NAMES = [
   'design.json',
@@ -58,6 +58,29 @@ describe('createProductionBundle', () => {
       fingerprint: '12ab34cd',
       productId: 'fn8788-jersey',
     })).rejects.toThrow('生产 ZIP 中存在缺失或空文件。');
+  });
+});
+
+describe('rebuildProductionBundle', () => {
+  it('rebuilds the ZIP only from verified seven-file input', async () => {
+    const result = await rebuildProductionBundle({
+      designFingerprint: '12ab34cd',
+      files: createFiles(),
+      productId: 'fn8788-jersey',
+    });
+
+    expect(result.filename).toBe('fn8788-jersey-design-12ab34cd.zip');
+    expect(readCentralNames(new Uint8Array(await result.blob.arrayBuffer())))
+      .toEqual(ZIP_NAMES);
+  });
+
+  it('rejects an uploaded ZIP or arbitrary metadata instead of passing it through', async () => {
+    await expect(rebuildProductionBundle({
+      designFingerprint: '12ab34cd',
+      files: createFiles(),
+      productId: 'fn8788-jersey',
+      uploadedZip: new Blob(['untrusted'], { type: 'application/zip' }),
+    })).rejects.toThrow('服务端生产 ZIP 输入无效。');
   });
 });
 

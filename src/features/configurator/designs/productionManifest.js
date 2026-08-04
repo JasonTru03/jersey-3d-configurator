@@ -5,14 +5,21 @@ import {
 
 const PNG_SIGNATURE = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_IHDR = Object.freeze([73, 72, 68, 82]);
+const MEBIBYTE = 1024 * 1024;
+
+export const MAX_PRODUCTION_PACKAGE_BYTES = 64 * MEBIBYTE;
+export const PRODUCTION_PACKAGE_FILE_CONTRACT = Object.freeze([
+  Object.freeze({ filename: 'design.json', mediaType: 'application/json', maxBytes: 8 * MEBIBYTE }),
+  Object.freeze({ filename: 'uv-atlas.png', mediaType: 'image/png', maxBytes: 16 * MEBIBYTE }),
+  Object.freeze({ filename: 'uv-pattern-pieces.png', mediaType: 'image/png', maxBytes: 16 * MEBIBYTE }),
+  Object.freeze({ filename: 'uv-reference.pdf', mediaType: 'application/pdf', maxBytes: 8 * MEBIBYTE }),
+  Object.freeze({ filename: 'preview-front.png', mediaType: 'image/png', maxBytes: 8 * MEBIBYTE }),
+  Object.freeze({ filename: 'preview-back.png', mediaType: 'image/png', maxBytes: 8 * MEBIBYTE }),
+  Object.freeze({ filename: 'manifest.json', mediaType: 'application/json', maxBytes: MEBIBYTE }),
+]);
 
 export const PRODUCTION_ARTIFACT_NAMES = Object.freeze([
-  'design.json',
-  'uv-atlas.png',
-  'uv-pattern-pieces.png',
-  'uv-reference.pdf',
-  'preview-front.png',
-  'preview-back.png',
+  ...PRODUCTION_PACKAGE_FILE_CONTRACT.slice(0, -1).map(({ filename }) => filename),
 ]);
 
 export async function sha256Hex(blob) {

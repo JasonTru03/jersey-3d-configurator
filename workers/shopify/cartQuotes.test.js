@@ -143,6 +143,30 @@ function r2Head({ key, size, contentType, customMetadata, sha256 }) {
   };
 }
 
+function workerdLazyHead(head, getters) {
+  return lazyAccessorObject({
+    key: head.key,
+    size: head.size,
+    httpMetadata: lazyAccessorObject({ contentType: head.httpMetadata.contentType }, getters),
+    customMetadata: lazyAccessorObject({ ...head.customMetadata }, getters),
+    checksums: lazyAccessorObject({ ...head.checksums }, getters),
+  }, getters);
+}
+
+function lazyAccessorObject(values, getters) {
+  const object = {};
+  for (const [key, value] of Object.entries(values)) {
+    const getter = vi.fn(() => value);
+    getters.push(getter);
+    Object.defineProperty(object, key, {
+      configurable: true,
+      enumerable: true,
+      get: getter,
+    });
+  }
+  return object;
+}
+
 function runtime(current, overrides = {}) {
   const records = new Map();
   const events = [];
@@ -404,14 +428,36 @@ describe('createCartQuotesHandler', () => {
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('shops/');
   });
 
-  it('rejects accessor-backed required R2 metadata without invoking the getter', async () => {
+  it('accepts workerd-shaped lazy accessors for required R2 metadata', async () => {
     const current = await fixture();
-    const getter = vi.fn(() => current.draft.manifestKey);
-    Object.defineProperty(current.objects.get(current.draft.manifestKey).head, 'key', { get: getter });
+    const getters = [];
+    for (const object of current.objects.values()) {
+      object.head = workerdLazyHead(object.head, getters);
+    }
     const app = runtime(current);
     const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    expect(response.status).toBe(201);
+    expect(getters.length).toBeGreaterThan(0);
+    expect(getters.every((getter) => getter.mock.calls.length > 0)).toBe(true);
+  });
+
+  it('maps a throwing R2 lazy accessor to a stable 503 without leaking details', async () => {
+    const current = await fixture();
+    const getter = vi.fn(() => {
+      throw new Error(`R2 secret at ${current.draft.manifestKey}`);
+    });
+    Object.defineProperty(current.objects.get(current.draft.manifestKey).head, 'key', {
+      configurable: true,
+      enumerable: true,
+      get: getter,
+    });
+    const logger = { error: vi.fn() };
+    const app = runtime(current, { dependencies: { logger } });
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
     expect(response.status).toBe(503);
-    expect(getter).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ error: 'Secure cart service is temporarily unavailable.' });
+    expect(getter).toHaveBeenCalledOnce();
+    expect(JSON.stringify(logger.error.mock.calls)).not.toMatch(/secret|shops\//u);
   });
 
   it('accepts the native R2ObjectBody prototype arrayBuffer method without trusting accessors', async () => {

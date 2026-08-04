@@ -394,9 +394,10 @@ describe('shop-scoped reads and quote binding', () => {
     expect(update.sql).toMatch(/expires_at\s*>\s*\?/iu);
     expect(update.sql).toMatch(/bundle_id\s*=\s*COALESCE\s*\(\s*bundle_id\s*,\s*\?\s*\)/iu);
     expect(update.sql).toMatch(/updated_at\s*=\s*CASE\s+WHEN\s+bundle_id\s+IS NULL\s+THEN\s+\?/iu);
+    expect(update.sql).toMatch(/bundle_id\s+IS NOT NULL\s+OR\s+updated_at\s*<=\s*\?/iu);
     expect(update.values).toEqual([
       BUNDLE_ID, 1_700_000_000_100, SHOP, DESIGN_ID,
-      1_700_000_000_100,
+      1_700_000_000_100, 1_700_000_000_100,
     ]);
     expect(select.values).toEqual([SHOP, DESIGN_ID]);
     expect(result.bundleId).toBe(BUNDLE_ID);

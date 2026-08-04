@@ -283,7 +283,8 @@ async function bindCartQuote(db, input) {
     WHERE shop = ? AND design_id = ?
       AND status = 'cart_draft'
       AND expires_at > ?
-  `, [bundleId, updatedAt, shop, designId, updatedAt]);
+      AND (bundle_id IS NOT NULL OR updated_at <= ?)
+  `, [bundleId, updatedAt, shop, designId, updatedAt, updatedAt]);
   const select = prepareBound(db, `
     SELECT ${ROW_COLUMNS}
     FROM production_designs

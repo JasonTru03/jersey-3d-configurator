@@ -60,6 +60,28 @@ describe('production repository against node:sqlite', () => {
     });
   });
 
+  it('rejects a real SQLite quote bind time rollback without changing the draft row', async () => {
+    await withDatabase(async (db) => {
+      const repository = createProductionRepository(createD1Adapter(db));
+      await repository.createCartDraft(draft(0));
+      const select = () => db.prepare(`
+        SELECT bundle_id, created_at, updated_at
+        FROM production_designs
+        WHERE design_id = ?
+      `).get(indexedDesignId(0));
+      const before = select();
+
+      await expect(repository.bindCartQuote({
+        shop: SHOP,
+        designId: indexedDesignId(0),
+        bundleId: 'bun_1111111111111111',
+        updatedAt: before.updated_at - 1,
+      })).rejects.toMatchObject({ code: 'production-repository-conflict' });
+
+      expect(select()).toEqual(before);
+    });
+  });
+
   it.each([2, 250])('atomically records %i paid designs from the real migration', async (count) => {
     await withDatabase(async (db) => {
       const repository = createProductionRepository(createD1Adapter(db));

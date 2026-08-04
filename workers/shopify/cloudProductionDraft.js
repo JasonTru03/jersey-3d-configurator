@@ -106,7 +106,7 @@ function validateHead(value, {
   requireContentLength = false,
   requireNativeChecksum = false,
 }) {
-  const head = readDataProperties(value, [
+  const head = readBindingProperties(value, [
     'key', 'size', 'httpMetadata', 'customMetadata', 'checksums',
   ]);
   if (!head
@@ -114,13 +114,13 @@ function validateHead(value, {
     || !Number.isSafeInteger(head.size)
     || head.size <= 0
     || head.size > maximumSize) throw new Error('Production R2 object is invalid.');
-  const http = readDataProperties(head.httpMetadata, ['contentType']);
-  const metadata = readDataProperties(head.customMetadata, [
+  const http = readBindingProperties(head.httpMetadata, ['contentType']);
+  const metadata = readBindingProperties(head.customMetadata, [
     'designFingerprint', 'productId', 'variantId', 'size', 'sha256',
     ...(requireContentLength ? ['contentLength'] : []),
   ]);
   const checksums = requireNativeChecksum
-    ? readDataProperties(head.checksums, ['sha256'])
+    ? readBindingProperties(head.checksums, ['sha256'])
     : null;
   if (!http
     || http.contentType !== contentType
@@ -242,17 +242,16 @@ function isArrayBuffer(value) {
   }
 }
 
-function readDataProperties(value, keys) {
+function readBindingProperties(value, keys) {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return null;
-  let descriptors;
+  const properties = {};
   try {
-    descriptors = Object.getOwnPropertyDescriptors(value);
+    // workerd exposes trusted R2 result fields as lazy readonly accessors.
+    for (const key of keys) properties[key] = value[key];
   } catch {
     return null;
   }
-  if (keys.some((key) => !Object.hasOwn(descriptors, key)
-    || !Object.hasOwn(descriptors[key], 'value'))) return null;
-  return Object.fromEntries(keys.map((key) => [key, descriptors[key].value]));
+  return properties;
 }
 
 function readDataMethod(value, key) {

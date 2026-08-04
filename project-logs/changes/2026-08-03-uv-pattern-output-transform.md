@@ -2,11 +2,11 @@
 
 ## 状态
 
-**BLOCKED：结构、哈希、测试和构建契约通过，但真实生产包视觉验收失败，当前提交不可交付或发布。**
+**本地验证通过、未发布：修正版真实生产包的结构、Manifest、哈希、测试、构建和固定视觉验收均通过。**
 
-本轮只新增本验证日志，没有修改生产代码；没有 push、merge、deploy 或 Shopify 发布。
+首轮真实包的 BLOCKED 失败记录继续保留在下文作为历史证据。本轮最终验证只更新并提交本验证日志，没有修改生产代码；没有 push、merge、deploy 或 Shopify 发布。
 
-## 日期与版本
+## 首轮 BLOCKED 历史：日期与版本
 
 - 日期：2026-08-03
 - 验证分支：`codex/uv-pattern-output-transform`
@@ -175,3 +175,146 @@ ZIP 中精确七文件：
 - 本地 Vite server 已通过受控 PTY 停止；端口 5173 无监听。
 - 证据 ZIP、解包目录和 PDF 渲染图保留。
 - 未 push、未 merge、未 deploy、未触发 Cloudflare 或 Shopify 发布。
+
+## 修正版最终验证（2026-08-04）
+
+### 版本与修复提交
+
+- 最终验证分支：`codex/uv-pattern-output-transform`。
+- 最终验证 HEAD：`6052750a2d79751d05d711fe5a5e8ead5a428b2f`。
+- 正式方向修复：`6f04e31 fix: avoid duplicate UV output orientation transform`。该提交移除 front/back 每片重复方向变换，只保留最终全局输出变换。
+- native Canvas 串行化：`6052750 test: serialize native Canvas verification`。默认测试分为 `unit` 与 `native-canvas` 两个项目，native Canvas 项目 `fileParallelism: false`、`maxWorkers: 1`，并在 unit 之后执行。
+- 修正版 Manifest 裁片布局指纹：`uv-pieces-v2-14887ff1`；首轮失败包为 `uv-pieces-v2-e5f46651`。
+- 设计指纹继续为 `6ac2cd02`。
+
+### 基线与完整命令
+
+开始时 `git status` clean，HEAD 与预期一致；以下命令均从主验证 worktree 新鲜执行：
+
+```text
+git diff showcase...HEAD --check
+exit 0
+
+npm test
+exit 0
+Test Files  77 passed (77)
+Tests       1153 passed (1153)
+Duration    56.81s
+
+npx vitest list --project unit
+exit 0，74 files / 1141 tests
+
+npx vitest list --project native-canvas
+exit 0，3 files / 12 tests
+
+npm run build
+exit 0
+
+npm run build:showcase
+exit 0
+
+npx wrangler deploy --dry-run
+exit 0，输出 --dry-run: exiting now.
+```
+
+默认 `npm test` 只执行一次，总计 77 个测试文件、1,153 个测试全部通过；没有 `ETIMEDOUT`。TTY 最终汇总只保留总计，因此另用不执行测试的 `vitest list` 核实拆分为 unit 74/1,141 与 native-canvas 3/12。测试输出仍有两条既有 jsdom 提示 `Not implemented: navigation to another Document`。
+
+`npm run build` 的 app 与 Shopify 构建均成功；app 转换 1,753 modules，Shopify 转换 1,738 modules。`npm run build:showcase` 转换 1,753 modules 并成功。允许的既有警告为：主 JS chunk 超过 500 kB；Shopify 构建提示 `inlineDynamicImports option is ignored because codeSplitting: false is set`。
+
+Wrangler 4.118.0 dry-run 读取 `dist` 中 7 个文件，Total Upload 104.02 KiB / gzip 24.30 KiB；检测到代理环境变量并用于 fetch。命令明确以 dry-run 退出，没有实际部署。
+
+### 真实 Showcase 导入与新 ZIP
+
+- localhost：主验证 worktree 的 Vite Showcase，实际入口为 `http://localhost:5173/`。
+- 导入源：首轮失败包 `C:\Users\Administrator\Downloads\fn8788-jersey-design-6ac2cd02.zip` 中的同一 `design.json`。
+- 导入源 `design.json` SHA-256：`19ec39680a794d305d7bec9dcfde1e69071a9a53faecb7528ab3812cde89cf2f`。
+- 导入设计明确包含正面 `FRONT TOP`、`Crest Badge`，背面 `PLAYER` / `16`；导入后审核弹窗显示 `1 item: FRONT TOP`、`Name set` 和 `1 artwork item`，总价为 `$115`。
+- 现有审核弹窗只直接展开 `FRONT TOP`，把精确的 `PLAYER / 16` 与 `Crest Badge` 聚合显示为 `Name set` 和 `1 artwork item`。精确值由导入源、新 `design.json` 以及实际生产图交叉确认；该既有摘要 UI 边界不影响本次方向修复结论。
+- 审核截图：`C:\Users\Administrator\Downloads\uv-output-transform-final-qa-20260804-100405\review-page.png`。
+- 新下载 ZIP：`C:\Users\Administrator\Downloads\fn8788-jersey-design-6ac2cd02 (2).zip`。
+- ZIP 创建/修改时间：`2026-08-04 10:07:43 +08:00`。
+- ZIP 大小：4,420,715 bytes。
+- ZIP SHA-256：`a700fb65f248369d2fc124648587915aa32efd729809c40778c82e888ddb12f2`。
+
+浏览器下载事件监听在 30 秒后超时，但点击后出现了未覆盖旧文件的新 `(2).zip`。其新时间戳、`generatedAt = 2026-08-04T02:07:10.594Z`、设计内容、设计指纹、修正版布局指纹和逐项 Manifest 均证明它是本轮由主验证 worktree 生成的包，不是旧候选。
+
+浏览器验收 tab 已关闭，本地 Vite server 已停止。
+
+### Fresh verifier、解包与 PDF 证据
+
+新 ZIP 在下载后 fresh 执行：
+
+```text
+node scripts/verify-production-package.mjs "C:\Users\Administrator\Downloads\fn8788-jersey-design-6ac2cd02 (2).zip"
+Production package verification: PASS (6ac2cd02, 4096x4096, 2 PDF pages)
+exit 0
+```
+
+- 唯一证据根目录：`C:\Users\Administrator\Downloads\uv-output-transform-final-qa-20260804-100405`。
+- 新包安全解包目录：`C:\Users\Administrator\Downloads\uv-output-transform-final-qa-20260804-100405\final-package-extracted`。
+- 失败包历史对比目录：`C:\Users\Administrator\Downloads\uv-output-transform-final-qa-20260804-100405\failed-package-extracted`。
+- 使用底层 Poppler `pdfinfo.exe` 确认 PDF 2 页、A4 横向、PDF 1.4、无旋转。
+- 使用底层 Poppler `pdftoppm.exe` 渲染并实际查看第 2 页：`C:\Users\Administrator\Downloads\uv-output-transform-final-qa-20260804-100405\final-package-extracted\uv-reference-page-2.png`。
+
+新 ZIP 精确包含七个顶层文件：
+
+1. `design.json` - 2,827 bytes
+2. `manifest.json` - 3,189 bytes
+3. `preview-back.png` - 1,013,716 bytes
+4. `preview-front.png` - 1,255,855 bytes
+5. `uv-atlas.png` - 993,382 bytes
+6. `uv-pattern-pieces.png` - 919,274 bytes
+7. `uv-reference.pdf` - 231,706 bytes
+
+实际尺寸：`uv-atlas.png` 与 `uv-pattern-pieces.png` 均为 4096 x 4096 RGBA；front/back previews 均为 1600 x 1600 RGBA。PDF 为 2 页。
+
+### 修正版 Manifest
+
+- `schemaVersion = 2`。
+- `uvExportVersion = "2"`。
+- `designFingerprint = "6ac2cd02"`。
+- `patternPieces.layoutFingerprint = "uv-pieces-v2-14887ff1"`。
+- `patternPieces.outputTransform = { "rotation": 180, "mirrorX": true }`。
+- front：`rotation = 0`、`mirrorX = false`、`outputBounds = { x: 192, y: 745, width: 1792, height: 2605 }`。
+- back：`rotation = 0`、`mirrorX = false`、`outputBounds = { x: 2228, y: 745, width: 1560, height: 2605 }`。
+
+Manifest 声明的六个生产文件长度与实际逐项一致，SHA-256 也与实际逐项一致：
+
+| 文件 | bytes | SHA-256 |
+| --- | ---: | --- |
+| `design.json` | 2,827 | `a890a59e7877a6bccef58d1a0e006688b885e6e95ebb464ad1aba5885772a3db` |
+| `uv-atlas.png` | 993,382 | `e24658da8c20983dbcc726c7ba516825ed56889eea735307a718a2e322a51693` |
+| `uv-pattern-pieces.png` | 919,274 | `c165a6907f7606628177f1c6c1ed19f9a0a001e5a2fb34bbd687d8e1344be881` |
+| `uv-reference.pdf` | 231,706 | `c03756bc36578038a0e00e1daf3c22a6f57b6288c971e1c9ab6fde69b427f687` |
+| `preview-front.png` | 1,255,855 | `2d91263d5cdf8b9e2b58e70afd0cfaca30ff9aa5d630a52020d1f941a8f39df2` |
+| `preview-back.png` | 1,013,716 | `b8a3f6517126742b7aabfe2fd64d1db62384b1222e60841ac89df4090cde5de9` |
+
+### 修正版真实视觉 PASS
+
+已实际打开并查看新 `uv-pattern-pieces.png`、`preview-front.png`、`preview-back.png`、`uv-atlas.png`，并实际查看 Poppler 渲染的 PDF 第 2 页：
+
+- front/back 裁片的领口均朝上。
+- `FRONT TOP` 上下正立；中段被 Crest 部分遮挡，但两侧可见字母方向明确正立。
+- `PLAYER` 与 `16` 上下正立，阅读方向为从左到右。
+- Crest 盾尖向下，星尖向上。
+- 正片和背片完整落在各自 bounds 内，未裁切；裁片内容内部无异常实心黑块。查看器中的外围黑色是透明背景的显示效果。
+- PDF 第 2 页与 `uv-pattern-pieces.png` 的方向、内容和排版一致。
+- `preview-front.png` 中 Crest 与可见 `FRONT TOP` 保持正向；`preview-back.png` 中 `PLAYER / 16` 保持正向。
+- `uv-atlas.png` 已实际查看，主身、袖片与领片未见新增裁切或异常实心黑块；Atlas 保持源 UV 朝向，不作为工厂正向裁片图。
+
+固定视觉验收条件全部通过。
+
+### 与首轮失败包的实际比较
+
+- 新旧 `uv-atlas.png` SHA-256 完全相同：`e24658da8c20983dbcc726c7ba516825ed56889eea735307a718a2e322a51693`。
+- 新旧 `preview-back.png` SHA-256 完全相同。
+- `uv-pattern-pieces.png`、PDF 和 front preview 哈希不同；设计 JSON 因新的 `savedAt` 而不同。
+- 对失败包与新包的 4096 x 4096 RGBA 裁片像素做了实际 bounds 比较。新图视觉内容相对于失败包各自完成一次垂直方向修正，但不是 PNG 解码后的逐像素完美 vertical flip：front bounds 共 4,668,160 像素，其中 9,166 像素不同于旧 crop 的逐行反转；back bounds 共 4,063,800 像素，其中 4,486 像素不同。两个 bounds 之外 8,045,256 像素的差异数为 0。差异集中在重新光栅化边缘，因此不声称两张裁片 PNG 是位级精确的单次翻转；视觉方向和 Manifest 变换层数则符合只保留一次最终输出修正。
+
+### 警告、边界与发布状态
+
+- 非阻塞既有警告：两条 jsdom navigation 提示、Vite 主 chunk 超过 500 kB、Shopify inlineDynamicImports/codeSplitting 提示、Wrangler 代理环境变量提示。
+- 浏览器 download 事件监听超时，但新文件存在并由新时间戳、内容、指纹、Manifest、verifier 与视觉检查组成完整证据链。
+- 审核弹窗现有摘要 UI 不直显精确 `PLAYER / 16` 与 `Crest Badge` 文案；本轮未获授权修改该既有 UI，只在本记录中显式保留边界。
+- 本轮只修改本日志，没有新增公共模块、依赖、生产代码或项目内证据文件。
+- 方向修正版已经完成本地完整验证，但仍未 push、未 merge、未 deploy、未发布到 Cloudflare 或 Shopify。

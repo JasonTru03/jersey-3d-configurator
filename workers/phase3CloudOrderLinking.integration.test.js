@@ -37,16 +37,33 @@ describe('phase 3 cloud order contract', () => {
         new URL('../migrations/0001_production_designs.sql', import.meta.url),
         'utf8',
       ));
+      database.exec(await readFile(
+        new URL('../migrations/0002_free_tier_streaming_upload.sql', import.meta.url),
+        'utf8',
+      ));
       const runtime = createContractRuntime(database);
       const state = structuredClone(jerseyProduct.defaultState);
       const artifact = await createBrowserProductionPackage(state);
       expect(artifact.files.map((file) => file.filename)).toEqual(PRODUCTION_FILENAMES);
 
-      const uploadResponse = await runtime.worker(await uploadRequest(artifact.files));
+      const sessionResponse = await runtime.worker(await uploadSessionRequest(artifact));
+      const session = await sessionResponse.json();
+      expect(sessionResponse.status, JSON.stringify(session)).toBe(201);
+      const manifestResponse = await runtime.worker(uploadBodyRequest(
+        session,
+        'manifest',
+        artifact.files[6].blob,
+      ));
+      expect(manifestResponse.status).toBe(204);
+      const uploadResponse = await runtime.worker(uploadBodyRequest(
+        session,
+        'bundle',
+        artifact.blob,
+      ));
       const upload = await uploadResponse.json();
       expect(uploadResponse.status, JSON.stringify(upload)).toBe(201);
       expect(upload.designId).toMatch(/^dsg_[0-9a-f-]{36}$/u);
-      expect(runtime.r2.objects).toHaveLength(8);
+      expect(runtime.r2.objects).toHaveLength(2);
 
       runtime.clock.value = NOW + 100;
       const quoteResponse = await runtime.worker(jsonRequest('/api/cart-quotes', {
@@ -257,18 +274,55 @@ function pieceMetadata({
   };
 }
 
-async function uploadRequest(files) {
-  const form = new FormData();
-  form.append('shop', SHOP);
-  form.append('uploadId', 'upl_phase3e2econtract01');
-  form.append('turnstileToken', 'verified-turnstile-token');
-  for (const file of files) form.append(file.filename, file.blob, file.filename);
+async function uploadSessionRequest(artifact) {
+  const manifest = artifact.files[6].blob;
+  const body = JSON.stringify({
+    shop: SHOP,
+    uploadId: 'upl_phase3e2econtract01',
+    turnstileToken: 'verified-turnstile-token',
+    design: {
+      designFingerprint: artifact.manifest.designFingerprint,
+      productId: artifact.manifest.productId,
+      variantId: artifact.manifest.variantId,
+      size: artifact.manifest.size,
+      modelId: artifact.manifest.model.id,
+      modelVersion: artifact.manifest.model.version,
+      uvExportVersion: artifact.manifest.uvExportVersion,
+    },
+    manifest: { byteLength: manifest.size, sha256: await sha256Blob(manifest) },
+    bundle: {
+      filename: artifact.filename,
+      byteLength: artifact.blob.size,
+      sha256: await sha256Blob(artifact.blob),
+    },
+  });
   const request = new Request('https://worker.example/api/production-drafts', {
-    body: form,
-    headers: { 'CF-Connecting-IP': '203.0.113.42' },
+    body,
+    headers: {
+      'CF-Connecting-IP': '203.0.113.42',
+      'Content-Type': 'application/json',
+    },
     method: 'POST',
   });
-  request.headers.set('Content-Length', String((await request.clone().arrayBuffer()).byteLength));
+  request.headers.set('Content-Length', String(new TextEncoder().encode(body).byteLength));
+  return request;
+}
+
+function uploadBodyRequest(session, kind, blob) {
+  const request = new Request(
+    `https://worker.example/api/production-drafts/${session.designId}/${kind}`,
+    {
+      body: blob,
+      headers: {
+        'Content-Type': kind === 'manifest' ? 'application/json' : 'application/zip',
+        'X-Production-Shop': SHOP,
+        'X-Production-Upload-Id': 'upl_phase3e2econtract01',
+        'X-Production-Upload-Token': session.uploadToken,
+      },
+      method: 'PUT',
+    },
+  );
+  request.headers.set('Content-Length', String(blob.size));
   return request;
 }
 
@@ -420,7 +474,7 @@ function createMemoryR2() {
           key,
           nativeSha256: options.sha256 ?? null,
         });
-        return { key };
+        return { key, size: bytes.byteLength };
       },
     },
     corruptBodyAndNativeChecksum: async (key) => {
@@ -467,6 +521,10 @@ async function readBodyBytes(value) {
 async function sha256Hex(bytes) {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256Blob(blob) {
+  return sha256Hex(new Uint8Array(await blob.arrayBuffer()));
 }
 
 function hexToArrayBuffer(value) {

@@ -68,6 +68,7 @@ export function validateProductionDraftBindings(env, createRepository) {
   }
   if (!repository
     || typeof repository.getCartDraftByUpload !== 'function'
+    || typeof repository.getOwnedUploadPending !== 'function'
     || typeof repository.createUploadPending !== 'function'
     || typeof repository.finalizeCartDraft !== 'function'
     || typeof repository.claimOwnedUploadCleanup !== 'function'

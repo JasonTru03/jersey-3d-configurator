@@ -1,7 +1,8 @@
-import { PRODUCTION_ARTIFACT_NAMES } from '../../src/features/configurator/designs/productionManifest.js';
 import { createProductionRepository } from './productionRepository.js';
 
-const CLEANUP_BATCH_LIMIT = 100;
+// Workers Free has a 10 ms CPU budget. One claimed draft per invocation keeps
+// cleanup bounded; the hourly schedule provides retry capacity without a long loop.
+const CLEANUP_BATCH_LIMIT = 1;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DESIGN_ID_PATTERN = /^dsg_[A-Za-z0-9_-]{16,64}$/u;
 const SHOP_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
@@ -166,12 +167,8 @@ function createKnownObjectKeys(candidate) {
   if (!expectedPrefix.test(prefix) || !candidate.bundleKey.startsWith(prefix)) return null;
   const bundleFilename = candidate.bundleKey.slice(prefix.length);
   if (!BUNDLE_FILENAME_PATTERN.test(bundleFilename)) return null;
-  const keys = [
-    ...PRODUCTION_ARTIFACT_NAMES.map((filename) => `${prefix}${filename}`),
-    candidate.manifestKey,
-    candidate.bundleKey,
-  ];
-  return new Set(keys).size === 8 ? keys : null;
+  const keys = [candidate.manifestKey, candidate.bundleKey];
+  return new Set(keys).size === 2 ? keys : null;
 }
 
 function matchesClaim(value, candidate, cleanupToken, claimedAt) {

@@ -39,6 +39,8 @@ const ALL_STATUSES = new Set([
   'archived',
 ]);
 const MAX_CLEANUP_LIMIT = 100;
+const MAX_MANIFEST_BYTES = 1024 * 1024;
+const MAX_BUNDLE_BYTES = 32 * 1024 * 1024 + 64 * 1024;
 
 const DRAFT_INPUT_KEYS = Object.freeze([
   'designId',
@@ -52,7 +54,10 @@ const DRAFT_INPUT_KEYS = Object.freeze([
   'uvExportVersion',
   'designFingerprint',
   'manifestSha256',
+  'manifestBytes',
   'manifestKey',
+  'bundleSha256',
+  'bundleBytes',
   'bundleKey',
   'bundleFilename',
   'createdAt',
@@ -67,15 +72,17 @@ const UPLOAD_PENDING_INPUT_KEYS = Object.freeze([
 const ROW_COLUMNS = `
   design_id, shop, upload_id, bundle_id, status, product_id, variant_id, size,
   model_id, model_version, uv_export_version, design_fingerprint,
-  manifest_sha256, manifest_key, bundle_key, bundle_filename, created_at,
+  manifest_sha256, manifest_bytes, manifest_key, bundle_sha256, bundle_bytes,
+  bundle_key, bundle_filename, created_at,
   expires_at, paid_at, shopify_order_gid, shopify_order_name, error_code,
   upload_token, cleanup_token, cleanup_started_at, updated_at
 `;
 const ROW_COLUMN_KEYS = Object.freeze([
   'design_id', 'shop', 'upload_id', 'bundle_id', 'status', 'product_id',
   'variant_id', 'size', 'model_id', 'model_version', 'uv_export_version',
-  'design_fingerprint', 'manifest_sha256', 'manifest_key', 'bundle_key',
-  'bundle_filename', 'created_at', 'expires_at', 'paid_at', 'shopify_order_gid',
+  'design_fingerprint', 'manifest_sha256', 'manifest_bytes', 'manifest_key',
+  'bundle_sha256', 'bundle_bytes', 'bundle_key', 'bundle_filename', 'created_at',
+  'expires_at', 'paid_at', 'shopify_order_gid',
   'shopify_order_name', 'error_code', 'upload_token', 'cleanup_token',
   'cleanup_started_at', 'updated_at',
 ]);
@@ -104,6 +111,7 @@ export function createProductionRepository(db) {
     claimOwnedUploadCleanup: (input) => claimOwnedUploadCleanup(db, input),
     getDesign: (shop, designId) => getDesign(db, shop, designId),
     getCartDraftByUpload: (shop, uploadId) => getCartDraftByUpload(db, shop, uploadId),
+    getOwnedUploadPending: (input) => getOwnedUploadPending(db, input),
     bindCartQuote: (input) => bindCartQuote(db, input),
     hasWebhookDelivery: (input) => hasWebhookDelivery(db, input),
     hasWebhookEvent: (input) => hasWebhookEvent(db, input),
@@ -128,11 +136,12 @@ async function createDraftWithStatus(db, draft, status, uploadLease) {
     INSERT OR IGNORE INTO production_designs (
       design_id, shop, upload_id, bundle_id, status, product_id, variant_id,
       size, model_id, model_version, uv_export_version, design_fingerprint,
-      manifest_sha256, manifest_key, bundle_key, bundle_filename, created_at,
+      manifest_sha256, manifest_bytes, manifest_key, bundle_sha256, bundle_bytes,
+      bundle_key, bundle_filename, created_at,
       expires_at, paid_at, shopify_order_gid, shopify_order_name, error_code,
       upload_token, cleanup_token, cleanup_started_at, updated_at
     ) VALUES (
-      ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       NULL, NULL, NULL, NULL, ?, NULL, NULL, ?
     )
   `, [
@@ -148,7 +157,10 @@ async function createDraftWithStatus(db, draft, status, uploadLease) {
     draft.uvExportVersion,
     draft.designFingerprint,
     draft.manifestSha256,
+    draft.manifestBytes,
     draft.manifestKey,
+    draft.bundleSha256,
+    draft.bundleBytes,
     draft.bundleKey,
     draft.bundleFilename,
     draft.createdAt,
@@ -265,6 +277,25 @@ async function getCartDraftByUpload(db, shopInput, uploadIdInput) {
     WHERE shop = ? AND upload_id = ?
     LIMIT 1
   `, [shop, uploadId]));
+  return row ? normalizeRow(row) : null;
+}
+
+async function getOwnedUploadPending(db, input) {
+  const value = readExactDataProperties(input, [
+    'shop', 'designId', 'uploadId', 'uploadToken',
+  ]);
+  if (!value) throw invalidInput();
+  const shop = requirePattern(value.shop, SHOP_PATTERN);
+  const designId = requirePattern(value.designId, DESIGN_ID_PATTERN);
+  const uploadId = requirePattern(value.uploadId, UPLOAD_ID_PATTERN);
+  const uploadToken = requirePattern(value.uploadToken, UPLOAD_TOKEN_PATTERN);
+  const row = await executeFirst(prepareBound(db, `
+    SELECT ${ROW_COLUMNS}
+    FROM production_designs
+    WHERE shop = ? AND design_id = ? AND upload_id = ?
+      AND status = 'upload_pending' AND upload_token = ?
+    LIMIT 1
+  `, [shop, designId, uploadId, uploadToken]));
   return row ? normalizeRow(row) : null;
 }
 
@@ -504,7 +535,10 @@ function validateDraft(input) {
     uvExportVersion: requirePattern(draft.uvExportVersion, SAFE_ID_PATTERN),
     designFingerprint: requirePattern(draft.designFingerprint, FINGERPRINT_PATTERN),
     manifestSha256: requirePattern(draft.manifestSha256, SHA256_PATTERN),
+    manifestBytes: requirePositiveInteger(draft.manifestBytes, MAX_MANIFEST_BYTES),
     manifestKey: requirePattern(draft.manifestKey, OBJECT_KEY_PATTERN),
+    bundleSha256: requirePattern(draft.bundleSha256, SHA256_PATTERN),
+    bundleBytes: requirePositiveInteger(draft.bundleBytes, MAX_BUNDLE_BYTES),
     bundleKey: requirePattern(draft.bundleKey, OBJECT_KEY_PATTERN),
     bundleFilename: requirePattern(draft.bundleFilename, BUNDLE_FILENAME_PATTERN),
     createdAt: requireTimestamp(draft.createdAt),
@@ -572,7 +606,10 @@ function normalizeRow(row) {
       uvExportVersion: requirePattern(value.uv_export_version, SAFE_ID_PATTERN),
       designFingerprint: requirePattern(value.design_fingerprint, FINGERPRINT_PATTERN),
       manifestSha256: requirePattern(value.manifest_sha256, SHA256_PATTERN),
+      manifestBytes: requirePositiveInteger(value.manifest_bytes, MAX_MANIFEST_BYTES),
       manifestKey: requirePattern(value.manifest_key, OBJECT_KEY_PATTERN),
+      bundleSha256: requirePattern(value.bundle_sha256, SHA256_PATTERN),
+      bundleBytes: requirePositiveInteger(value.bundle_bytes, MAX_BUNDLE_BYTES),
       bundleKey: requirePattern(value.bundle_key, OBJECT_KEY_PATTERN),
       bundleFilename: requirePattern(value.bundle_filename, BUNDLE_FILENAME_PATTERN),
       createdAt: requireTimestamp(value.created_at),
@@ -746,6 +783,11 @@ function requirePattern(value, pattern) {
 
 function requireTimestamp(value) {
   if (!Number.isSafeInteger(value) || value < 0) throw invalidInput();
+  return value;
+}
+
+function requirePositiveInteger(value, maximum) {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) throw invalidInput();
   return value;
 }
 

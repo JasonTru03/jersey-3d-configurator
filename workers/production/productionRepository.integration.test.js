@@ -283,6 +283,7 @@ async function withDatabase(run) {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec(await readFile('migrations/0001_production_designs.sql', 'utf8'));
+    db.exec(await readFile('migrations/0002_free_tier_streaming_upload.sql', 'utf8'));
     await run(db);
   } finally {
     db.close();
@@ -390,7 +391,10 @@ function draft(index) {
     uvExportVersion: '2',
     designFingerprint: fingerprint,
     manifestSha256: index.toString(16).padStart(64, '0'),
+    manifestBytes: 1024,
     manifestKey: `shops/verify/${designId}/manifest.json`,
+    bundleSha256: (index + 1).toString(16).padStart(64, '0'),
+    bundleBytes: 4096,
     bundleKey: `shops/verify/${designId}/bundle.zip`,
     bundleFilename: `fn8788-jersey-design-${fingerprint}.zip`,
     createdAt: 1_700_000_000_000,

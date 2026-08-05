@@ -10,7 +10,9 @@
     "build:showcase": "vite build",
     "build:shopify": "vite build --config vite.shopify.config.js && node scripts/export-shopify-css.mjs",
     "preview": "vite preview",
-    "test": "vitest run"
+    "start:server": "node server/index.js",
+    "test": "vitest run",
+    "test:server": "vitest run server"
   },
   "dependencies": {
     "gsap": "^3.15.0",

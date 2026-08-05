@@ -1,0 +1,11 @@
+.git
+.worktrees
+.server-data
+.env.server
+.superpowers
+dist
+node_modules
+project-logs
+**/*.test.js
+**/*.test.jsx
+**/__snapshots__

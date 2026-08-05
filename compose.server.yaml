@@ -1,0 +1,20 @@
+services:
+  jersey-server:
+    build:
+      context: .
+    image: jersey-3d-configurator-server:local
+    restart: unless-stopped
+    env_file:
+      - "${JERSEY_ENV_FILE:-.env.server}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - "${JERSEY_DATA_PATH:?Set JERSEY_DATA_PATH in .env.server}:/data"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s

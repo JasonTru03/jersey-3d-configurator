@@ -2,14 +2,14 @@
 
 ## 当前状态与授权边界
 
-Phase 3 Task 1-8 的本地代码、自动测试、构建和本地 D1 migration 已完成；Task 9 单一端到端契约测试由 `d38d500` 补齐。但尚未完成任何线上资源创建、远程 migration、secret 写入、Shopify App 发布、webhook 注册或测试支付。本指南是上线操作清单，不是线上验收记录。
+Phase 3 已在 2026-08-05 改为免费额度友好的流式上传协议：浏览器先提交小型声明，再分别把 `manifest.json` 和完整生产 ZIP 流式写入 R2。Worker 不再解析 multipart 七文件、计算大文件哈希或重建 ZIP。但尚未完成 R2 启用、远程 migration、secret 写入、Shopify App 发布、webhook 注册或测试支付。本指南是上线操作清单，不是线上验收记录。
 
 推送 Git 分支或提交代码不代表授权以下外部动作：创建或自动 provision R2/D1、执行远程 migration、写入 Cloudflare secret、注册 Shopify webhook、发布 Shopify App、部署生产 Worker、修改商店数据或发起支付。每类动作都必须获得用户单独明确批准。
 
 ## 上线前硬门禁
 
 - 只能先在非 live 的 Shopify app-development store 验证，不能用真实顾客订单或真实支付。
-- Cloudflare 账号必须确认使用 Workers Paid / Standard Usage Model，并确认 `wrangler.jsonc` 中 `limits.cpu_ms = 30000` 在线上生效。未确认套餐或 CPU 上限时，必须保持 `LOCAL_PRODUCTION_FILES=true`，不得启用生产包上传。
+- Cloudflare 账号可以先使用 Workers Free，配置按每请求 10ms CPU 预算执行。R2 Standard 有免费额度，但必须先在 Cloudflare 控制台完成 R2 订阅/付款资料流程，且超出免费额度会计费；在费用边界和 R2 状态未确认前，必须保持 `LOCAL_PRODUCTION_FILES=true`。
 - 记录当前 Worker 版本、Shopify App 版本、Functions 版本、webhook 订阅状态和已脱敏配置摘要，作为回滚点。
 - `read_orders` 属受保护客户数据范围。Partner/public app 应完成适用的 Shopify Dashboard protected customer data 流程并重新安装授权；商家组织内 Dev Dashboard custom app 也必须完成适用声明和商家授权。两种路径最终都要实测 granted scopes 包含 `read_orders`，不能仅以 TOML 声明为准。
 - 明确一个可安装 App 和 Shopify Functions 的测试店，并确认该店不承载 live 销售。
@@ -22,12 +22,12 @@ Phase 3 Task 1-8 的本地代码、自动测试、构建和本地 D1 migration �
 ### 1. 锁定测试环境和回滚点
 
 1. 确认目标是非 live app-development store。
-2. 确认 Workers Paid / Standard Usage Model 和 30 秒 CPU ceiling。
+2. 确认 Workers Free、10ms CPU ceiling、R2 已启用及超额计费提醒；若未来升级 Paid，仍以本版本 10ms 配置先验收。
 3. 在仓库根复制 `wrangler.jsonc` 为本地私有 `wrangler.phase3-test.jsonc`，把 `name` 改为经批准且唯一的测试 Worker 名称，并保持 `LOCAL_PRODUCTION_FILES=true`。删除复制文件中 `DESIGN_QUOTES` 的现有 `id`，让 Wrangler 为测试 Worker 自动 provision 独立 KV。把三项 rate-limit binding 的 `namespace_id` 全部改为已记录的测试专用数字字符串，且每项都与默认配置和彼此不同，避免与默认 Worker 共享计数。在 `shopify-app` 下复制 `shopify.app.toml` 为 `shopify.app.phase3-test.toml`。
 4. 使用 `git rev-parse --git-path info/exclude` 定位当前 worktree 的 exclude 文件，把 `/wrangler.phase3-test.jsonc` 和 `/shopify-app/shopify.app.phase3-test.toml` 加入该文件。确认 `git status` 不显示这两个私有配置；不得提交它们。
 5. 先确定测试 Worker 的完整 HTTPS URL，再把 Shopify 私有配置中的 `client_id`、`application_url`、`auth.redirect_urls` 和 `[app_proxy].url` 全部解析为该测试 App/Worker 的真实测试值；不得保留 `TARGET_*` 或其他占位值，不得指向当前生产 Worker。
 6. 在上线记录中写下这两个私有配置的绝对路径、唯一 Worker 名、完整 URL、测试店域名、当前 Worker/App/Functions 版本、granted scopes 和 webhook 状态。
-7. 套餐、CPU、权限、目标身份或回滚点有一项不明确时，上传继续禁用并停止。
+7. R2、CPU、权限、目标身份或回滚点有一项不明确时，上传继续禁用并停止。
 
 ### 2. dry-run 后自动 provision 独立 KV、私有 R2 与 D1
 
@@ -99,12 +99,12 @@ npx wrangler deploy --dry-run --config wrangler.phase3-test.jsonc
 npm --prefix shopify-app run deploy:check -- phase3-test
 ```
 
-必须确认应用、Shopify 构建和 Rust Functions 通过，Wrangler 能识别 D1、R2、三项 rate-limit bindings、cron 与 30 秒 CPU ceiling，输出中没有 secret 值。dry-run 不会证明线上套餐、CPU、内存或权限已经正确。
+必须确认应用、Shopify 构建和 Rust Functions 通过，Wrangler 能识别 D1、R2、三项 rate-limit bindings、每小时 cron 与 10ms CPU ceiling，输出中没有 secret 值。dry-run 不会证明线上 R2 状态、CPU、内存或权限已经正确。
 
 ### 6. 发布启用上传的测试版本并注册 webhook
 
 1. 另行获得启用上传的测试 Worker 部署和 Shopify App 发布授权。此处不是首次 Worker 部署：步骤 2 的 bootstrap 和步骤 4 的每次 `secret put` 已产生测试 Worker versions。
-2. 只在前述门禁通过后，在私有 `wrangler.phase3-test.jsonc` 把 `LOCAL_PRODUCTION_FILES` 改为 `false`；若无法确认 Workers Paid / Standard 或 CPU ceiling，保持 `true` 并停止。
+2. 只在前述门禁通过后，在私有 `wrangler.phase3-test.jsonc` 把 `LOCAL_PRODUCTION_FILES` 改为 `false`；若无法确认 R2 已启用、免费额度/超额费用或 10ms CPU ceiling，保持 `true` 并停止。
 3. 用 `npx wrangler deploy --config wrangler.phase3-test.jsonc` 部署测试 Worker，核对命令目标仍是步骤 1 锁定的唯一测试 Worker，并记录新旧版本。
 4. 执行 `npm --prefix shopify-app run deploy:check -- phase3-test`，确认私有 Shopify 配置的 `application_url` 与该测试 Worker 完全一致后，经单独授权执行 `npm --prefix shopify-app run deploy -- phase3-test`。该 App deploy 才会使相对 URI `/webhooks/shopify/orders` 的订阅配置生效；发布后读取实际订阅，确认 `orders/paid`、`orders/cancelled`、`refunds/create` 指向测试 App URL。
 5. 在 Shopify 测试模式完成测试支付，不使用真实付款方式。
@@ -115,10 +115,12 @@ npm --prefix shopify-app run deploy:check -- phase3-test
 
 - D1 状态实际经过 `upload_pending -> cart_draft -> paid_pending_production`；缺失或损坏文件进入 `file_error`。
 - 同一个 `designId` 出现在上传响应、KV 报价记录、App Proxy 私有 line property 和最终 D1 已付款记录中。
-- 七文件和重建 ZIP 直接流式写入私有 R2；应用响应、日志和 Shopify line properties 均不暴露原始 R2 key。
+- 浏览器本地校验七文件并生成 ZIP；Worker 只把 `manifest.json` 和完整 ZIP 流式写入私有 R2。应用响应、日志和 Shopify line properties 均不暴露原始 R2 key。
 - manifest 与 ZIP 的 R2 `sha256` metadata、ZIP native checksum、content type 和 content length 一致。
-- 分别用代表性真实生产包和 32 MiB 边界包观察 Worker CPU time、wall time、内存和失败率。两档都必须在已确认的线上套餐与 30 秒 CPU ceiling 内完成；本地测试和 dry-run 不能替代该证据。
+- 分别用代表性真实生产包和 32 MiB 边界包观察 Worker CPU time、wall time、内存和失败率。两档都必须在 Workers Free 的 10ms CPU ceiling 内完成；本地测试和 dry-run 不能替代该证据。
 - 记录测试订单号、脱敏 design 指纹、Worker/App 版本和结果，不记录顾客信息、secret 或原始对象路径。
+
+免费方案不在服务器端重新解析 ZIP，因此无法证明恶意客户端提交的 ZIP 语义正确。后台下载必须把 ZIP 当作不可信附件，不自动执行或自动解压；正常浏览器生成路径仍受既有七文件校验约束。
 
 阶段 4 尚未实现 Shopify 订单文件卡片、App 定制订单列表和后台安全下载。因此 Phase 3 即使订单关联成功，也不能声称工作人员已经能在后台下载 ZIP；当前只能通过受控的 D1/R2 运维检查验证文件存在。
 
@@ -142,3 +144,11 @@ npm --prefix shopify-app run deploy:check -- phase3-test
 - 单一端到端契约测试：`d38d500 test: cover phase 3 cloud order contract`；focused 1/1、相邻 227 tests、完整 86 files / 1,534 tests passed。
 
 以上均为本地证据，不代表线上资源、权限、订阅、测试支付、32 MiB CPU/内存门禁或后台下载已经验收。
+
+## 免费额度改造本地证据（2026-08-05）
+
+- 新协议保存两个 R2 对象，R2 对请求体按预声明 SHA-256 校验，ZIP 成功后才把 D1 更新为 `cart_draft`。
+- `0002_free_tier_streaming_upload.sql` 增加 manifest/ZIP 的大小和哈希字段；未执行远程 migration。
+- 清理改为每小时最多一条、每条两个对象；`wrangler.jsonc` 的 CPU ceiling 为 10ms。
+- 单一端到端契约已覆盖上传、报价、购物车、付款关联与损坏 ZIP 的 `file_error`；完整本地测试为 86 files / 1,440 tests passed。
+- 尚未启用 R2、部署 Worker、写 secret、迁移远程 D1、发布 Shopify App 或发起测试支付。

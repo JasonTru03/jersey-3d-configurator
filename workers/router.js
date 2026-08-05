@@ -9,6 +9,7 @@ const CART_HANDOFF_PATH = '/apps/jersey-configurator/cart-handoff';
 const ORDER_LIFECYCLE_WEBHOOKS_PATH = '/webhooks/shopify/orders';
 const PRODUCTION_DRAFTS_PATH = '/api/production-drafts';
 const PRODUCTION_DRAFTS_CONFIG_PATH = '/api/production-drafts/config';
+const PRODUCTION_DRAFT_UPLOAD_PATH_PATTERN = /^\/api\/production-drafts\/dsg_[A-Za-z0-9_-]{16,64}\/(?:manifest|bundle)$/u;
 
 export function createWorkerHandler(env, dependencies = {}) {
   const cartQuotesHandler = resolveHandler(
@@ -49,7 +50,9 @@ export function createWorkerHandler(env, dependencies = {}) {
     if (request.method === 'POST' && pathname === ORDER_LIFECYCLE_WEBHOOKS_PATH) {
       return orderLifecycleWebhooksHandler(request);
     }
-    if (pathname === PRODUCTION_DRAFTS_PATH || pathname === PRODUCTION_DRAFTS_CONFIG_PATH) {
+    if (pathname === PRODUCTION_DRAFTS_PATH
+      || pathname === PRODUCTION_DRAFTS_CONFIG_PATH
+      || PRODUCTION_DRAFT_UPLOAD_PATH_PATTERN.test(pathname)) {
       return productionDraftsHandler(request);
     }
     return designAssetsHandler(request);

@@ -66,6 +66,15 @@ describe('0001_production_designs migration', () => {
   });
 });
 
+describe('0002 free-tier streaming upload migration', () => {
+  it('adds the declared manifest and ZIP integrity fields without rewriting old rows', async () => {
+    const sql = await readFile('migrations/0002_free_tier_streaming_upload.sql', 'utf8');
+    expect(normalizeSql(sql)).toContain('add column manifest_bytes integer');
+    expect(normalizeSql(sql)).toContain('add column bundle_sha256 text');
+    expect(normalizeSql(sql)).toContain('add column bundle_bytes integer');
+  });
+});
+
 describe('createProductionRepository', () => {
   it('rejects an invalid D1 binding before preparing SQL', () => {
     expect(() => createProductionRepository(null)).toThrow(ProductionRepositoryError);
@@ -368,6 +377,23 @@ describe('shop-scoped reads and quote binding', () => {
     await expect(repository.getCartDraftByUpload(OTHER_SHOP, UPLOAD_ID)).resolves.toBeNull();
     await expect(repository.getCartDraftByUpload(SHOP, 'upl_fedcba0987654321')).resolves.toBeNull();
     expect(db.prepared.map((statement) => statement.values[0])).toEqual([OTHER_SHOP, SHOP]);
+  });
+
+  it('authorizes a pending stream only when shop, design, upload and token all match in SQL', async () => {
+    const pending = databaseRow({ status: 'upload_pending', upload_token: UPLOAD_TOKEN });
+    const db = createFakeD1({ firstResults: [pending] });
+    const result = await createProductionRepository(db).getOwnedUploadPending({
+      shop: SHOP,
+      designId: DESIGN_ID,
+      uploadId: UPLOAD_ID,
+      uploadToken: UPLOAD_TOKEN,
+    });
+
+    expect(db.prepared[0].sql).toMatch(/shop\s*=\s*\?.*design_id\s*=\s*\?.*upload_id\s*=\s*\?/isu);
+    expect(db.prepared[0].sql).toContain("status = 'upload_pending'");
+    expect(db.prepared[0].sql).toMatch(/upload_token\s*=\s*\?/iu);
+    expect(db.prepared[0].values).toEqual([SHOP, DESIGN_ID, UPLOAD_ID, UPLOAD_TOKEN]);
+    expect(result).toEqual(authoritativeRow({ status: 'upload_pending', upload_token: UPLOAD_TOKEN }));
   });
 
   it('returns a stable repository error when the upload lookup fails in D1', async () => {
@@ -865,7 +891,10 @@ function draft(overrides = {}) {
     uvExportVersion: '2',
     designFingerprint: '6ac2cd02',
     manifestSha256: 'a'.repeat(64),
+    manifestBytes: 1024,
     manifestKey: `shops/shop-hash/designs/${DESIGN_ID}/manifest.json`,
+    bundleSha256: 'b'.repeat(64),
+    bundleBytes: 4096,
     bundleKey: `shops/shop-hash/designs/${DESIGN_ID}/fn8788-jersey-design-6ac2cd02.zip`,
     bundleFilename: 'fn8788-jersey-design-6ac2cd02.zip',
     createdAt: 1_700_000_000_000,
@@ -891,7 +920,10 @@ function databaseRow(overrides = {}) {
     uv_export_version: value.uvExportVersion,
     design_fingerprint: value.designFingerprint,
     manifest_sha256: value.manifestSha256,
+    manifest_bytes: value.manifestBytes,
     manifest_key: value.manifestKey,
+    bundle_sha256: value.bundleSha256,
+    bundle_bytes: value.bundleBytes,
     bundle_key: value.bundleKey,
     bundle_filename: value.bundleFilename,
     created_at: value.createdAt,
@@ -924,7 +956,10 @@ function authoritativeRow(overrides = {}) {
     uvExportVersion: row.uv_export_version,
     designFingerprint: row.design_fingerprint,
     manifestSha256: row.manifest_sha256,
+    manifestBytes: row.manifest_bytes,
     manifestKey: row.manifest_key,
+    bundleSha256: row.bundle_sha256,
+    bundleBytes: row.bundle_bytes,
     bundleKey: row.bundle_key,
     bundleFilename: row.bundle_filename,
     createdAt: row.created_at,

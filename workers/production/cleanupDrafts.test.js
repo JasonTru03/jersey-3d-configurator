@@ -15,7 +15,7 @@ const UUIDS = [
 ];
 
 describe('expired production draft cleanup', () => {
-  it('claims at most 100 candidates before deleting their eight known R2 keys and guarded rows', async () => {
+  it('claims one candidate before deleting its two known R2 keys and guarded row', async () => {
     const candidates = Array.from({ length: 101 }, (_, index) => candidate(index));
     const events = [];
     const runtime = createRuntime({
@@ -35,19 +35,19 @@ describe('expired production draft cleanup', () => {
     });
 
     await expect(cleanExpiredProductionDrafts(runtime.env, NOW, runtime.dependencies))
-      .resolves.toEqual({ scanned: 100, claimed: 100, deleted: 100, failed: 0 });
+      .resolves.toEqual({ scanned: 1, claimed: 1, deleted: 1, failed: 0 });
 
     expect(runtime.repository.listExpiredDrafts).toHaveBeenCalledWith({
       before: NOW,
       staleBefore: NOW - CLEANUP_LEASE_MS,
-      limit: 100,
+      limit: 1,
     });
-    expect(runtime.repository.claimExpiredDraft).toHaveBeenCalledTimes(100);
-    expect(runtime.assets.delete).toHaveBeenCalledTimes(100);
-    expect(runtime.repository.deleteClaimedDraft).toHaveBeenCalledTimes(100);
+    expect(runtime.repository.claimExpiredDraft).toHaveBeenCalledOnce();
+    expect(runtime.assets.delete).toHaveBeenCalledOnce();
+    expect(runtime.repository.deleteClaimedDraft).toHaveBeenCalledOnce();
     expect(events.slice(0, 3)).toEqual([
       `claim:${candidates[0].designId}`,
-      `r2:${prefix(candidates[0])}design.json`,
+      `r2:${candidates[0].manifestKey}`,
       `d1:${candidates[0].designId}`,
     ]);
 
@@ -61,12 +61,6 @@ describe('expired production draft cleanup', () => {
       staleBefore: NOW - CLEANUP_LEASE_MS,
     });
     expect(runtime.assets.delete.mock.calls[0][0]).toEqual([
-      `${prefix(candidates[0])}design.json`,
-      `${prefix(candidates[0])}uv-atlas.png`,
-      `${prefix(candidates[0])}uv-pattern-pieces.png`,
-      `${prefix(candidates[0])}uv-reference.pdf`,
-      `${prefix(candidates[0])}preview-front.png`,
-      `${prefix(candidates[0])}preview-back.png`,
       candidates[0].manifestKey,
       candidates[0].bundleKey,
     ]);

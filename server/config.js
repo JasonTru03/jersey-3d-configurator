@@ -1,6 +1,8 @@
 import path from 'node:path';
+import { isAdminPasswordHash } from './admin/adminAuth.js';
 
 const MINIMUM_SECRET_BYTES = 32;
+const SHOP_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
 
 export function readServerConfig({ source = process.env, projectRoot = process.cwd() } = {}) {
   if (!source || typeof source !== 'object' || !path.isAbsolute(projectRoot)) {
@@ -12,6 +14,9 @@ export function readServerConfig({ source = process.env, projectRoot = process.c
   const localProductionFiles = source.LOCAL_PRODUCTION_FILES;
   if (localProductionFiles !== 'false') throw configurationError('LOCAL_PRODUCTION_FILES');
   const shopifyStoreConfigJson = readStoreConfig(source.SHOPIFY_STORE_CONFIG_JSON);
+  const adminShop = readAdminShop(source.ADMIN_SHOP, shopifyStoreConfigJson);
+  const adminPasswordHash = readAdminPasswordHash(source.ADMIN_PASSWORD_HASH);
+  const adminSessionSecret = readSecret(source.ADMIN_SESSION_SECRET, 'ADMIN_SESSION_SECRET');
   const shopifyApiSecret = readSecret(source.SHOPIFY_API_SECRET, 'SHOPIFY_API_SECRET');
   const cartQuoteSigningSecret = readSecret(
     source.CART_QUOTE_SIGNING_SECRET,
@@ -23,6 +28,9 @@ export function readServerConfig({ source = process.env, projectRoot = process.c
   const distDirectory = resolveDirectory(source.DIST_DIR ?? 'dist', projectRoot, 'DIST_DIR');
 
   return Object.freeze({
+    adminPasswordHash,
+    adminSessionSecret,
+    adminShop,
     cartQuoteSigningSecret,
     dataDirectory,
     distDirectory,
@@ -36,6 +44,20 @@ export function readServerConfig({ source = process.env, projectRoot = process.c
     turnstileSecretKey,
     turnstileSiteKey,
   });
+}
+
+function readAdminShop(value, storeConfigJson) {
+  if (typeof value !== 'string' || !SHOP_PATTERN.test(value)) {
+    throw configurationError('ADMIN_SHOP');
+  }
+  const stores = JSON.parse(storeConfigJson);
+  if (!Object.hasOwn(stores, value)) throw configurationError('ADMIN_SHOP');
+  return value;
+}
+
+function readAdminPasswordHash(value) {
+  if (!isAdminPasswordHash(value)) throw configurationError('ADMIN_PASSWORD_HASH');
+  return value;
 }
 
 function readPort(value) {

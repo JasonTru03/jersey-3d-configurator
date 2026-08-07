@@ -2,13 +2,14 @@
 
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createAdminPasswordHash } from './admin/adminAuth.js';
 import { readServerConfig } from './config.js';
 
 describe('server configuration', () => {
-  it('normalizes an explicit production configuration without exposing secret values', () => {
+  it('normalizes an explicit production configuration without exposing secret values', async () => {
     const config = readServerConfig({
       projectRoot: process.cwd(),
-      source: validEnvironment(),
+      source: await validEnvironment(),
     });
 
     expect(config).toMatchObject({
@@ -16,6 +17,7 @@ describe('server configuration', () => {
       publicOrigin: 'https://jersey.example',
       trustProxy: true,
       localProductionFiles: 'false',
+      adminShop: 'test.myshopify.com',
     });
     expect(config.dataDirectory).toBe(path.resolve(process.cwd(), '.server-test-data'));
   });
@@ -26,21 +28,30 @@ describe('server configuration', () => {
     ['short signing secret', { CART_QUOTE_SIGNING_SECRET: 'short' }],
     ['placeholder secret', { SHOPIFY_API_SECRET: 'CHANGE_ME_WITH_AT_LEAST_32_CHARACTERS' }],
     ['invalid store JSON', { SHOPIFY_STORE_CONFIG_JSON: '{bad' }],
-  ])('fails closed for %s', (_label, override) => {
+    ['admin shop outside configured stores', { ADMIN_SHOP: 'other.myshopify.com' }],
+    ['invalid admin password hash', { ADMIN_PASSWORD_HASH: 'plaintext-password' }],
+    ['short admin session secret', { ADMIN_SESSION_SECRET: 'short' }],
+  ])('fails closed for %s', async (_label, override) => {
+    const source = await validEnvironment();
     expect(() => readServerConfig({
       projectRoot: process.cwd(),
-      source: { ...validEnvironment(), ...override },
+      source: { ...source, ...override },
     })).toThrow('configuration');
   });
 });
 
-function validEnvironment() {
+async function validEnvironment() {
   return {
     PORT: '8080',
     PUBLIC_ORIGIN: 'https://jersey.example',
     TRUST_PROXY: 'true',
     DATA_DIR: '.server-test-data',
     LOCAL_PRODUCTION_FILES: 'false',
+    ADMIN_SHOP: 'test.myshopify.com',
+    ADMIN_PASSWORD_HASH: await createAdminPasswordHash('test-admin-password', {
+      randomBytes: () => Buffer.alloc(16, 8),
+    }),
+    ADMIN_SESSION_SECRET: 'a'.repeat(32),
     SHOPIFY_STORE_CONFIG_JSON: JSON.stringify({
       'test.myshopify.com': {
         productId: 'fn8788-jersey',

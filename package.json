@@ -11,6 +11,7 @@
     "build:shopify": "vite build --config vite.shopify.config.js && node scripts/export-shopify-css.mjs",
     "preview": "vite preview",
     "start:server": "node server/index.js",
+    "admin:credentials": "node server/admin/generateAdminCredentials.js",
     "test": "vitest run",
     "test:server": "vitest run server"
   },

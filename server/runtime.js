@@ -4,6 +4,8 @@ import { createFileObjectStore } from './adapters/fileObjectStore.js';
 import { createFixedWindowRateLimiter } from './adapters/fixedWindowRateLimit.js';
 import { openServerDatabase } from './adapters/sqliteD1.js';
 import { createSqliteKv } from './adapters/sqliteKv.js';
+import { createAdminOrderRepository } from './admin/adminOrderRepository.js';
+import { createAdminPortal, isAdminPath } from './admin/adminPortal.js';
 import { createStaticAssetsBinding } from './staticAssets.js';
 
 export function createServerRuntime({ config, now = Date.now } = {}) {
@@ -17,6 +19,19 @@ export function createServerRuntime({ config, now = Date.now } = {}) {
       database: opened.database,
       rootDirectory: path.join(config.dataDirectory, 'objects'),
       now,
+    });
+    const adminPortal = createAdminPortal({
+      assets: productionAssets,
+      config,
+      loginRateLimit: createFixedWindowRateLimiter({
+        database: opened.database,
+        namespace: 'admin_login',
+        limit: 5,
+        periodSeconds: 300,
+        now,
+      }),
+      now,
+      repository: createAdminOrderRepository(opened.database),
     });
     const env = Object.freeze({
       ASSETS: createStaticAssetsBinding(config.distDirectory),
@@ -56,9 +71,14 @@ export function createServerRuntime({ config, now = Date.now } = {}) {
       TURNSTILE_SECRET_KEY: config.turnstileSecretKey,
       TURNSTILE_SITE_KEY: config.turnstileSiteKey,
     });
+    const workerHandler = createWorkerHandler(env);
     return Object.freeze({
       env,
-      handler: createWorkerHandler(env),
+      handler(request) {
+        return isAdminPath(new URL(request.url).pathname)
+          ? adminPortal(request)
+          : workerHandler(request);
+      },
       close: opened.close,
     });
   } catch (error) {
@@ -70,6 +90,9 @@ export function createServerRuntime({ config, now = Date.now } = {}) {
 function assertConfig(config) {
   const directoryKeys = ['dataDirectory', 'distDirectory', 'projectRoot'];
   const stringKeys = [
+    'adminPasswordHash',
+    'adminSessionSecret',
+    'adminShop',
     'cartQuoteSigningSecret',
     'localProductionFiles',
     'shopifyApiSecret',

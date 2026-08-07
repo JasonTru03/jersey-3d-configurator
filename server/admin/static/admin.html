@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>球衣定制订单后台</title>
+    <link rel="stylesheet" href="/admin/admin.css">
+    <script src="/admin/admin.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section id="login-view" class="login-card" hidden>
+        <p class="eyebrow">JERSEY PRODUCTION</p>
+        <h1>球衣定制订单后台</h1>
+        <p class="muted">登录后可按 Shopify 订单查找并下载生产 ZIP。</p>
+        <form id="login-form">
+          <label for="password">后台密码</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button type="submit">登录</button>
+        </form>
+        <p id="login-error" class="error" role="alert"></p>
+      </section>
+
+      <section id="dashboard-view" hidden>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">JERSEY PRODUCTION</p>
+            <h1>定制订单</h1>
+            <p id="shop-name" class="muted"></p>
+          </div>
+          <button id="logout-button" class="secondary" type="button">退出登录</button>
+        </header>
+
+        <form id="filters" class="filters">
+          <label>
+            <span>订单号或设计编号</span>
+            <input id="query" type="search" placeholder="#1001 或 dsg_..." maxlength="128">
+          </label>
+          <label>
+            <span>状态</span>
+            <select id="status">
+              <option value="">全部状态</option>
+              <option value="paid_pending_production">待生产</option>
+              <option value="file_error">文件异常</option>
+              <option value="cancelled">已取消</option>
+              <option value="refunded">已退款</option>
+              <option value="archived">已归档</option>
+            </select>
+          </label>
+          <label>
+            <span>开始日期</span>
+            <input id="date-from" type="date">
+          </label>
+          <label>
+            <span>结束日期</span>
+            <input id="date-to" type="date">
+          </label>
+          <button type="submit">查询</button>
+        </form>
+
+        <div class="summary-row">
+          <p id="result-summary" class="muted">正在读取订单…</p>
+          <button id="refresh-button" class="secondary" type="button">刷新</button>
+        </div>
+        <p id="orders-error" class="error" role="alert"></p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Shopify 订单</th>
+                <th>状态</th>
+                <th>球衣信息</th>
+                <th>设计编号</th>
+                <th>付款时间</th>
+                <th>生产文件</th>
+              </tr>
+            </thead>
+            <tbody id="orders-body"></tbody>
+          </table>
+          <div id="empty-state" class="empty" hidden>没有找到符合条件的定制订单。</div>
+        </div>
+
+        <nav class="pagination" aria-label="订单分页">
+          <button id="previous-page" class="secondary" type="button">上一页</button>
+          <span id="page-label">第 1 页</span>
+          <button id="next-page" class="secondary" type="button">下一页</button>
+        </nav>
+      </section>
+    </main>
+  </body>
+</html>

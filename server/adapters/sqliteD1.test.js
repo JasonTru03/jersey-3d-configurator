@@ -38,6 +38,7 @@ describe('server SQLite D1 adapter', () => {
     expect(migrations.results.map(({ name }) => name)).toEqual([
       'migrations/0001_production_designs.sql',
       'migrations/0002_free_tier_streaming_upload.sql',
+      'migrations/0003_admin_download_audit.sql',
       'server/migrations/0001_runtime.sql',
     ]);
     second.close();

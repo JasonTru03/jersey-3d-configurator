@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { configDefaults } from 'vitest/config';
+import path from 'node:path';
 
 const nativeCanvasTestFiles = [
   'src/features/configurator/scene/nativeCanvasBrowserTestHelpers.test.js',
@@ -11,6 +12,14 @@ const defaultTestExclude = [...configDefaults.exclude, '**/.worktrees/**', 'shop
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      'cloudflare:sockets': path.resolve(
+        process.cwd(),
+        'src/test/cloudflareSocketsStub.js',
+      ),
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

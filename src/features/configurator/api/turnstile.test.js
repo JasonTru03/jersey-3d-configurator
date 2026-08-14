@@ -8,6 +8,15 @@ afterEach(() => {
 });
 
 describe('getDesignUploadTurnstileToken', () => {
+  it('uses Cloudflare official dummy credentials without loading a browser widget', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      turnstileSiteKey: '1x00000000000000000000AA',
+    })));
+
+    await expect(getDesignUploadTurnstileToken({ container: createTurnstileContainer() }))
+      .resolves.toBe('XXXX.DUMMY.TOKEN.XXXX');
+  });
+
   it('renders an explicit execute-mode widget and resolves only the callback token', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ turnstileSiteKey: 'public-site-key' })));
     const container = createTurnstileContainer();

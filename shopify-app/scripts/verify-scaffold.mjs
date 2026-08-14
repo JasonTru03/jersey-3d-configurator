@@ -12,6 +12,10 @@ const requiredFiles = [
   "rust-toolchain.toml",
   "LICENSE.shopify-function-examples.md",
   "NOTICE.md",
+  "extensions/secure-jersey-launcher/shopify.extension.toml",
+  "extensions/secure-jersey-launcher/blocks/secure-jersey-launcher.liquid",
+  "extensions/secure-jersey-launcher/assets/secure-jersey-launcher.css",
+  "extensions/secure-jersey-launcher/assets/secure-jersey-launcher.js",
   "scripts/deploy.mjs",
   "scripts/deploy.test.mjs",
   "extensions/secure-jersey-transform/Cargo.lock",
@@ -86,18 +90,28 @@ function assertEqual(actual, expected, label) {
 const appConfigText = contents.get("shopify.app.toml");
 const appConfig = parse(appConfigText);
 assertEqual(appConfig.client_id, "TARGET_SHOPIFY_CLIENT_ID", "client_id");
-assertEqual(appConfig.application_url, "https://TARGET_WORKER_DOMAIN", "application_url");
+assertEqual(
+  appConfig.application_url,
+  "https://jersey-3d-configurator.jason1064969838.workers.dev/auth",
+  "application_url",
+);
 assertEqual(appConfig.embedded, false, "embedded");
 assertEqual(appConfig.webhooks, {
   api_version: "2026-07",
   subscriptions: [{
     topics: ["orders/paid", "orders/cancelled", "refunds/create"],
     uri: "/webhooks/shopify/orders",
+  }, {
+    compliance_topics: ["customers/data_request", "customers/redact", "shop/redact"],
+    uri: "/webhooks/shopify/privacy",
+  }, {
+    topics: ["app/uninstalled", "app/scopes_update"],
+    uri: "/webhooks/shopify/app-lifecycle",
   }],
 }, "webhooks section");
 assertEqual(
   appConfig.auth,
-  {redirect_urls: ["https://TARGET_WORKER_DOMAIN/auth/callback"]},
+  {redirect_urls: ["https://jersey-3d-configurator.jason1064969838.workers.dev/auth/callback"]},
   "auth section",
 );
 assertEqual(
@@ -105,7 +119,7 @@ assertEqual(
   {
     prefix: "apps",
     subpath: "jersey-configurator",
-    url: "https://TARGET_WORKER_DOMAIN/apps/jersey-configurator",
+    url: "https://jersey-3d-configurator.jason1064969838.workers.dev/apps/jersey-configurator",
   },
   "app_proxy section",
 );
@@ -113,6 +127,7 @@ assertEqual(
 const expectedScopes = [
   "read_cart_transforms",
   "read_orders",
+  "read_products",
   "read_validations",
   "write_app_proxy",
   "write_cart_transforms",
@@ -124,6 +139,26 @@ const configuredScopes = appConfig.access_scopes?.scopes
   .filter(Boolean)
   .sort();
 assertEqual(configuredScopes, expectedScopes, "access_scopes.scopes");
+assertEqual(appConfig.access_scopes?.use_legacy_install_flow, true, "access_scopes.use_legacy_install_flow");
+
+const launcherExtension = parse(contents.get("extensions/secure-jersey-launcher/shopify.extension.toml"));
+assertEqual(
+  {name: launcherExtension.name, type: launcherExtension.type},
+  {name: "Secure Jersey launcher", type: "theme"},
+  "theme launcher extension",
+);
+if (launcherExtension.uid !== undefined && !/^[a-zA-Z0-9-]+$/.test(launcherExtension.uid)) {
+  throw new Error("theme launcher extension uid must be an alphanumeric Shopify identifier");
+}
+const launcherBlock = contents.get("extensions/secure-jersey-launcher/blocks/secure-jersey-launcher.liquid");
+for (const marker of [
+  '"target": "section"',
+  '"javascript": "secure-jersey-launcher.js"',
+  'apps/jersey-configurator/launch',
+  "block.shopify_attributes",
+]) {
+  if (!launcherBlock.includes(marker)) throw new Error(`theme launcher block must contain: ${marker}`);
+}
 
 const toolchain = parse(contents.get("rust-toolchain.toml"));
 assertEqual(
@@ -250,7 +285,7 @@ if (/^Cargo\.lock$/m.test(contents.get(".gitignore"))) {
 async function collectFiles(directory) {
   const result = [];
   for (const entry of await readdir(directory, {withFileTypes: true})) {
-    if (["node_modules", "target", ".shopify", ".git"].includes(entry.name)) continue;
+    if (["node_modules", "target", ".shopify", ".git", "local-config", "secrets"].includes(entry.name)) continue;
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) result.push(...await collectFiles(path));
     else result.push(path);

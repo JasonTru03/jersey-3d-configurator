@@ -15,9 +15,12 @@ export function readServerConfig({ source = process.env, projectRoot = process.c
   if (localProductionFiles !== 'false') throw configurationError('LOCAL_PRODUCTION_FILES');
   const shopifyStoreConfigJson = readStoreConfig(source.SHOPIFY_STORE_CONFIG_JSON);
   const adminShop = readAdminShop(source.ADMIN_SHOP, shopifyStoreConfigJson);
+  const adminShops = readAdminShops(shopifyStoreConfigJson, adminShop);
   const adminPasswordHash = readAdminPasswordHash(source.ADMIN_PASSWORD_HASH);
   const adminSessionSecret = readSecret(source.ADMIN_SESSION_SECRET, 'ADMIN_SESSION_SECRET');
   const shopifyApiSecret = readSecret(source.SHOPIFY_API_SECRET, 'SHOPIFY_API_SECRET');
+  const shopifyApiKey = readPublicCredential(source.SHOPIFY_API_KEY, 'SHOPIFY_API_KEY');
+  const shopifyTokenEncryptionKey = readEncryptionKey(source.SHOPIFY_TOKEN_ENCRYPTION_KEY);
   const cartQuoteSigningSecret = readSecret(
     source.CART_QUOTE_SIGNING_SECRET,
     'CART_QUOTE_SIGNING_SECRET',
@@ -31,6 +34,7 @@ export function readServerConfig({ source = process.env, projectRoot = process.c
     adminPasswordHash,
     adminSessionSecret,
     adminShop,
+    adminShops,
     cartQuoteSigningSecret,
     dataDirectory,
     distDirectory,
@@ -39,11 +43,25 @@ export function readServerConfig({ source = process.env, projectRoot = process.c
     projectRoot,
     publicOrigin,
     shopifyApiSecret,
+    shopifyApiKey,
+    shopifyTokenEncryptionKey,
     shopifyStoreConfigJson,
     trustProxy,
     turnstileSecretKey,
     turnstileSiteKey,
   });
+}
+
+function readAdminShops(storeConfigJson, adminShop) {
+  const stores = JSON.parse(storeConfigJson);
+  const shops = Object.keys(stores);
+  if (shops.length === 0 || shops.length > 100 || shops.some((shop) => !SHOP_PATTERN.test(shop))) {
+    throw configurationError('SHOPIFY_STORE_CONFIG_JSON');
+  }
+  return Object.freeze([
+    adminShop,
+    ...shops.filter((shop) => shop !== adminShop).sort(),
+  ]);
 }
 
 function readAdminShop(value, storeConfigJson) {
@@ -122,6 +140,24 @@ function readNonEmpty(value, name) {
   if (typeof value !== 'string' || value.trim() === '' || value.length > 4096) {
     throw configurationError(name);
   }
+  return value;
+}
+
+function readPublicCredential(value, name) {
+  const result = readNonEmpty(value, name);
+  if (!/^[A-Za-z0-9_-]{8,128}$/u.test(result) || result.startsWith('CHANGE_ME')) {
+    throw configurationError(name);
+  }
+  return result;
+}
+
+function readEncryptionKey(value) {
+  const name = 'SHOPIFY_TOKEN_ENCRYPTION_KEY';
+  if (typeof value !== 'string' || value.startsWith('CHANGE_ME')
+    || !/^(?:[A-Za-z0-9+/]{4}){10}[A-Za-z0-9+/]{3}=$/u.test(value)) {
+    throw configurationError(name);
+  }
+  if (Buffer.from(value, 'base64').byteLength !== 32) throw configurationError(name);
   return value;
 }
 

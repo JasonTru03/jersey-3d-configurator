@@ -193,6 +193,15 @@ test('accepts Shopify authorization-code Admin tokens', () => {
   });
   assert.equal(result.metafield.namespace, '$app:secure_jersey');
 });
+
+test('accepts Shopify client-credentials Admin tokens', () => {
+  const result = buildStoreConfig({
+    ...input(),
+    adminAccessToken: 'shpca_' + '0123456789abcdef0123456789abcdef',
+  });
+  assert.equal(result.metafield.namespace, '$app:secure_jersey');
+});
+
 test('uses the 2026-07 handle mutations and both registration-owned metafields', () => {
   assert.match(OPERATIONS.CreateSecureJerseyCartTransform, /functionHandle/u);
   assert.doesNotMatch(OPERATIONS.CreateSecureJerseyCartTransform, /functionId/u);

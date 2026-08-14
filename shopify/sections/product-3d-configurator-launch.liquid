@@ -15,7 +15,7 @@
       {% endfor %}
     }
   {% endcapture %}
-  {% capture configurator_url %}https://jersey-3d-configurator.jason1064969838.workers.dev/?shop={{ shop.permanent_domain | url_encode }}&productHandle={{ product.handle | url_encode }}&variantId={{ initial_variant.id }}&variantMap={{ variant_map | strip | url_encode }}&surchargeVariantMap={{ surcharge_variant_map | strip | url_encode }}&returnPath={{ routes.cart_url | url_encode }}{% endcapture %}
+  {% capture configurator_url %}https://139.199.202.173/?shop={{ shop.permanent_domain | url_encode }}&productHandle={{ product.handle | url_encode }}&variantId={{ initial_variant.id }}&variantMap={{ variant_map | strip | url_encode }}&surchargeVariantMap={{ surcharge_variant_map | strip | url_encode }}&returnPath={{ routes.cart_url | url_encode }}{% endcapture %}
 
   <style>
     .product-3d-configurator-launch {
@@ -89,7 +89,7 @@
 
         const variantMap = JSON.parse(currentLauncher.dataset.variantMap);
         const surchargeVariantMap = JSON.parse(currentLauncher.dataset.surchargeVariantMap);
-        const workerUrl = new URL('https://jersey-3d-configurator.jason1064969838.workers.dev/');
+        const workerUrl = new URL('https://139.199.202.173/');
         workerUrl.searchParams.set('shop', currentLauncher.dataset.shop);
         workerUrl.searchParams.set('productHandle', currentLauncher.dataset.productHandle);
         workerUrl.searchParams.set('variantId', variantId);

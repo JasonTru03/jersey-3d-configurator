@@ -6,6 +6,7 @@ import { createAdminPasswordHash } from './adminAuth.js';
 import { createAdminPortal } from './adminPortal.js';
 
 const SHOP = 'test.myshopify.com';
+const SECOND_SHOP = 'second.myshopify.com';
 const SESSION_SECRET = 'admin-session-secret-'.padEnd(40, 's');
 const PASSWORD = 'Correct horse battery staple';
 let passwordHash;
@@ -32,6 +33,8 @@ describe('independent admin portal', () => {
     expect(page.status).toBe(200);
     expect(page.headers.get('content-security-policy')).toContain("default-src 'none'");
     expect(await page.text()).toContain('球衣定制订单后台');
+    expect(await (await portal(new Request('https://jersey.example/admin/admin.js'))).text())
+      .toContain("document.querySelector('#shop')");
     expect(orders.status).toBe(401);
     expect(download.status).toBe(401);
   });
@@ -43,6 +46,9 @@ describe('independent admin portal', () => {
     const badLogin = await login(portal, 'wrong password');
     const goodLogin = await login(portal, PASSWORD);
     const cookie = goodLogin.headers.get('set-cookie').split(';')[0];
+    const session = await portal(new Request('https://jersey.example/admin/api/session', {
+      headers: { cookie },
+    }));
     const orders = await portal(new Request(
       'https://jersey.example/admin/api/orders?q=1001&status=paid_pending_production&from=1000&to=2000&page=2',
       { headers: { cookie } },
@@ -55,6 +61,11 @@ describe('independent admin portal', () => {
     expect(badLogin.status).toBe(401);
     expect(goodLogin.status).toBe(204);
     expect(cookie).toMatch(/^__Host-jersey_admin=/u);
+    expect(await session.json()).toEqual({
+      authenticated: true,
+      shop: SHOP,
+      shops: [SHOP, SECOND_SHOP],
+    });
     expect(orders.status).toBe(200);
     expect(await orders.json()).toEqual({ items: [], total: 0, page: 1, pageSize: 50 });
     expect(listOrders).toHaveBeenCalledWith({
@@ -68,6 +79,49 @@ describe('independent admin portal', () => {
     });
     expect(logout.status).toBe(204);
     expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+  });
+
+  it('lists only the selected configured shop and rejects unknown shops', async () => {
+    const listOrders = vi.fn(() => ({ items: [], total: 0, page: 1, pageSize: 50 }));
+    const portal = createPortal({ repository: repository({ listOrders }) });
+    const cookie = (await login(portal, PASSWORD)).headers.get('set-cookie').split(';')[0];
+
+    const selected = await portal(new Request(
+      `https://jersey.example/admin/api/orders?shop=${SECOND_SHOP}`,
+      { headers: { cookie } },
+    ));
+    const unknown = await portal(new Request(
+      'https://jersey.example/admin/api/orders?shop=unknown.myshopify.com',
+      { headers: { cookie } },
+    ));
+
+    expect(selected.status).toBe(200);
+    expect(listOrders).toHaveBeenCalledWith(expect.objectContaining({ shop: SECOND_SHOP }));
+    expect(unknown.status).toBe(400);
+    expect(listOrders).toHaveBeenCalledTimes(1);
+  });
+
+  it('scopes downloads to the selected configured shop', async () => {
+    const getOrderFile = vi.fn(() => null);
+    const portal = createPortal({ repository: repository({ getOrderFile }) });
+    const cookie = (await login(portal, PASSWORD)).headers.get('set-cookie').split(';')[0];
+
+    const selected = await portal(new Request(
+      `https://jersey.example/admin/api/orders/dsg_1234567890abcdef/download?shop=${SECOND_SHOP}`,
+      { headers: { cookie } },
+    ));
+    const unknown = await portal(new Request(
+      'https://jersey.example/admin/api/orders/dsg_1234567890abcdef/download?shop=unknown.myshopify.com',
+      { headers: { cookie } },
+    ));
+
+    expect(selected.status).toBe(404);
+    expect(getOrderFile).toHaveBeenCalledWith({
+      designId: 'dsg_1234567890abcdef',
+      shop: SECOND_SHOP,
+    });
+    expect(unknown.status).toBe(400);
+    expect(getOrderFile).toHaveBeenCalledTimes(1);
   });
 
   it('streams the order ZIP only after authentication and records the download', async () => {
@@ -240,6 +294,7 @@ function createPortal({
       adminPasswordHash: passwordHash,
       adminSessionSecret: SESSION_SECRET,
       adminShop: SHOP,
+      adminShops: [SHOP, SECOND_SHOP],
     },
     loginRateLimit: rateLimit,
     now: () => 10_000,
@@ -250,6 +305,7 @@ function createPortal({
 
 function repository(overrides = {}) {
   return {
+    listShops: vi.fn((fallback) => [...fallback]),
     listOrders: vi.fn(() => ({ items: [], total: 0, page: 1, pageSize: 50 })),
     getOrderFile: vi.fn(() => ({
       designId: 'dsg_1234567890abcdef',

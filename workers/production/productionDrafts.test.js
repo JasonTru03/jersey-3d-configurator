@@ -154,6 +154,12 @@ describe('production draft free-tier streaming protocol', () => {
     const response = await runtime.handler(request);
     expect(response.status).toBe(400);
     expect(runtime.assets.put).not.toHaveBeenCalled();
+    expect(runtime.logger.error).toHaveBeenCalledWith(JSON.stringify({
+      code: 'PRODUCTION_DRAFT_UPLOAD_LENGTH_MISMATCH',
+      kind: 'manifest',
+      expectedBytes: fixture.manifest.size,
+      receivedBytes: fixture.manifest.size + 1,
+    }));
   });
 
   it('requires the verified manifest object before accepting a ZIP', async () => {
@@ -283,15 +289,23 @@ function createRuntime({ turnstile = { success: true, action: 'production_draft'
       },
     }),
   };
+  const logger = { error: vi.fn() };
   const handler = createProductionDraftsHandler(env, {
     createProductionRepository: () => repository,
+    createStoreConfigRepository: () => ({
+      get: async (shop) => ({
+        source: 'legacy',
+        status: 'active',
+        config: JSON.parse(env.SHOPIFY_STORE_CONFIG_JSON)[shop],
+      }),
+    }),
     createShopFingerprint: vi.fn(async () => SHOP_FINGERPRINT),
     fetchImpl,
     now: () => NOW,
     randomUUID: sequenceUuid(),
-    logger: { error: vi.fn() },
+    logger,
   });
-  return { assets, env, fetchImpl, handler, repository };
+  return { assets, env, fetchImpl, handler, logger, repository };
 }
 
 function sessionRequest(declaration) {

@@ -49,7 +49,12 @@ describe('admin order repository', () => {
       status: 'paid_pending_production',
     });
     indexBundle(opened.database, 'shops/test/dsg_1234567890abcdef/design.zip');
+    insertStoreConfig(opened.database, 'configured.myshopify.com');
     const repository = createAdminOrderRepository(opened.database);
+
+    expect(repository.listShops([SHOP])).toEqual([
+      'configured.myshopify.com', 'other.myshopify.com', SHOP,
+    ]);
 
     const all = repository.listOrders({ shop: SHOP });
     const filtered = repository.listOrders({
@@ -172,6 +177,26 @@ function insertDesign(database, {
     orderGid,
     orderName,
     paidAt ?? 1_000,
+  );
+}
+
+function insertStoreConfig(database, shop) {
+  database.prepare(`
+    INSERT INTO shopify_store_configs (
+      shop, status, revision, shopify_product_gid, product_id, currency,
+      jersey_variants_json, surcharge_variants_json, signing_secret_ciphertext,
+      signing_secret_iv, signing_secret_key_version, activation_lock_token,
+      activation_lock_expires_at, transform_registration_id,
+      validation_registration_id, last_error_code, created_at, updated_at, activated_at
+    ) VALUES (?, 'active', 1, 'gid://shopify/Product/9', 'fn8788-jersey', 'USD',
+      ?, ?, ?, ?, 1, NULL, NULL, 'gid://shopify/CartTransform/1',
+      'gid://shopify/Validation/2', NULL, 1000, 1000, 1000)
+  `).run(
+    shop,
+    JSON.stringify({ s: '101', m: '102', l: '103', xl: '104' }),
+    JSON.stringify({ 8: '201' }),
+    'A'.repeat(32),
+    'B'.repeat(16),
   );
 }
 

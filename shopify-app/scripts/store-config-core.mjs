@@ -10,7 +10,10 @@ export const VALIDATION_TITLE = 'Secure jersey bundle validation';
 
 const UINT64_MAX = '18446744073709551615';
 const SHOP_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
-const TOKEN_PATTERN = new RegExp(`^${'sh'}(?:${'pat_'}|${'pua_'})[A-Za-z0-9_-]{20,}$`, 'u');
+const TOKEN_PATTERN = new RegExp(
+  `^${'sh'}(?:${'pat_'}|${'pua_'}|${'pca_'})[A-Za-z0-9_-]{20,}$`,
+  'u',
+);
 const FINGERPRINT_PATTERN = /^shop_[A-Za-z0-9_-]{12}$/u;
 const EXPECTED_PRODUCT_ID = 'fn8788-jersey';
 const STORE_CONFIG_KEYS = [

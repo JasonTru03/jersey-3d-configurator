@@ -18,6 +18,7 @@ describe('server configuration', () => {
       trustProxy: true,
       localProductionFiles: 'false',
       adminShop: 'test.myshopify.com',
+      adminShops: ['test.myshopify.com', 'second.myshopify.com'],
     });
     expect(config.dataDirectory).toBe(path.resolve(process.cwd(), '.server-test-data'));
   });
@@ -27,7 +28,15 @@ describe('server configuration', () => {
     ['enabled local files', { LOCAL_PRODUCTION_FILES: 'true' }],
     ['short signing secret', { CART_QUOTE_SIGNING_SECRET: 'short' }],
     ['placeholder secret', { SHOPIFY_API_SECRET: 'CHANGE_ME_WITH_AT_LEAST_32_CHARACTERS' }],
+    ['invalid Shopify API key', { SHOPIFY_API_KEY: 'short' }],
+    ['invalid token encryption key', { SHOPIFY_TOKEN_ENCRYPTION_KEY: 'not-base64' }],
     ['invalid store JSON', { SHOPIFY_STORE_CONFIG_JSON: '{bad' }],
+    ['invalid store domain', {
+      SHOPIFY_STORE_CONFIG_JSON: JSON.stringify({
+        'TEST.myshopify.com': {},
+        'test.myshopify.com': {},
+      }),
+    }],
     ['admin shop outside configured stores', { ADMIN_SHOP: 'other.myshopify.com' }],
     ['invalid admin password hash', { ADMIN_PASSWORD_HASH: 'plaintext-password' }],
     ['short admin session secret', { ADMIN_SESSION_SECRET: 'short' }],
@@ -59,8 +68,16 @@ async function validEnvironment() {
         jerseyVariants: { s: '123' },
         surchargeVariants: { 8: '456' },
       },
+      'second.myshopify.com': {
+        productId: 'fn8788-jersey',
+        currency: 'USD',
+        jerseyVariants: { s: '789' },
+        surchargeVariants: { 8: '987' },
+      },
     }),
     SHOPIFY_API_SECRET: 's'.repeat(32),
+    SHOPIFY_API_KEY: 'public-app-client-id',
+    SHOPIFY_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     CART_QUOTE_SIGNING_SECRET: 'q'.repeat(32),
     TURNSTILE_SITE_KEY: 'site-key',
     TURNSTILE_SECRET_KEY: 't'.repeat(32),

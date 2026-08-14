@@ -1,6 +1,6 @@
 {
   "name": "secure-jersey-shopify-app",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Local-only Shopify app scaffold for secure jersey cart processing.",
   "scripts": {

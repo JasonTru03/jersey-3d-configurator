@@ -68,7 +68,7 @@ async function signedUrl(overrides = {}, secret = API_SECRET) {
   return url;
 }
 
-async function validFixture(overrides = {}) {
+async function validFixture(overrides = {}, signingSecret = QUOTE_SECRET) {
   const shopFingerprint = await createShopFingerprint(SHOP);
   const record = {
     version: 1,
@@ -107,7 +107,7 @@ async function validFixture(overrides = {}) {
     issuedAt: record.issuedAt,
     expiresAt: record.expiresAt,
     components: record.components,
-  }, QUOTE_SECRET);
+  }, signingSecret);
   return { record, token };
 }
 
@@ -572,6 +572,60 @@ describe('createAppProxyHandler', () => {
     expect(response.headers.get('Content-Security-Policy')).toContain("connect-src 'self'");
     expect(html).not.toContain(token);
     expect(html).not.toContain(JSON.stringify(record.summary));
+  });
+
+  it('verifies database-backed store quotes with that store signing secret', async () => {
+    const databaseSigningSecret = 'database-shop-signing-secret-1234567890';
+    const { record, token } = await validFixture({}, databaseSigningSecret);
+    const { env } = runtime(record, {
+      PRODUCTION_DB: { prepare: vi.fn(), batch: vi.fn() },
+      SHOPIFY_STORE_CONFIG_JSON: '{}',
+      SHOPIFY_TOKEN_ENCRYPTION_KEY: 'configured-encryption-key',
+    });
+    const decrypt = vi.fn(async () => databaseSigningSecret);
+    const get = vi.fn(async () => ({
+      source: 'database',
+      status: 'active',
+      encryptedSigningSecret: {
+        ciphertext: 'encrypted-signing-secret',
+        iv: 'encrypted-iv',
+        keyVersion: 1,
+      },
+    }));
+    const response = await createAppProxyHandler(env, {
+      now: () => NOW,
+      createStoreConfigRepository: () => ({ get }),
+      createTokenVault: () => ({ decrypt }),
+    })(await requestFor(token));
+
+    expect(response.status).toBe(200);
+    expect(get).toHaveBeenCalledWith(SHOP);
+    expect(decrypt).toHaveBeenCalledWith(SHOP, expect.objectContaining({ keyVersion: 1 }));
+  });
+
+  it('fails closed when a database-backed store signing secret cannot be decrypted', async () => {
+    const { record, token } = await validFixture();
+    const { env, logger } = runtime(record, {
+      PRODUCTION_DB: { prepare: vi.fn(), batch: vi.fn() },
+      SHOPIFY_STORE_CONFIG_JSON: '{}',
+      SHOPIFY_TOKEN_ENCRYPTION_KEY: 'configured-encryption-key',
+    });
+    const response = await createAppProxyHandler(env, {
+      now: () => NOW,
+      logger,
+      createStoreConfigRepository: () => ({
+        get: async () => ({
+          source: 'database',
+          status: 'active',
+          encryptedSigningSecret: { ciphertext: 'bad', iv: 'bad', keyVersion: 1 },
+        }),
+      }),
+      createTokenVault: () => ({ decrypt: async () => { throw new Error('authentication'); } }),
+    })(await requestFor(token));
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe('Secure cart service is temporarily unavailable.');
+    expect(logger.error).toHaveBeenCalledWith('APP_PROXY_SIGNING_SECRET_DECRYPT_FAILED');
   });
 
   it('returns limited invalid or expired responses for missing and unauthenticated handoffs', async () => {

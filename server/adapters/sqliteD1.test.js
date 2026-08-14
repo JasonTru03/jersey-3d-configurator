@@ -39,6 +39,9 @@ describe('server SQLite D1 adapter', () => {
       'migrations/0001_production_designs.sql',
       'migrations/0002_free_tier_streaming_upload.sql',
       'migrations/0003_admin_download_audit.sql',
+      'migrations/0004_shopify_privacy_requests.sql',
+      'migrations/0005_shopify_installations.sql',
+      'migrations/0006_shopify_store_configs.sql',
       'server/migrations/0001_runtime.sql',
     ]);
     second.close();

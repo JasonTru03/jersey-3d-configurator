@@ -5,7 +5,12 @@ function createInjectedRouter(overrides = {}) {
   const handlers = {
     cartQuotes: vi.fn(() => new Response('cart quotes')),
     appProxy: vi.fn(() => new Response('app proxy')),
+    appProxyLaunch: vi.fn(() => new Response('app proxy launch')),
     orderLifecycleWebhooks: vi.fn(() => new Response('order lifecycle webhooks')),
+    privacyWebhooks: vi.fn(() => new Response('privacy webhooks')),
+    appLifecycleWebhooks: vi.fn(() => new Response('app lifecycle webhooks')),
+    oauth: vi.fn(() => new Response('oauth')),
+    merchantApp: vi.fn(() => new Response('merchant app')),
     productionDrafts: vi.fn(() => new Response('production drafts')),
     designAssets: vi.fn(() => new Response('design assets')),
     ...overrides,
@@ -13,7 +18,12 @@ function createInjectedRouter(overrides = {}) {
   const factories = {
     createCartQuotesHandler: vi.fn(() => handlers.cartQuotes),
     createAppProxyHandler: vi.fn(() => handlers.appProxy),
+    createAppProxyLaunchHandler: vi.fn(() => handlers.appProxyLaunch),
     createOrderLifecycleWebhooksHandler: vi.fn(() => handlers.orderLifecycleWebhooks),
+    createPrivacyWebhooksHandler: vi.fn(() => handlers.privacyWebhooks),
+    createAppLifecycleWebhooksHandler: vi.fn(() => handlers.appLifecycleWebhooks),
+    createOAuthHandler: vi.fn(() => handlers.oauth),
+    createMerchantAppHandler: vi.fn(() => handlers.merchantApp),
     createProductionDraftsHandler: vi.fn(() => handlers.productionDrafts),
     createDesignAssetsHandler: vi.fn(() => handlers.designAssets),
   };
@@ -30,7 +40,13 @@ describe('Worker router', () => {
   it.each([
     ['POST', '/api/cart-quotes', 'cartQuotes'],
     ['GET', '/apps/jersey-configurator/cart-handoff', 'appProxy'],
+    ['GET', '/apps/jersey-configurator/launch', 'appProxyLaunch'],
     ['POST', '/webhooks/shopify/orders', 'orderLifecycleWebhooks'],
+    ['POST', '/webhooks/shopify/privacy', 'privacyWebhooks'],
+    ['POST', '/webhooks/shopify/app-lifecycle', 'appLifecycleWebhooks'],
+    ['GET', '/auth', 'oauth'],
+    ['GET', '/auth/callback', 'oauth'],
+    ['GET', '/app', 'merchantApp'],
     ['GET', '/api/production-drafts/config', 'productionDrafts'],
     ['POST', '/api/production-drafts', 'productionDrafts'],
     ['PUT', '/api/production-drafts', 'productionDrafts'],
@@ -63,6 +79,10 @@ describe('Worker router', () => {
     ['PUT', '/apps/jersey-configurator/cart-handoff'],
     ['GET', '/webhooks/shopify/orders'],
     ['PUT', '/webhooks/shopify/orders'],
+    ['GET', '/webhooks/shopify/privacy'],
+    ['PUT', '/webhooks/shopify/privacy'],
+    ['GET', '/webhooks/shopify/app-lifecycle'],
+    ['PUT', '/webhooks/shopify/app-lifecycle'],
   ])('falls back for unmatched method %s %s', async (method, pathname) => {
     const runtime = createInjectedRouter();
     const request = new Request(`https://example.workers.dev${pathname}`, { method });
@@ -81,6 +101,13 @@ describe('Worker router', () => {
     '/apps/jersey-configurator/cart-handoff/',
     '/webhooks/shopify/orders/',
     '/webhooks/shopify/orders/extra',
+    '/webhooks/shopify/privacy/',
+    '/webhooks/shopify/privacy/extra',
+    '/webhooks/shopify/app-lifecycle/',
+    '/webhooks/shopify/app-lifecycle/extra',
+    '/auth/',
+    '/auth/callback/extra',
+    '/app/',
     '/api/production-drafts-extra',
     '/api/production-drafts/',
     '/api/production-drafts/config/',
@@ -111,26 +138,46 @@ describe('Worker router', () => {
   it('accepts already-created handler dependencies', async () => {
     const cartQuotesHandler = vi.fn(() => new Response('direct cart'));
     const appProxyHandler = vi.fn(() => new Response('direct proxy'));
+    const appProxyLaunchHandler = vi.fn(() => new Response('direct launch'));
     const orderLifecycleWebhooksHandler = vi.fn(() => new Response('direct order webhook'));
+    const privacyWebhooksHandler = vi.fn(() => new Response('direct privacy webhook'));
+    const appLifecycleWebhooksHandler = vi.fn(() => new Response('direct app lifecycle webhook'));
+    const oauthHandler = vi.fn(() => new Response('direct oauth'));
+    const merchantAppHandler = vi.fn(() => new Response('direct merchant app'));
     const designAssetsHandler = vi.fn(() => new Response('direct fallback'));
     const productionDraftsHandler = vi.fn(() => new Response('direct production drafts'));
     const handler = createWorkerHandler({}, {
       cartQuotesHandler,
       appProxyHandler,
+      appProxyLaunchHandler,
       orderLifecycleWebhooksHandler,
+      privacyWebhooksHandler,
+      appLifecycleWebhooksHandler,
+      oauthHandler,
+      merchantAppHandler,
       productionDraftsHandler,
       designAssetsHandler,
     });
 
     await handler(new Request('https://example.workers.dev/api/cart-quotes', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/apps/jersey-configurator/cart-handoff'));
+    await handler(new Request('https://example.workers.dev/apps/jersey-configurator/launch'));
     await handler(new Request('https://example.workers.dev/webhooks/shopify/orders', { method: 'POST' }));
+    await handler(new Request('https://example.workers.dev/webhooks/shopify/privacy', { method: 'POST' }));
+    await handler(new Request('https://example.workers.dev/webhooks/shopify/app-lifecycle', { method: 'POST' }));
+    await handler(new Request('https://example.workers.dev/auth'));
+    await handler(new Request('https://example.workers.dev/app?shop=test.myshopify.com'));
     await handler(new Request('https://example.workers.dev/api/production-drafts', { method: 'POST' }));
     await handler(new Request('https://example.workers.dev/'));
 
     expect(cartQuotesHandler).toHaveBeenCalledOnce();
     expect(appProxyHandler).toHaveBeenCalledOnce();
+    expect(appProxyLaunchHandler).toHaveBeenCalledOnce();
     expect(orderLifecycleWebhooksHandler).toHaveBeenCalledOnce();
+    expect(privacyWebhooksHandler).toHaveBeenCalledOnce();
+    expect(appLifecycleWebhooksHandler).toHaveBeenCalledOnce();
+    expect(oauthHandler).toHaveBeenCalledOnce();
+    expect(merchantAppHandler).toHaveBeenCalledOnce();
     expect(productionDraftsHandler).toHaveBeenCalledOnce();
     expect(designAssetsHandler).toHaveBeenCalledOnce();
   });
@@ -168,6 +215,29 @@ describe('Worker router', () => {
     await expect(configResponse.json()).resolves.toEqual({ turnstileSiteKey: 'public-site-key' });
     expect(staticResult).toBe(assetsResponse);
     expect(env.ASSETS.fetch).toHaveBeenCalledWith(staticRequest);
+  });
+
+  it('forwards only the Shopify cart handoff when an upstream origin is configured', async () => {
+    const upstreamFetch = vi.fn(async (request) => new Response(request.url));
+    vi.stubGlobal('fetch', upstreamFetch);
+    const handler = createWorkerHandler({
+      APP_PROXY_UPSTREAM_ORIGIN: 'https://139.199.202.173',
+    }, {
+      cartQuotesHandler: vi.fn(),
+      designAssetsHandler: vi.fn(),
+      orderLifecycleWebhooksHandler: vi.fn(),
+      productionDraftsHandler: vi.fn(),
+    });
+    const request = new Request(
+      'https://example.workers.dev/apps/jersey-configurator/cart-handoff?signature=abc&token=def',
+    );
+
+    const response = await handler(request);
+
+    expect(await response.text()).toBe(
+      'https://139.199.202.173/apps/jersey-configurator/cart-handoff?signature=abc&token=def',
+    );
+    expect(upstreamFetch).toHaveBeenCalledOnce();
   });
 
   it('preserves real local-production-files and missing-static 404 behavior', async () => {

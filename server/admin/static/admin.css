@@ -137,7 +137,7 @@ select:focus {
 
 .filters {
   display: grid;
-  grid-template-columns: minmax(220px, 2fr) minmax(160px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) auto;
+  grid-template-columns: minmax(230px, 1.4fr) minmax(220px, 1.6fr) minmax(150px, 0.9fr) minmax(145px, 0.9fr) minmax(145px, 0.9fr) auto;
   align-items: end;
   gap: 12px;
   border: 1px solid #dfe4dd;

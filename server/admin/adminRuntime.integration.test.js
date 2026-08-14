@@ -33,12 +33,15 @@ describe('admin runtime integration', () => {
         adminPasswordHash: passwordHash,
         adminSessionSecret: 'a'.repeat(32),
         adminShop: 'test.myshopify.com',
+        adminShops: ['test.myshopify.com', 'second.myshopify.com'],
         projectRoot: process.cwd(),
         dataDirectory,
         distDirectory,
         localProductionFiles: 'false',
         shopifyStoreConfigJson: JSON.stringify({ 'test.myshopify.com': {} }),
         shopifyApiSecret: 's'.repeat(32),
+        shopifyApiKey: 'public-app-client-id',
+        shopifyTokenEncryptionKey: Buffer.alloc(32, 7).toString('base64'),
         cartQuoteSigningSecret: 'q'.repeat(32),
         turnstileSiteKey: 'site-key',
         turnstileSecretKey: 't'.repeat(32),
@@ -50,6 +53,15 @@ describe('admin runtime integration', () => {
     const bundleKey = 'shops/test/designs/dsg_6234567890abcdef/design.zip';
     const database = new DatabaseSync(path.join(dataDirectory, 'jersey.sqlite'));
     insertPaidDesign(database, { bundleKey, bundleBytes: bundle.byteLength, sha256 });
+    insertPaidDesign(database, {
+      bundleKey: 'shops/second/designs/dsg_7234567890abcdef/design.zip',
+      bundleBytes: bundle.byteLength,
+      sha256,
+      shop: 'second.myshopify.com',
+      designId: 'dsg_7234567890abcdef',
+      orderGid: 'gid://shopify/Order/1701',
+      orderName: '#1701',
+    });
     database.close();
     await runtime.env.PRODUCTION_ASSETS.put(bundleKey, bundle, {
       sha256,
@@ -68,6 +80,10 @@ describe('admin runtime integration', () => {
     const orders = await runtime.handler(new Request('https://jersey.example/admin/api/orders', {
       headers: { cookie },
     }));
+    const secondOrders = await runtime.handler(new Request(
+      'https://jersey.example/admin/api/orders?shop=second.myshopify.com',
+      { headers: { cookie } },
+    ));
     const download = await runtime.handler(new Request(
       'https://jersey.example/admin/api/orders/dsg_6234567890abcdef/download',
       { headers: { cookie } },
@@ -77,6 +93,10 @@ describe('admin runtime integration', () => {
     expect(await orders.json()).toMatchObject({
       total: 1,
       items: [{ orderName: '#1601', bundleIndexed: true }],
+    });
+    expect(await secondOrders.json()).toMatchObject({
+      total: 1,
+      items: [{ orderName: '#1701', bundleIndexed: false }],
     });
     expect(download.status).toBe(200);
     expect(Buffer.from(await download.arrayBuffer())).toEqual(bundle);
@@ -93,7 +113,15 @@ describe('admin runtime integration', () => {
   });
 });
 
-function insertPaidDesign(database, { bundleKey, bundleBytes, sha256 }) {
+function insertPaidDesign(database, {
+  bundleKey,
+  bundleBytes,
+  sha256,
+  shop = 'test.myshopify.com',
+  designId = 'dsg_6234567890abcdef',
+  orderGid = 'gid://shopify/Order/1601',
+  orderName = '#1601',
+}) {
   database.prepare(`
     INSERT INTO production_designs (
       design_id, shop, upload_id, bundle_id, status, product_id, variant_id,
@@ -107,10 +135,10 @@ function insertPaidDesign(database, { bundleKey, bundleBytes, sha256 }) {
       NULL, NULL, NULL, NULL, ?
     )
   `).run(
-    'dsg_6234567890abcdef',
-    'test.myshopify.com',
-    'upl_6234567890abcdef',
-    'bun_6234567890abcdef',
+    designId,
+    shop,
+    `upl_${designId.slice(4)}`,
+    `bun_${designId.slice(4)}`,
     'paid_pending_production',
     'fn8788-jersey',
     '123456789',
@@ -129,8 +157,8 @@ function insertPaidDesign(database, { bundleKey, bundleBytes, sha256 }) {
     1_000,
     100_000,
     2_000,
-    'gid://shopify/Order/1601',
-    '#1601',
+    orderGid,
+    orderName,
     2_000,
   );
 }

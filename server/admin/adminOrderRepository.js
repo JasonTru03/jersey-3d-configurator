@@ -15,10 +15,26 @@ const DOWNLOAD_OUTCOMES = new Set(['started', 'missing', 'invalid']);
 export function createAdminOrderRepository(database) {
   assertDatabase(database);
   return Object.freeze({
+    listShops: (fallback) => listShops(database, fallback),
     listOrders: (input) => listOrders(database, input),
     getOrderFile: (input) => getOrderFile(database, input),
     recordDownload: (input) => recordDownload(database, input),
   });
+}
+
+function listShops(database, fallback = []) {
+  if (!Array.isArray(fallback) || fallback.some((shop) => !SHOP_PATTERN.test(shop))) {
+    throw new TypeError('Admin shop fallback is invalid.');
+  }
+  const rows = database.prepare(`
+    SELECT shop FROM shopify_store_configs WHERE status = 'active'
+    UNION
+    SELECT DISTINCT shop FROM production_designs WHERE shop IS NOT NULL
+    ORDER BY shop ASC
+  `).all();
+  const shops = [...new Set([...fallback, ...rows.map(({ shop }) => shop)])].sort();
+  if (shops.some((shop) => !SHOP_PATTERN.test(shop))) throw new TypeError('Admin shop data is invalid.');
+  return shops;
 }
 
 function listOrders(database, input = {}) {

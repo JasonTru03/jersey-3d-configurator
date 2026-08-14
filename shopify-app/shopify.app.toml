@@ -1,11 +1,12 @@
-# Local scaffold only. Replace every TARGET_* placeholder in a private local config before any deployment command.
+# Public App scaffold. Replace the client ID in a private local config before deployment.
 client_id = "TARGET_SHOPIFY_CLIENT_ID"
 name = "Secure Jersey Configurator"
-application_url = "https://TARGET_WORKER_DOMAIN"
+application_url = "https://jersey-3d-configurator.jason1064969838.workers.dev/auth"
 embedded = false
 
 [access_scopes]
-scopes = "read_orders,read_cart_transforms,write_cart_transforms,read_validations,write_validations,write_app_proxy"
+scopes = "read_orders,read_products,read_cart_transforms,write_cart_transforms,read_validations,write_validations,write_app_proxy"
+use_legacy_install_flow = true
 
 [webhooks]
 api_version = "2026-07"
@@ -14,12 +15,20 @@ api_version = "2026-07"
 topics = ["orders/paid", "orders/cancelled", "refunds/create"]
 uri = "/webhooks/shopify/orders"
 
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks/shopify/privacy"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled", "app/scopes_update"]
+uri = "/webhooks/shopify/app-lifecycle"
+
 [auth]
 redirect_urls = [
-  "https://TARGET_WORKER_DOMAIN/auth/callback"
+  "https://jersey-3d-configurator.jason1064969838.workers.dev/auth/callback"
 ]
 
 [app_proxy]
 prefix = "apps"
 subpath = "jersey-configurator"
-url = "https://TARGET_WORKER_DOMAIN/apps/jersey-configurator"
+url = "https://jersey-3d-configurator.jason1064969838.workers.dev/apps/jersey-configurator"

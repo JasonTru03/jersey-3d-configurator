@@ -11,8 +11,10 @@ const resultSummary = document.querySelector('#result-summary');
 const pageLabel = document.querySelector('#page-label');
 const previousPage = document.querySelector('#previous-page');
 const nextPage = document.querySelector('#next-page');
+const shopSelect = document.querySelector('#shop');
 let currentPage = 1;
 let lastPage = 1;
+let orderRequestSequence = 0;
 
 const statusLabels = Object.freeze({
   paid_pending_production: '待生产',
@@ -59,6 +61,12 @@ document.querySelector('#refresh-button').addEventListener('click', () => {
   void loadOrders();
 });
 
+shopSelect.addEventListener('change', () => {
+  currentPage = 1;
+  document.querySelector('#shop-name').textContent = shopSelect.value;
+  void loadOrders();
+});
+
 previousPage.addEventListener('click', () => {
   if (currentPage <= 1) return;
   currentPage -= 1;
@@ -82,7 +90,7 @@ async function loadSession() {
     }
     if (!response.ok) throw new Error(await readError(response));
     const session = await response.json();
-    document.querySelector('#shop-name').textContent = session.shop;
+    populateShops(session);
     showView('dashboard');
     currentPage = 1;
     await loadOrders();
@@ -93,12 +101,14 @@ async function loadSession() {
 }
 
 async function loadOrders() {
+  const requestSequence = ++orderRequestSequence;
+  const selectedShop = shopSelect.value;
   ordersError.textContent = '';
   resultSummary.textContent = '正在读取订单…';
   previousPage.disabled = true;
   nextPage.disabled = true;
   try {
-    const response = await fetch(`/admin/api/orders?${buildQuery()}`, {
+    const response = await fetch(`/admin/api/orders?${buildQuery(selectedShop)}`, {
       credentials: 'same-origin',
     });
     if (response.status === 401) {
@@ -108,7 +118,8 @@ async function loadOrders() {
     }
     if (!response.ok) throw new Error(await readError(response));
     const result = await response.json();
-    renderOrders(result.items);
+    if (requestSequence !== orderRequestSequence || selectedShop !== shopSelect.value) return;
+    renderOrders(result.items, selectedShop);
     lastPage = Math.max(1, Math.ceil(result.total / result.pageSize));
     currentPage = Math.min(result.page, lastPage);
     resultSummary.textContent = `共 ${result.total} 个定制订单`;
@@ -116,17 +127,19 @@ async function loadOrders() {
     previousPage.disabled = currentPage <= 1;
     nextPage.disabled = currentPage >= lastPage;
   } catch (error) {
+    if (requestSequence !== orderRequestSequence || selectedShop !== shopSelect.value) return;
     ordersError.textContent = error.message || '订单读取失败，请重试。';
     resultSummary.textContent = '订单读取失败';
   }
 }
 
-function buildQuery() {
+function buildQuery(shop) {
   const params = new URLSearchParams();
   const query = document.querySelector('#query').value.trim();
   const status = document.querySelector('#status').value;
   const from = localDateStart(document.querySelector('#date-from').value);
   const toStart = localDateStart(document.querySelector('#date-to').value);
+  params.set('shop', shop);
   if (query) params.set('q', query);
   if (status) params.set('status', status);
   if (from !== null) params.set('from', String(from));
@@ -135,7 +148,7 @@ function buildQuery() {
   return params.toString();
 }
 
-function renderOrders(items) {
+function renderOrders(items, shop) {
   ordersBody.replaceChildren();
   emptyState.hidden = items.length !== 0;
   for (const item of items) {
@@ -146,7 +159,7 @@ function renderOrders(items) {
       cellWithPrimary(`${item.productId} / ${item.size.toUpperCase()}`, `${item.modelId} v${item.modelVersion}`),
       cellWithPrimary(item.designFingerprint, item.designId),
       cellWithPrimary(formatDate(item.paidAt), item.bundleFilename),
-      downloadCell(item),
+      downloadCell(item, shop),
     );
     ordersBody.append(row);
   }
@@ -173,7 +186,7 @@ function statusCell(status) {
   return cell;
 }
 
-function downloadCell(item) {
+function downloadCell(item, shop) {
   const cell = document.createElement('td');
   if (!item.bundleIndexed || item.status === 'file_error') {
     const warning = document.createElement('span');
@@ -184,10 +197,30 @@ function downloadCell(item) {
   }
   const link = document.createElement('a');
   link.className = 'download-link';
-  link.href = `/admin/api/orders/${encodeURIComponent(item.designId)}/download`;
+  link.href = `/admin/api/orders/${encodeURIComponent(item.designId)}/download?shop=${encodeURIComponent(shop)}`;
   link.textContent = '下载 ZIP';
   cell.append(link);
   return cell;
+}
+
+function populateShops(session) {
+  if (!session
+    || typeof session.shop !== 'string'
+    || !Array.isArray(session.shops)
+    || session.shops.length === 0
+    || !session.shops.includes(session.shop)
+    || session.shops.some((shop) => typeof shop !== 'string')) {
+    throw new Error('后台店铺配置无效。');
+  }
+  shopSelect.replaceChildren();
+  for (const shop of session.shops) {
+    const option = document.createElement('option');
+    option.value = shop;
+    option.textContent = shop;
+    shopSelect.append(option);
+  }
+  shopSelect.value = session.shop;
+  document.querySelector('#shop-name').textContent = session.shop;
 }
 
 function localDateStart(value) {

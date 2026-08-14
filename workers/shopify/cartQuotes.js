@@ -1,4 +1,6 @@
 import { calculateTrustedComponents } from './quotePricing.js';
+import { createStoreConfigRepository } from './storeConfigRepository.js';
+import { createTokenVault } from './tokenVault.js';
 import { createDesignSummary } from './designSummary.js';
 import { createProductionRepository } from '../production/productionRepository.js';
 import {
@@ -35,6 +37,8 @@ export function createCartQuotesHandler(env, dependencies = {}) {
   const randomBytes = dependencies.randomBytes ?? secureRandomBytes;
   const logger = dependencies.logger ?? console;
   const createRepository = dependencies.createProductionRepository ?? createProductionRepository;
+  const createConfigRepository = dependencies.createStoreConfigRepository ?? createStoreConfigRepository;
+  const createVault = dependencies.createTokenVault ?? createTokenVault;
   const loadCloudDraft = dependencies.loadAuthoritativeCloudDraft ?? loadAuthoritativeCloudDraft;
 
   return async function handleCartQuote(request) {
@@ -43,7 +47,7 @@ export function createCartQuotesHandler(env, dependencies = {}) {
     }
 
     try {
-      const bindings = validateBindings(env, createRepository);
+      const bindings = validateBindings(env, createRepository, createConfigRepository, createVault);
       let requestedAt;
       try {
         requestedAt = now();
@@ -56,12 +60,15 @@ export function createCartQuotesHandler(env, dependencies = {}) {
       await consumeRateLimit(bindings.rateLimit, request, requestedAt);
 
       const body = await parseRequestBody(request);
-      const storeConfigs = parseStoreConfigs(bindings.storeConfigJson);
       const shop = normalizeShop(body.shop);
-      const storeConfig = storeConfigs[shop];
-      if (storeConfig === undefined) {
+      const storedConfig = await bindings.configRepository.get(shop);
+      const storeConfig = storedConfig?.status === 'active' ? storedConfig.config : null;
+      if (storeConfig === null) {
         throw new ServiceError('CART_QUOTE_STORE_NOT_CONFIGURED');
       }
+      const signingSecret = storedConfig.source === 'database'
+        ? await bindings.vault.decrypt(shop, storedConfig.encryptedSigningSecret)
+        : bindings.legacySigningSecret;
 
       let priced;
       try {
@@ -150,7 +157,7 @@ export function createCartQuotesHandler(env, dependencies = {}) {
 
       let token;
       try {
-        token = await signQuoteContract(contract, bindings.signingSecret);
+        token = await signQuoteContract(contract, signingSecret);
       } catch {
         throw new ServiceError('CART_QUOTE_SIGNING_FAILED');
       }
@@ -225,7 +232,7 @@ export function toMinorUnits(amount, currency) {
   return Number(minor);
 }
 
-function validateBindings(env, createRepository) {
+function validateBindings(env, createRepository, createConfigRepository, createVault) {
   if (env === null || typeof env !== 'object') {
     throw new ServiceError('CART_QUOTE_ENV_MISSING');
   }
@@ -254,9 +261,7 @@ function validateBindings(env, createRepository) {
   ) {
     throw new ServiceError('CART_QUOTE_SIGNING_SECRET_INVALID');
   }
-  if (typeof env.SHOPIFY_STORE_CONFIG_JSON !== 'string' || env.SHOPIFY_STORE_CONFIG_JSON.length === 0) {
-    throw new ServiceError('CART_QUOTE_STORE_CONFIG_MISSING');
-  }
+  if (typeof env.SHOPIFY_STORE_CONFIG_JSON !== 'string') throw new ServiceError('CART_QUOTE_STORE_CONFIG_MISSING');
   let repository;
   try {
     repository = createRepository(env.PRODUCTION_DB);
@@ -268,41 +273,37 @@ function validateBindings(env, createRepository) {
     || typeof repository.bindCartQuote !== 'function') {
     throw new ServiceError('CART_QUOTE_PRODUCTION_REPOSITORY_INVALID');
   }
+  let configRepository;
+  try {
+    configRepository = createConfigRepository(env.PRODUCTION_DB, {
+      legacyConfigJson: env.SHOPIFY_STORE_CONFIG_JSON,
+    });
+  } catch {
+    throw new ServiceError('CART_QUOTE_STORE_CONFIG_INVALID');
+  }
+  if (typeof configRepository?.get !== 'function') {
+    throw new ServiceError('CART_QUOTE_STORE_CONFIG_INVALID');
+  }
+  let vault;
+  try {
+    vault = createVault(env.SHOPIFY_TOKEN_ENCRYPTION_KEY, {
+      purpose: 'shopify-function-signing-secret',
+    });
+  } catch {
+    if (env.SHOPIFY_TOKEN_ENCRYPTION_KEY !== undefined) {
+      throw new ServiceError('CART_QUOTE_TOKEN_VAULT_INVALID');
+    }
+    vault = null;
+  }
   return {
+    configRepository,
     designQuotes: env.DESIGN_QUOTES,
     productionAssets: env.PRODUCTION_ASSETS,
     rateLimit: env.CART_QUOTE_RATE_LIMIT,
     repository,
-    signingSecret: env.CART_QUOTE_SIGNING_SECRET,
-    storeConfigJson: env.SHOPIFY_STORE_CONFIG_JSON,
+    legacySigningSecret: env.CART_QUOTE_SIGNING_SECRET,
+    vault,
   };
-}
-
-function parseStoreConfigs(serialized) {
-  let configs;
-  try {
-    configs = JSON.parse(serialized);
-  } catch {
-    throw new ServiceError('CART_QUOTE_STORE_CONFIG_JSON_INVALID');
-  }
-  if (!isPlainObject(configs)) throw new ServiceError('CART_QUOTE_STORE_CONFIG_SHAPE_INVALID');
-  for (const [shop, config] of Object.entries(configs)) {
-    if (!SHOP_PATTERN.test(shop) || !isPlainObject(config)) {
-      throw new ServiceError('CART_QUOTE_STORE_CONFIG_ENTRY_INVALID');
-    }
-    const keys = Object.keys(config);
-    const allowed = new Set(['productId', 'currency', 'jerseyVariants', 'surchargeVariants']);
-    if (
-      keys.some((key) => !allowed.has(key))
-      || !Object.hasOwn(config, 'productId')
-      || !Object.hasOwn(config, 'currency')
-      || !Object.hasOwn(config, 'jerseyVariants')
-      || !Object.hasOwn(config, 'surchargeVariants')
-    ) {
-      throw new ServiceError('CART_QUOTE_STORE_CONFIG_FIELDS_INVALID');
-    }
-  }
-  return configs;
 }
 
 async function parseRequestBody(request) {

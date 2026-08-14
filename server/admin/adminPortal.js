@@ -15,6 +15,7 @@ const SESSION_PATH = '/admin/api/session';
 const ORDERS_PATH = '/admin/api/orders';
 const DOWNLOAD_PATH = /^\/admin\/api\/orders\/(dsg_[A-Za-z0-9_-]{16,64})\/download$/u;
 const MAX_LOGIN_BODY_BYTES = 4096;
+const SHOP_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/u;
 const BUNDLE_FILENAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,100}-design-[a-f0-9]{8}\.zip$/u;
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const STATIC_DIRECTORY = path.join(path.dirname(fileURLToPath(import.meta.url)), 'static');
@@ -62,23 +63,30 @@ export function createAdminPortal({
       if (pathname === SESSION_PATH) {
         if (request.method !== 'GET') return methodNotAllowed('GET');
         const session = requireSession(request, config, now);
-        return jsonResponse(200, { authenticated: true, shop: session.shop });
+        const shops = readAdminShops(repository, config);
+        return jsonResponse(200, {
+          authenticated: true,
+          shop: session.shop,
+          shops,
+        });
       }
       if (pathname === ORDERS_PATH) {
         if (request.method !== 'GET') return methodNotAllowed('GET');
         requireSession(request, config, now);
-        return jsonResponse(200, repository.listOrders(readListInput(url, config.adminShop)));
+        const shop = readRequestedShop(url, config, readAdminShops(repository, config));
+        return jsonResponse(200, repository.listOrders(readListInput(url, shop)));
       }
       const download = DOWNLOAD_PATH.exec(pathname);
       if (download) {
         if (request.method !== 'GET') return methodNotAllowed('GET');
         requireSession(request, config, now);
+        const shop = readRequestedShop(url, config, readAdminShops(repository, config));
         return await handleDownload({
           assets,
           designId: download[1],
           now,
           repository,
-          shop: config.adminShop,
+          shop,
         });
       }
       return jsonResponse(404, { error: '未找到页面。' });
@@ -89,6 +97,27 @@ export function createAdminPortal({
       return jsonResponse(500, { error: '后台服务暂时不可用。' });
     }
   };
+}
+
+function readRequestedShop(url, config, shops) {
+  const values = url.searchParams.getAll('shop');
+  if (values.length === 0) return config.adminShop;
+  const [shop] = values;
+  if (values.length !== 1
+    || !SHOP_PATTERN.test(shop)
+    || !shops.includes(shop)) {
+    throw new TypeError('Admin shop is invalid.');
+  }
+  return shop;
+}
+
+function readAdminShops(repository, config) {
+  const shops = repository.listShops(config.adminShops);
+  if (!Array.isArray(shops) || shops.length === 0 || !shops.includes(config.adminShop)
+    || shops.some((shop) => !SHOP_PATTERN.test(shop)) || new Set(shops).size !== shops.length) {
+    throw new TypeError('Admin shops are invalid.');
+  }
+  return shops;
 }
 
 async function handleLogin(request, { config, loginRateLimit, now, randomBytes }) {
@@ -320,12 +349,18 @@ function assertDependencies({ assets, config, loginRateLimit, now, repository })
   if (!assets || typeof assets.get !== 'function'
     || !repository
     || typeof repository.listOrders !== 'function'
+    || typeof repository.listShops !== 'function'
     || typeof repository.getOrderFile !== 'function'
     || typeof repository.recordDownload !== 'function'
     || !loginRateLimit || typeof loginRateLimit.limit !== 'function'
     || typeof now !== 'function'
     || !config
     || typeof config.adminShop !== 'string'
+    || !Array.isArray(config.adminShops)
+    || config.adminShops.length === 0
+    || !config.adminShops.includes(config.adminShop)
+    || config.adminShops.some((shop) => !SHOP_PATTERN.test(shop))
+    || new Set(config.adminShops).size !== config.adminShops.length
     || typeof config.adminPasswordHash !== 'string'
     || typeof config.adminSessionSecret !== 'string') {
     throw new TypeError('Admin portal dependencies are invalid.');

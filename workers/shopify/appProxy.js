@@ -1,4 +1,6 @@
 import { toMinorUnits } from './cartQuotes.js';
+import { createStoreConfigRepository } from './storeConfigRepository.js';
+import { createTokenVault } from './tokenVault.js';
 import {
   MAX_QUOTE_TOKEN_LENGTH,
   QUOTE_SCHEMA_VERSION,
@@ -81,6 +83,8 @@ class RateLimitError extends Error {}
 export function createAppProxyHandler(env, dependencies = {}) {
   const now = dependencies.now ?? Date.now;
   const logger = dependencies.logger ?? console;
+  const createConfigRepository = dependencies.createStoreConfigRepository ?? createStoreConfigRepository;
+  const createVault = dependencies.createTokenVault ?? createTokenVault;
 
   return async function handleAppProxy(request) {
     if (request.method !== 'GET') {
@@ -88,7 +92,7 @@ export function createAppProxyHandler(env, dependencies = {}) {
     }
 
     try {
-      const bindings = validateBindings(env);
+      const bindings = validateBindings(env, createConfigRepository, createVault);
       const url = parseRequestUrl(request.url);
       validateUnauthenticatedQuery(url);
       if (!await verifyAppProxySignature(url, bindings.apiSecret)) {
@@ -101,6 +105,7 @@ export function createAppProxyHandler(env, dependencies = {}) {
         authenticated.shop,
         authenticated.loggedInCustomerId,
       );
+      const signingSecret = await readSigningSecret(bindings, authenticated.shop);
       let designId;
       try {
         designId = decodeQuoteHeader(authenticated.token).designId;
@@ -116,7 +121,7 @@ export function createAppProxyHandler(env, dependencies = {}) {
         record,
         shop: authenticated.shop,
         now: authenticated.now,
-        signingSecret: bindings.signingSecret,
+        signingSecret,
       });
 
       let items;
@@ -472,7 +477,7 @@ export function classifyCartBundle(requestItems, cartItems, validateResponse = i
   return validateResponse(requestItems, { items: ordered }) ? 'complete' : 'partial';
 }
 
-function validateBindings(env) {
+function validateBindings(env, createConfigRepository, createVault) {
   if (!isPlainObject(env)) throw new ServiceError('APP_PROXY_ENV_MISSING');
   if (!env.DESIGN_QUOTES || typeof env.DESIGN_QUOTES.get !== 'function') {
     throw new ServiceError('APP_PROXY_DESIGN_QUOTES_BINDING_MISSING');
@@ -490,12 +495,64 @@ function validateBindings(env) {
   } catch {
     throw new ServiceError('APP_PROXY_API_SECRET_INVALID');
   }
+  let configRepository = null;
+  let configSecretVault = null;
+  if (env.PRODUCTION_DB !== undefined) {
+    if (!env.PRODUCTION_DB
+      || typeof env.PRODUCTION_DB.prepare !== 'function'
+      || typeof env.PRODUCTION_DB.batch !== 'function'
+      || typeof env.SHOPIFY_STORE_CONFIG_JSON !== 'string') {
+      throw new ServiceError('APP_PROXY_STORE_CONFIG_BINDING_INVALID');
+    }
+    try {
+      configRepository = createConfigRepository(env.PRODUCTION_DB, {
+        legacyConfigJson: env.SHOPIFY_STORE_CONFIG_JSON,
+      });
+      if (env.SHOPIFY_TOKEN_ENCRYPTION_KEY !== undefined) {
+        configSecretVault = createVault(env.SHOPIFY_TOKEN_ENCRYPTION_KEY, {
+          purpose: 'shopify-function-signing-secret',
+        });
+      }
+    } catch {
+      throw new ServiceError('APP_PROXY_STORE_CONFIG_BINDING_INVALID');
+    }
+    if (typeof configRepository?.get !== 'function'
+      || (configSecretVault !== null && typeof configSecretVault?.decrypt !== 'function')) {
+      throw new ServiceError('APP_PROXY_STORE_CONFIG_BINDING_INVALID');
+    }
+  } else if (env.SHOPIFY_TOKEN_ENCRYPTION_KEY !== undefined) {
+    throw new ServiceError('APP_PROXY_STORE_CONFIG_BINDING_INVALID');
+  }
   return {
+    configRepository,
+    configSecretVault,
     designQuotes: env.DESIGN_QUOTES,
     rateLimit: env.CART_HANDOFF_RATE_LIMIT,
-    signingSecret: env.CART_QUOTE_SIGNING_SECRET,
+    legacySigningSecret: env.CART_QUOTE_SIGNING_SECRET,
     apiSecret: env.SHOPIFY_API_SECRET,
   };
+}
+
+async function readSigningSecret(bindings, shop) {
+  if (bindings.configRepository === null) return bindings.legacySigningSecret;
+  let storedConfig;
+  try {
+    storedConfig = await bindings.configRepository.get(shop);
+  } catch {
+    throw new ServiceError('APP_PROXY_STORE_CONFIG_READ_FAILED');
+  }
+  if (storedConfig?.status !== 'active') {
+    throw new ClientError(400, INVALID_HANDOFF_MESSAGE);
+  }
+  if (storedConfig.source !== 'database') return bindings.legacySigningSecret;
+  if (bindings.configSecretVault === null) {
+    throw new ServiceError('APP_PROXY_SIGNING_SECRET_DECRYPT_FAILED');
+  }
+  try {
+    return await bindings.configSecretVault.decrypt(shop, storedConfig.encryptedSigningSecret);
+  } catch {
+    throw new ServiceError('APP_PROXY_SIGNING_SECRET_DECRYPT_FAILED');
+  }
 }
 
 function parseRequestUrl(value) {

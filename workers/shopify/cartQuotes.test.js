@@ -4,6 +4,7 @@ import { jerseyProduct } from '../../src/features/configurator/config/productDef
 import { createDecoration } from '../../src/features/configurator/config/decorations.js';
 import { createDesignFingerprint } from '../../src/features/configurator/designs/productionFingerprint.js';
 import { verifyQuoteContract } from './quoteContract.js';
+import { createTokenVault } from './tokenVault.js';
 import {
   CART_QUOTE_TTL_SECONDS,
   DESIGN_RECORD_TTL_SECONDS,
@@ -215,6 +216,13 @@ function runtime(current, overrides = {}) {
   Object.assign(assets, overrides.assets);
   const dependencies = {
     createProductionRepository: vi.fn(() => repository),
+    createStoreConfigRepository: vi.fn(() => ({
+      get: vi.fn(async (shop) => ({
+        source: 'legacy',
+        status: 'active',
+        config: JSON.parse(env.SHOPIFY_STORE_CONFIG_JSON)[shop],
+      })),
+    })),
     now: () => NOW,
     randomBytes: () => new Uint8Array(24).fill(7),
     ...overrides.dependencies,
@@ -247,6 +255,41 @@ function validBody(current, overrides = {}) {
 }
 
 describe('createCartQuotesHandler', () => {
+  it('uses the active database config and its shop-bound signing secret', async () => {
+    const current = await fixture();
+    const app = runtime(current);
+    const key = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)));
+    const signingSecret = 'database-shop-signing-secret-1234567890';
+    const encryptedSigningSecret = await createTokenVault(key, {
+      purpose: 'shopify-function-signing-secret',
+    }).encrypt(SHOP, signingSecret);
+    app.env.SHOPIFY_TOKEN_ENCRYPTION_KEY = key;
+    app.dependencies.createTokenVault = createTokenVault;
+    app.dependencies.createStoreConfigRepository = vi.fn(() => ({
+      get: vi.fn(async () => ({
+        source: 'database',
+        status: 'active',
+        config: storeConfig(),
+        encryptedSigningSecret,
+      })),
+    }));
+
+    const response = await createCartQuotesHandler(app.env, app.dependencies)(post(validBody(current)));
+    const payload = await response.json();
+    const record = JSON.parse(app.records.get(DESIGN_ID).value);
+    const token = new URL(payload.handoffUrl).searchParams.get('token');
+
+    expect(response.status).toBe(201);
+    await expect(verifyQuoteContract(token, record.components, signingSecret, {
+      expectedShopFingerprint: record.shopFingerprint,
+      now: NOW,
+    })).resolves.toMatchObject({ designId: DESIGN_ID });
+    await expect(verifyQuoteContract(token, record.components, SECRET, {
+      expectedShopFingerprint: record.shopFingerprint,
+      now: NOW,
+    })).rejects.toThrow();
+  });
+
   it('re-prices one authoritative cloud draft, verifies private files, binds D1, then stores a signed quote', async () => {
     const complexState = state({
       layout: 'xl',
@@ -615,17 +658,16 @@ describe('toMinorUnits', () => {
   });
 });
 
-describe('wrangler cart quote configuration', () => {
-  it('keeps local production files enabled while cloud resources await automatic provisioning', () => {
+describe('wrangler public gateway configuration', () => {
+  it('keeps workers.dev as a stateless HTTPS gateway to Tencent', () => {
     const config = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
-    expect(config.vars.LOCAL_PRODUCTION_FILES).toBe('true');
-    expect(config.r2_buckets).toEqual([{ binding: 'PRODUCTION_ASSETS' }]);
-    expect(config.d1_databases).toEqual([{
-      binding: 'PRODUCTION_DB',
-      migrations_dir: 'migrations',
-    }]);
-    expect(config.r2_buckets[0]).not.toHaveProperty('bucket_name');
-    expect(config.d1_databases[0]).not.toHaveProperty('database_id');
+    expect(config.name).toBe('jersey-3d-configurator');
+    expect(config.main).toBe('workers/tencentTunnelGateway.js');
+    expect(config.workers_dev).toBe(true);
+    expect(config.vars).toEqual({ TENCENT_ORIGIN: 'http://139.199.202.173:8080' });
+    expect(config).not.toHaveProperty('kv_namespaces');
+    expect(config).not.toHaveProperty('r2_buckets');
+    expect(config).not.toHaveProperty('d1_databases');
     expect(config.vars).not.toHaveProperty('CART_QUOTE_SIGNING_SECRET');
     expect(config.vars).not.toHaveProperty('TURNSTILE_SITE_KEY');
     expect(config.vars).not.toHaveProperty('TURNSTILE_SECRET_KEY');

@@ -2,9 +2,11 @@ import {
   MAX_PRODUCTION_PACKAGE_BYTES,
   PRODUCTION_PACKAGE_FILE_CONTRACT,
 } from '../../src/features/configurator/designs/productionManifest.js';
+import { createStoreConfigRepository } from '../shopify/storeConfigRepository.js';
 
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const TURNSTILE_ACTION = 'production_draft';
+const TURNSTILE_ALWAYS_PASS_SECRET = '1x0000000000000000000000000000000AA';
 export const TURNSTILE_TIMEOUT_MS = 8_000;
 const MAX_MULTIPART_BYTES = MAX_PRODUCTION_PACKAGE_BYTES + 64 * 1024;
 const MAX_TURNSTILE_TOKEN_LENGTH = 4_096;
@@ -37,7 +39,11 @@ export class ServiceError extends Error {
   }
 }
 
-export function validateProductionDraftBindings(env, createRepository) {
+export function validateProductionDraftBindings(
+  env,
+  createRepository,
+  createConfigRepository = createStoreConfigRepository,
+) {
   if (!isPlainObject(env) || isLocalProductionMode(env)) {
     throw new ServiceError('PRODUCTION_DRAFT_DISABLED');
   }
@@ -59,7 +65,9 @@ export function validateProductionDraftBindings(env, createRepository) {
   if (typeof env.TURNSTILE_SECRET_KEY !== 'string' || env.TURNSTILE_SECRET_KEY.length === 0) {
     throw new ServiceError('PRODUCTION_DRAFT_SECRET_INVALID');
   }
-  const storeConfigs = parseStoreConfigs(env.SHOPIFY_STORE_CONFIG_JSON);
+  if (typeof env.SHOPIFY_STORE_CONFIG_JSON !== 'string') {
+    throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_MISSING');
+  }
   let repository;
   try {
     repository = createRepository(db);
@@ -75,50 +83,24 @@ export function validateProductionDraftBindings(env, createRepository) {
     || typeof repository.deleteClaimedDraft !== 'function') {
     throw new ServiceError('PRODUCTION_DRAFT_REPOSITORY_INVALID');
   }
+  let configRepository;
+  try {
+    configRepository = createConfigRepository(db, {
+      legacyConfigJson: env.SHOPIFY_STORE_CONFIG_JSON,
+    });
+  } catch {
+    throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_INVALID');
+  }
+  if (typeof configRepository?.get !== 'function') {
+    throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_INVALID');
+  }
   return {
     assets,
+    configRepository,
     rateLimit,
     repository,
-    storeConfigs,
     turnstileSecret: env.TURNSTILE_SECRET_KEY,
   };
-}
-
-function parseStoreConfigs(serialized) {
-  if (typeof serialized !== 'string' || serialized.length === 0) {
-    throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_MISSING');
-  }
-  let configs;
-  try {
-    configs = JSON.parse(serialized);
-  } catch {
-    throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_JSON_INVALID');
-  }
-  if (!isPlainObject(configs)) throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_INVALID');
-  for (const [shop, config] of Object.entries(configs)) {
-    if (!SHOP_PATTERN.test(shop)
-      || !isPlainObject(config)
-      || Object.keys(config).length !== CONFIG_KEYS.size
-      || Object.keys(config).some((key) => !CONFIG_KEYS.has(key))
-      || !matches(config.productId, PRODUCT_ID_PATTERN)
-      || !matches(config.currency, /^[A-Z]{3}$/u)
-      || !isPlainObject(config.jerseyVariants)
-      || !isPlainObject(config.surchargeVariants)) {
-      throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_INVALID');
-    }
-    for (const [size, variantId] of Object.entries(config.jerseyVariants)) {
-      if (!matches(size, SAFE_ID_PATTERN)
-        || (variantId !== null && !matches(variantId, VARIANT_ID_PATTERN))) {
-        throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_INVALID');
-      }
-    }
-    for (const [quantity, variantId] of Object.entries(config.surchargeVariants)) {
-      if (!/^[1-9][0-9]{0,5}$/u.test(quantity) || !matches(variantId, VARIANT_ID_PATTERN)) {
-        throw new ServiceError('PRODUCTION_DRAFT_STORE_CONFIG_INVALID');
-      }
-    }
-  }
-  return configs;
 }
 
 export function isLocalProductionMode(env) {
@@ -312,10 +294,13 @@ export async function verifyProductionTurnstile({ fetchImpl, ip, secret, timeout
       throw new ServiceError('PRODUCTION_DRAFT_TURNSTILE_SERVICE_FAILED');
     }
     const result = await waitForAbort(response.json(), controller.signal);
-    if (!isPlainObject(result) || typeof result.success !== 'boolean' || typeof result.action !== 'string') {
+    const officialTestMode = secret === TURNSTILE_ALWAYS_PASS_SECRET;
+    if (!isPlainObject(result)
+      || typeof result.success !== 'boolean'
+      || (!officialTestMode && typeof result.action !== 'string')) {
       throw new ServiceError('PRODUCTION_DRAFT_TURNSTILE_RESULT_INVALID');
     }
-    if (!result.success || result.action !== TURNSTILE_ACTION) {
+    if (!result.success || (!officialTestMode && result.action !== TURNSTILE_ACTION)) {
       throw new HttpError(403, 'Turnstile verification failed.');
     }
   } catch (error) {

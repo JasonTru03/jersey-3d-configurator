@@ -1,6 +1,10 @@
+import { loadTurnstileApi } from './turnstileLoader.js';
+
 const VERIFICATION_FAILED = 'Design upload verification failed.';
 const VERIFICATION_TIMEOUT = 'Design upload verification timed out.';
 const DEFAULT_TIMEOUT_MS = 120_000;
+const TURNSTILE_ALWAYS_PASS_SITE_KEY = '1x00000000000000000000AA';
+const TURNSTILE_DUMMY_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
 
 export async function getDesignUploadTurnstileToken({
   action = 'production_draft',
@@ -8,7 +12,7 @@ export async function getDesignUploadTurnstileToken({
   endpoint = '/api/production-drafts/config',
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  turnstile = window.turnstile,
+  turnstile,
 } = {}) {
   if (
     !(container instanceof HTMLElement)
@@ -42,22 +46,28 @@ export async function getDesignUploadTurnstileToken({
     ) {
       throw new StableTurnstileError('Design upload verification is not configured.');
     }
+    if (config.turnstileSiteKey.trim() === TURNSTILE_ALWAYS_PASS_SITE_KEY) {
+      return TURNSTILE_DUMMY_TOKEN;
+    }
+    const turnstileApi = turnstile ?? await loadTurnstileApi({
+      signal: requestController.signal,
+    });
     if (
-      typeof turnstile?.ready !== 'function'
-      || typeof turnstile?.render !== 'function'
-      || typeof turnstile?.execute !== 'function'
-      || typeof turnstile?.remove !== 'function'
+      typeof turnstileApi?.ready !== 'function'
+      || typeof turnstileApi?.render !== 'function'
+      || typeof turnstileApi?.execute !== 'function'
+      || typeof turnstileApi?.remove !== 'function'
     ) {
       throw new StableTurnstileError('Design upload verification is unavailable.');
     }
 
-    await waitUntilReady(turnstile, requestController.signal);
+    await waitUntilReady(turnstileApi, requestController.signal);
     return await executeWidget({
       action,
       container,
       signal: requestController.signal,
       siteKey: config.turnstileSiteKey.trim(),
-      turnstile,
+      turnstile: turnstileApi,
     });
   } catch (error) {
     if (signal?.aborted) throw toAbortError(signal.reason);

@@ -31,6 +31,7 @@ const UPLOAD_PATH_PATTERN = /^\/api\/production-drafts\/(dsg_[A-Za-z0-9_-]{16,64
 
 export function createProductionDraftsHandler(env, dependencies = {}) {
   const createRepository = dependencies.createProductionRepository ?? createProductionRepository;
+  const createConfigRepository = dependencies.createStoreConfigRepository;
   const fingerprintShop = dependencies.createShopFingerprint ?? createShopFingerprint;
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const now = dependencies.now ?? Date.now;
@@ -52,6 +53,7 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
         designId: uploadRoute[1],
         env,
         kind: uploadRoute[2],
+        logger,
         now,
         request,
       }));
@@ -59,6 +61,7 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
     if (pathname !== '/api/production-drafts') return errorResponse(404, 'Not found.');
     if (request.method !== 'POST') return methodNotAllowed('POST');
     return guard(logger, () => handleCreateSession({
+      createConfigRepository,
       createRepository,
       env,
       fetchImpl,
@@ -72,6 +75,7 @@ export function createProductionDraftsHandler(env, dependencies = {}) {
 }
 
 async function handleCreateSession({
+  createConfigRepository,
   createRepository,
   env,
   fetchImpl,
@@ -81,12 +85,13 @@ async function handleCreateSession({
   request,
   turnstileTimeoutMs,
 }) {
-  const bindings = validateProductionDraftBindings(env, createRepository);
+  const bindings = validateProductionDraftBindings(env, createRepository, createConfigRepository);
   validateSessionHeaders(request);
   const ip = request.headers.get('cf-connecting-ip');
   await consumeProductionPreflightRateLimit(bindings.rateLimit, ip);
   const session = await parseProductionDraftSession(request);
-  const storeConfig = bindings.storeConfigs[session.shop];
+  const storedConfig = await bindings.configRepository.get(session.shop);
+  const storeConfig = storedConfig?.status === 'active' ? storedConfig.config : null;
   if (!storeConfig) throw new ServiceError('PRODUCTION_DRAFT_STORE_NOT_CONFIGURED');
   await verifyProductionTurnstile({
     fetchImpl,
@@ -142,7 +147,7 @@ async function handleCreateSession({
   return reuseSession(authoritative, session, currentTime);
 }
 
-async function handleUpload({ createRepository, designId, env, kind, now, request }) {
+async function handleUpload({ createRepository, designId, env, kind, logger, now, request }) {
   const bindings = validateProductionDraftBindings(env, createRepository);
   const expected = kind === 'manifest'
     ? { contentType: 'application/json', maxBytes: PRODUCTION_UPLOAD_LIMITS.manifest }
@@ -164,7 +169,15 @@ async function handleUpload({ createRepository, designId, env, kind, now, reques
   if (draft.expiresAt <= currentTime) throw new HttpError(409, 'Production upload session has expired.');
 
   const expectedBytes = kind === 'manifest' ? draft.manifestBytes : draft.bundleBytes;
-  if (auth.byteLength !== expectedBytes) throw new HttpError(400, 'Production upload length does not match.');
+  if (auth.byteLength !== expectedBytes) {
+    logger?.error?.(JSON.stringify({
+      code: 'PRODUCTION_DRAFT_UPLOAD_LENGTH_MISMATCH',
+      kind,
+      expectedBytes,
+      receivedBytes: auth.byteLength,
+    }));
+    throw new HttpError(400, 'Production upload length does not match.');
+  }
   if (kind === 'bundle') await assertManifestStored(bindings.assets, draft);
   const key = kind === 'manifest' ? draft.manifestKey : draft.bundleKey;
   const sha256 = kind === 'manifest' ? draft.manifestSha256 : draft.bundleSha256;

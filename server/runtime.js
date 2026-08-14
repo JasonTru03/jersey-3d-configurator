@@ -67,6 +67,9 @@ export function createServerRuntime({ config, now = Date.now } = {}) {
         now,
       }),
       SHOPIFY_API_SECRET: config.shopifyApiSecret,
+      SHOPIFY_API_KEY: config.shopifyApiKey,
+      SHOPIFY_TOKEN_ENCRYPTION_KEY: config.shopifyTokenEncryptionKey,
+      PUBLIC_ORIGIN: config.publicOrigin,
       SHOPIFY_STORE_CONFIG_JSON: config.shopifyStoreConfigJson,
       TURNSTILE_SECRET_KEY: config.turnstileSecretKey,
       TURNSTILE_SITE_KEY: config.turnstileSiteKey,
@@ -96,13 +99,18 @@ function assertConfig(config) {
     'cartQuoteSigningSecret',
     'localProductionFiles',
     'shopifyApiSecret',
+    'shopifyApiKey',
+    'shopifyTokenEncryptionKey',
     'shopifyStoreConfigJson',
     'turnstileSecretKey',
     'turnstileSiteKey',
   ];
   if (!config
     || directoryKeys.some((key) => typeof config[key] !== 'string' || !path.isAbsolute(config[key]))
-    || stringKeys.some((key) => typeof config[key] !== 'string' || config[key].length === 0)) {
+    || stringKeys.some((key) => typeof config[key] !== 'string' || config[key].length === 0)
+    || !Array.isArray(config.adminShops)
+    || config.adminShops.length === 0
+    || !config.adminShops.includes(config.adminShop)) {
     throw new TypeError('Server runtime configuration is invalid.');
   }
 }
